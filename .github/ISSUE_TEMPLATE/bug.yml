@@ -1,0 +1,64 @@
+name: Bug report
+description: Report a defect in Forge.Server, Forge.Plugin, or docs
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. For **security** issues, use private reporting in [SECURITY.md](../SECURITY.md) instead.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Forge.Server (MCP)
+        - Forge.Plugin (AutoCAD)
+        - Forge.Shared (safety/audit)
+        - Docs / examples / skill
+        - CI / packaging
+        - Unknown
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: Product SemVer tag (e.g. v0.1.0) or commit SHA
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: input
+    id: autocad
+    attributes:
+      label: AutoCAD version
+      description: Leave blank if ServerOnly / no plugin involved
+      placeholder: AutoCAD 2026
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Exact tools, args, and environment variables (redact tokens)
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include error codes from ForgeResult when available
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I set FORGE_AUTOCAD_TOKEN explicitly (not relying on a default secret)
+        - label: I called forge_system_health successfully before the failing write (if applicable)
+        - label: I searched existing issues / capability-matrix for known partial tools

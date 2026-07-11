@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/765T/765T-Forge/security/advisories/new
+    about: Report vulnerabilities privately (see SECURITY.md). Do not file public issues for security findings.
+  - name: Capability matrix
+    url: https://github.com/765T/765T-Forge/blob/main/docs/capability-matrix.md
+    about: Check implemented / partial / planned status before requesting a tool.

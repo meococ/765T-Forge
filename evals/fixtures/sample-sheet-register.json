@@ -1,0 +1,39 @@
+{
+  "project": "DEMO-METRO-LINE",
+  "issue": "IFC-01",
+  "sheets": [
+    {
+      "layout": "A101",
+      "blockName": "TITLE_BLOCK",
+      "attributes": {
+        "DWG_NO": "MTR-DEMO-A101",
+        "TITLE_VI": "Mặt bằng ga mẫu",
+        "TITLE_EN": "Sample station plan",
+        "SCALE": "1:100",
+        "REV": "A",
+        "SHEET": "1",
+        "TOTAL": "2"
+      }
+    },
+    {
+      "layout": "A102",
+      "blockName": "TITLE_BLOCK",
+      "attributes": {
+        "DWG_NO": "MTR-DEMO-A102",
+        "TITLE_VI": "Mặt cắt ga mẫu",
+        "TITLE_EN": "Sample station section",
+        "SCALE": "1:50",
+        "REV": "A",
+        "SHEET": "2",
+        "TOTAL": "2"
+      }
+    }
+  ],
+  "requiredTitleblockTags": ["DWG_NO", "TITLE_VI", "REV", "SHEET", "TOTAL"],
+  "plot": {
+    "device": "DWG To PDF.pc3",
+    "paperSize": "ISO A1 (841.00 x 594.00 MM)",
+    "plotStyle": "monochrome.ctb",
+    "orientation": "Landscape"
+  }
+}

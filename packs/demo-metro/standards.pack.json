@@ -1,0 +1,18 @@
+{
+  "packId": "demo-metro-synthetic",
+  "description": "Synthetic reference pack for demos — not a national standard. Replace with project CAD Manual.",
+  "layers": ["A-ANNO-TTLB", "A-ANNO-TEXT", "Defpoints"],
+  "forbiddenLayers": ["0-TEMP", "SCRATCH"],
+  "drawingNoRegex": "^MTR-[A-Z0-9-]+$",
+  "revisionScheme": "A-Z",
+  "requiredTitleblockTags": ["DWG_NO", "TITLE_VI", "REV"],
+  "vpScaleAllowlist": ["1:50", "1:100", "1:200"],
+  "requireForegroundPlot": true,
+  "plotDevice": "DWG To PDF.pc3",
+  "paperSize": "ISO A1 (841.00 x 594.00 MM)",
+  "titleBlockAttrMap": {
+    "DWG_NO": "drawingNo",
+    "REV": "rev",
+    "TITLE_VI": "title"
+  }
+}

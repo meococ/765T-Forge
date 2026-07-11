@@ -1,0 +1,29 @@
+{
+  "projectId": "DEMO-METRO-LINE",
+  "sheets": [
+    {
+      "drawingNo": "MTR-DEMO-A101",
+      "rev": "A",
+      "layout": "A101",
+      "title": "Sample station plan",
+      "titleAttrs": {
+        "DWG_NO": "MTR-DEMO-A101",
+        "TITLE_VI": "Mặt bằng ga mẫu",
+        "TITLE_EN": "Sample station plan",
+        "REV": "A"
+      }
+    },
+    {
+      "drawingNo": "MTR-DEMO-A102",
+      "rev": "A",
+      "layout": "A102",
+      "title": "Sample station section",
+      "titleAttrs": {
+        "DWG_NO": "MTR-DEMO-A102",
+        "TITLE_VI": "Mặt cắt ga mẫu",
+        "TITLE_EN": "Sample station section",
+        "REV": "A"
+      }
+    }
+  ]
+}

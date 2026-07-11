@@ -1,0 +1,50 @@
+name: Capability request
+description: Request a new or deeper MCP tool / workflow capability
+title: "[capability] "
+labels: ["enhancement", "capability"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check [docs/capability-matrix.md](../../docs/capability-matrix.md) first — the feature may already be **partial** or **planned** for 0.2.
+  - type: dropdown
+    id: wave
+    attributes:
+      label: Best-fit roadmap wave
+      options:
+        - Wave 1 — plot / DSD / sync writes
+        - Wave 2 — preflight / campaign / QaReport / capabilities
+        - Wave 3 — batch / recipe / pack-and-go
+        - Unsure / other
+    validations:
+      required: true
+  - type: input
+    id: tool_name
+    attributes:
+      label: Proposed tool name
+      description: Prefer forge_<group>_<action>
+      placeholder: forge_qa_preflight
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / metro workflow
+      description: What production pain does this unblock?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Dry-run, verify, denylist, backup expectations
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority for your team
+      options:
+        - Blocker for publish
+        - Important
+        - Nice to have
+    validations:
+      required: true

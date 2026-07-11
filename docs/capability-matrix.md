@@ -1,0 +1,84 @@
+# Capability matrix
+
+Honest status of MCP tools. AutoCAD target: **2026**. Civil 3D, full SSM **write**, and geometry megakits are out of scope.
+
+| Status | Meaning |
+|--------|---------|
+| **implemented** | Documented happy path works in current code |
+| **partial** | Present but limited (e.g. import still command-queued) |
+| **planned** | Not shipped |
+
+## System
+
+| Tool | Status | Notes |
+|------|--------|-------|
+| `forge_system_health` | implemented | |
+| `forge_system_version` | implemented | Product + envelope versions |
+| `forge_system_getvar` / `_setvar` | implemented | |
+| `forge_system_capabilities` | implemented | Devices, media, page setups, layouts, layer states, plot styles |
+
+## Document / xref / layer
+
+| Tool | Status | Notes |
+|------|--------|-------|
+| `forge_doc_*` (list/open/save/layouts) | implemented | SaveAs overwrite ack |
+| `forge_xref_list` / `_reload` / `_repath` | implemented | |
+| `forge_xref_normalize_relative` | implemented | Absolute → host-relative + optional reload |
+| `forge_layer_list` / `_state_list` | implemented | |
+| `forge_layer_state_restore` | implemented | Sync via `LayerStateManager` |
+
+## Block / layout
+
+| Tool | Status | Notes |
+|------|--------|-------|
+| `forge_block_list/get/set_attr` | implemented | |
+| `forge_block_campaign` | implemented | Multi-entry dry-run diffs, Unicode |
+| `forge_layout_page_setup_import` | implemented | Prefers sync PlotSettings copy from template DWG/DWT; falls back to queued `-PSETUPIN` with `completed=false` |
+| `forge_layout_page_setup_apply` | implemented | Sync `PlotSettings` copy onto layout |
+
+## Plot / publish / QA / recipes
+
+| Tool | Status | Notes |
+|------|--------|-------|
+| `forge_plot_to_pdf` | implemented | Configurable device/paper/CTB·STB/area; overwrite ack |
+| `forge_plot_publish` | implemented | DSD + `Publisher.PublishDsd`; **PublishReceipt** + PDF probe; preflight gate |
+| `forge_qa_*` (verify/check/audit/readback) | implemented | |
+| `forge_qa_readback_after_timeout` | implemented | Timeout recovery protocol — never retry write blind |
+| `forge_qa_preflight` | implemented | QaReport + pack v2 + foreground plot + issue-set contract findings |
+| `forge_audit_summarize` | implemented | Server-side last-N audit summary (no raw args) |
+| `forge_issue_set_validate` | implemented | IssueSetContract layouts↔drawingNos↔rev |
+| `forge_sheet_inventory_import` | implemented | Read-only CSV → contract (no DST/SSM write) |
+| `forge_issue_set_diff` | implemented | Diff two PublishReceipt artifacts |
+| `forge_recipe_issue_set` | implemented | Normalize → fill → gate → publish |
+| `forge_pack_and_go` | implemented | Host+xrefs+styles + `manifest.json` |
+| `forge_batch_run` | implemented | AccoreConsole queue + **resume** via `resumeBatchId` |
+| `forge_batch_status` | implemented | Load saved batch resume state |
+
+## Registry / standards / viewport / profiles
+
+| Tool | Status | Notes |
+|------|--------|-------|
+| `forge_registry_load` / `_lookup` | implemented | Fail-closed drawing numbers for titleblock tags |
+| `forge_pack_load` / `_status` | implemented | Declarative project standards pack (v2 plot bindings) |
+| `forge_system_tool_profile` | implemented | Profiles `core` / `plot` / `qa` (server-side) |
+| `forge_viewport_list` | implemented | Paper-space viewports |
+| `forge_viewport_set_layer_freeze` | implemented | VP freeze/thaw by handle |
+
+## Executors
+
+| Tool | Status | Notes |
+|------|--------|-------|
+| `forge_exec_command` / `_lisp` | implemented | Prefer sync `Editor.Command`; else `queued=true, completed=false` |
+| `forge_run_script` | implemented | AccoreConsole; **server-only** SafetyPolicy (ADR 0002) |
+| `forge_exec_dotnet` | implemented | Dual-gated; sync snippets only |
+
+## Still planned / deferred
+
+| Item | Notes |
+|------|-------|
+| Visual viewport screenshot | Competitor parity; only after PDF probes |
+| Full SSM **write** | Deferred (GUID/path fragility); read-only CSV inventory is shipped |
+| Civil 3D / geometry megakit / remote multi-tenant MCP | Explicitly out of scope |
+| netDxf offline path | Optional later — not SoT for plot truth |
+| NuGet `McpServer` / registry | After Releases packaging — see docs/packaging-nuget.md |
+| MCP Resources / Prompts | implemented (`forge://…`, issue_set_runbook) |

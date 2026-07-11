@@ -1,0 +1,49 @@
+name: CI Plugin (self-hosted)
+
+# Requires a self-hosted Windows runner with AutoCAD 2026 reference assemblies
+# and AUTOCAD_2026_ROOT set. Do not enable on GitHub-hosted runners.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - "src/Forge.Plugin/**"
+      - "src/Forge.Shared/**"
+      - "scripts/build-plugin.ps1"
+      - "scripts/pack-release.ps1"
+      - ".github/workflows/ci-plugin.yml"
+
+jobs:
+  build-plugin:
+    name: Build Forge.Plugin
+    runs-on: [self-hosted, Windows, autocad-2026]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build plugin
+        shell: pwsh
+        run: |
+          if (-not $env:AUTOCAD_2026_ROOT) {
+            throw "AUTOCAD_2026_ROOT must be set on the self-hosted runner."
+          }
+          .\scripts\build-plugin.ps1 -Configuration Release -OutDir artifacts\Forge.Plugin\
+
+      - name: Pack plugin zip
+        shell: pwsh
+        run: |
+          .\scripts\pack-release.ps1 -Configuration Release
+          # pack-release also publishes server; upload plugin zip only here
+
+      - name: Upload plugin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: forge-plugin
+          path: artifacts/release/765T-Forge.Plugin.zip
+          if-no-files-found: warn

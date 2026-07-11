@@ -1,0 +1,10 @@
+{
+  "passed": false,
+  "findings": [
+    {
+      "code": "titleblock_tag_missing",
+      "severity": "error",
+      "message": "Required titleblock tag 'DWG_NO' was not found."
+    }
+  ]
+}

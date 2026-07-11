@@ -1,0 +1,10 @@
+{
+  "solution": {
+    "path": "765T-Forge.sln",
+    "projects": [
+      "src\\Forge.Shared\\Forge.Shared.csproj",
+      "src\\Forge.Server\\Forge.Server.csproj",
+      "tests\\Forge.Tests\\Forge.Tests.csproj"
+    ]
+  }
+}
