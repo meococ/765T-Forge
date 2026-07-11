@@ -12,25 +12,32 @@ See [docs/versioning.md](docs/versioning.md).
 
 ### Added
 
-- Publish-ready Wave 0: Autoloader R25.1 + valid GUIDs; `%APPDATA%` install guidance; NOTICE upstream attribution; `docs/history/build-brief.md`; embedded matrix/safety in server publish; `RELEASE_STATUS.txt` from pack script
-- PublishReceipt + PDF probes + actionable preflight findings + foreground plot policy
-- IssueSetContract lite, standards pack v2 plot bindings, field/rev gates, timeout read-back protocol
-- Differential issue-set receipts, read-only sheet inventory, batch resume metadata
-- Plugin-dispatch CI sync; Dependabot; scoped open-world `*` denylist; ADR honesty for headless AccoreConsole path
+- (none yet)
+
+## [0.2.1] - 2026-07-11
+
+### Added
+
+- [docs/getting-started.md](docs/getting-started.md) dual-install matrix; [docs/install/](docs/install/) (Cursor, Claude Desktop, VS Code, plugin)
+- Atomic dual-zip release workflow (draft until plugin attached); SBOM on release; `.editorconfig` / `.gitattributes`
+- VS Code MCP example; `.mcp/server.json`; `PackAsTool` on `Forge.Server` (`765T.Forge.Server`)
+- Exclusive AEC tools: plot fingerprint, dependency closure, dual-source titleblock, modal trap, xref closure/pin, transmittal seal, publish ceremony/budget, CDE gate + sidecar
+- Archive index for historical brief
 
 ### Changed
 
-- Roadmap SemVer reconciled with capability matrix (registry/packs/resources are 0.2.0 shipped, not 0.3.0 targets)
-- Removed `companion-skill/` stub; added `docs/README.md` + `AGENTS.md`
-- Maintainer smoke-lab pass recorded (2026-07-11) against live AutoCAD 2026; `scripts/smoke-lab.ps1` helper
+- `forge_plot_publish` marked **partial** in capability matrix; demo-60s prefers smoke-verified `forge_plot_to_pdf`
+- Roadmap SemVer reconciled: evidence chain / IssueSet already in 0.2.x; 0.3.0 = further determinism hardening
+- Moved aspirational brief to [docs/archive/build-brief.md](docs/archive/build-brief.md); stripped from README hero
+- Product SemVer **0.2.1**
 
-### Security
+### Fixed
 
-- Open-world denylist no longer blocks every `*` (scoped to selection idioms); headless script path documented as server-side SafetyPolicy only
+- `forge_plot_publish` falls back to per-layout `-PLOT` when `PublishDsd` fails or produces no output (`fallback=plot_to_pdf`); receipt includes preflight hash when gated
 
 ## [0.2.0] - 2026-07-11
 
-> Tag/release when smoke-lab has a maintainer pass and **both** server + plugin zips are attached. Until then treat 0.2.0 as the product SemVer in-tree; GitHub Release links below apply after the first public tag.
+> Superseded for public announce by **0.2.1** Technical Preview. In-tree history retained.
 
 ### Added
 
@@ -44,11 +51,12 @@ See [docs/versioning.md](docs/versioning.md).
 - Fail-closed pipe token (`FORGE_AUTOCAD_TOKEN`); `FORGE_DEV_ALLOW_DEFAULT_TOKEN` for local only
 - `AUTOCAD_2026_ROOT`-driven plugin HintPath
 - Product SemVer `0.2.0` + envelope version constant
+- Autoloader R25.1; embedded matrix/safety in server publish; `RELEASE_STATUS.txt`
 
 #### Wave 1 — Real publish
 
 - Configurable `forge_plot_to_pdf` (device, paper, CTB/STB, area, orientation, scale)
-- Real DSD `forge_plot_publish` via `Publisher.PublishDsd` + PDF verify
+- DSD `forge_plot_publish` via `Publisher.PublishDsd` + PDF verify (seat-dependent; see 0.2.1 honesty)
 - Sync layer-state restore and page-setup apply
 - Overwrite acknowledgement for PDF/publish/pack
 - Undo marks around typed writes
@@ -59,6 +67,7 @@ See [docs/versioning.md](docs/versioning.md).
 - `forge_block_campaign` titleblock campaigns with dry-run diffs
 - `forge_xref_normalize_relative`
 - `forge_system_capabilities`
+- PublishReceipt + PDF probes + IssueSetContract + pack v2 + differential receipts + sheet inventory + batch resume
 
 #### Wave 3 — Scale
 
@@ -70,6 +79,7 @@ See [docs/versioning.md](docs/versioning.md).
 ### Security
 
 - Removed `default-secret-token` production fallback
+- Scoped open-world `*` denylist; headless AccoreConsole = server-side SafetyPolicy only (ADR 0002)
 
 ## [0.1.0] - 2026-07-11
 
@@ -80,5 +90,6 @@ See [docs/versioning.md](docs/versioning.md).
 - Typed hot-path tools and gated open-world executors
 - `765T-Forge.ServerOnly.slnf` and unit tests
 
+[0.2.1]: https://github.com/765T/765T-Forge/releases/tag/v0.2.1
 [0.2.0]: https://github.com/765T/765T-Forge/releases/tag/v0.2.0
 [0.1.0]: https://github.com/765T/765T-Forge/releases/tag/v0.1.0

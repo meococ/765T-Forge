@@ -4,6 +4,11 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>765t-forge</ToolCommandName>
+    <PackageId>765T.Forge.Server</PackageId>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>mcp;autocad;aec;forge</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
@@ -20,5 +25,6 @@
   <ItemGroup>
     <Content Include="..\..\docs\capability-matrix.md" Link="docs\capability-matrix.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\docs\safety.md" Link="docs\safety.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 </Project>

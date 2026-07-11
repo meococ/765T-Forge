@@ -8,7 +8,7 @@ Use this as a recording checklist for a GIF/video. Prefer **Release zips** (not 
 2. **10–20s** — `forge_registry_load` + `forge_pack_load` (demo pack) + optional `forge_sheet_inventory_import` / `forge_issue_set_validate`.
 3. **20–35s** — `forge_qa_preflight` fails on empty `DWG_NO` (show finding + SuggestedTool).
 4. **35–50s** — Campaign dry-run from registry → write → preflight pass (foreground plot warning cleared).
-5. **50–60s** — `forge_plot_publish` dry-run then publish; show **PublishReceipt** + open PDF.
+5. **50–60s** — Prefer **`forge_plot_to_pdf`** (smoke-verified) dry-run then plot; show PDF + verification. Optionally show `forge_plot_publish` dry-run — note DSD is **partial** on some seats; if used, require `verification.passed` / PublishReceipt before claiming success.
 
 ## Commands (agent)
 

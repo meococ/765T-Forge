@@ -112,6 +112,16 @@ public sealed partial class PluginCommandProcessor
             "forge_exec_command" => ExecCommand(command),
             "forge_exec_lisp" => ExecLisp(command),
             "forge_exec_dotnet" => ExecDotNet(command),
+            "forge_qa_plot_fingerprint" => QaPlotFingerprint(command),
+            "forge_qa_dependency_closure" => QaDependencyClosure(command),
+            "forge_qa_dual_source" => QaDualSource(command),
+            "forge_qa_modal_trap" => QaModalTrap(command),
+            "forge_xref_closure" => XrefClosure(command),
+            "forge_xref_pin_save" => XrefPinSave(command),
+            "forge_xref_pin_verify" => XrefPinVerify(command),
+            "forge_transmittal_seal" => TransmittalSealCreate(command),
+            "forge_publish_ceremony_check" => PublishCeremonyCheck(command),
+            "forge_cde_gate_evaluate" => CdeGateEvaluate(command),
             _ => ForgeResult.Failure(command.Id, "unknown_tool", $"Unknown Forge tool: {command.Tool}")
         };
 
@@ -1077,10 +1087,11 @@ public sealed partial class PluginCommandProcessor
                 "Pass overwriteAcknowledged=true after confirming the previous issue set is archived.");
         }
 
+        QaReport? preflightReport = null;
         if (args.RequirePreflight)
         {
-            var preflight = BuildPreflightReport(args.RequiredTitleblockTags, args.TitleblockBlockName);
-            if (!preflight.Passed && !args.Force)
+            preflightReport = BuildPreflightReport(args.RequiredTitleblockTags, args.TitleblockBlockName);
+            if (!preflightReport.Passed && !args.Force)
             {
                 return new ForgeResult
                 {
@@ -1090,7 +1101,7 @@ public sealed partial class PluginCommandProcessor
                         "publish_preflight_failed",
                         "Publish readiness gate failed.",
                         "Fix findings from forge_qa_preflight or pass force=true to override."),
-                    Data = preflight
+                    Data = preflightReport
                 };
             }
         }
@@ -1098,6 +1109,8 @@ public sealed partial class PluginCommandProcessor
         var dsdPath = Path.Combine(Path.GetTempPath(), $"forge-publish-{command.Id}.dsd");
         var previousBgPlot = Application.GetSystemVariable("BACKGROUNDPLOT");
         Application.SetSystemVariable("BACKGROUNDPLOT", 0);
+        var dsdFailed = false;
+        string? dsdError = null;
 
         try
         {
@@ -1108,11 +1121,8 @@ public sealed partial class PluginCommandProcessor
         }
         catch (System.Exception ex)
         {
-            return ForgeResult.Failure(
-                command.Id,
-                "publish_failed",
-                $"DSD publish failed: {ex.Message}",
-                "Verify layouts exist, BACKGROUNDPLOT can be set to 0, and the PDF device is available.");
+            dsdFailed = true;
+            dsdError = ex.Message;
         }
         finally
         {
@@ -1130,28 +1140,229 @@ public sealed partial class PluginCommandProcessor
             }
         }
 
-        if (!File.Exists(outputPath))
+        if (dsdFailed || !File.Exists(outputPath))
         {
+            var fallback = TryPublishViaPlotFallback(command, outputPath, args.Layouts, args.SinglePdf, preflightReport);
+            if (fallback is not null)
+            {
+                return fallback;
+            }
+
             return ForgeResult.Failure(
                 command.Id,
-                "publish_no_output",
-                $"Publisher finished but output was not found at {outputPath}.",
+                dsdFailed ? "publish_failed" : "publish_no_output",
+                dsdFailed
+                    ? $"DSD publish failed: {dsdError}"
+                    : $"Publisher finished but output was not found at {outputPath}, and plot fallback also failed.",
                 "Check plot log and that layouts contain plottable content.");
         }
 
-        var probe = PdfProbeResult.Probe(outputPath, expectedPages: args.SinglePdf ? args.Layouts.Length : 1);
+        return BuildPublishSuccess(command, dwgPath, outputPath, args, dsd: true, fallback: null, preflightReport);
+    }
+
+    private static ForgeResult? TryPublishViaPlotFallback(
+        ForgeCommand command,
+        string outputPath,
+        string[] layouts,
+        bool singlePdf,
+        QaReport? preflightReport)
+    {
+        var produced = new List<string>();
+        var dir = Path.GetDirectoryName(outputPath)!;
+        var baseName = Path.GetFileNameWithoutExtension(outputPath);
+        Directory.CreateDirectory(dir);
+
+        foreach (var layout in layouts)
+        {
+            var target = singlePdf && layouts.Length == 1
+                ? outputPath
+                : Path.Combine(dir, $"{baseName}-{SanitizeFileToken(layout)}.pdf");
+
+            if (!TryPlotLayoutToPdf(target, layout, out var error))
+            {
+                return ForgeResult.Failure(
+                    command.Id,
+                    "publish_fallback_failed",
+                    $"DSD produced no output; plot fallback failed on layout '{layout}': {error}",
+                    "Verify device/paper via forge_system_capabilities.");
+            }
+
+            produced.Add(target);
+        }
+
+        var primary = singlePdf && layouts.Length == 1
+            ? outputPath
+            : produced[0];
+
+        if (singlePdf && layouts.Length > 1 && !File.Exists(outputPath) && produced.Count > 0)
+        {
+            primary = produced[0];
+        }
+
+        if (!File.Exists(primary))
+        {
+            return null;
+        }
+
+        var args = Args<PublishArgs>(command);
+        return BuildPublishSuccess(
+            command,
+            ActiveDocumentPath(),
+            primary,
+            args,
+            dsd: false,
+            fallback: "plot_to_pdf",
+            preflightReport: preflightReport,
+            extraData: new { producedFiles = produced.ToArray(), requestedSinglePdf = singlePdf });
+    }
+
+    private static string SanitizeFileToken(string value)
+    {
+        foreach (var c in Path.GetInvalidFileNameChars())
+        {
+            value = value.Replace(c, '_');
+        }
+
+        return value;
+    }
+
+    private static bool TryPlotLayoutToPdf(
+        string outputPath,
+        string? layout,
+        out string? error,
+        string? device = null,
+        string? paperSize = null,
+        string? plotStyle = null,
+        string? plotArea = null,
+        string? orientation = null,
+        string? scale = null,
+        string? units = null)
+    {
+        error = null;
+        device = string.IsNullOrWhiteSpace(device) ? "DWG To PDF.pc3" : device!;
+        paperSize = string.IsNullOrWhiteSpace(paperSize) ? "ISO A1 (841.00 x 594.00 MM)" : paperSize!;
+        orientation = string.IsNullOrWhiteSpace(orientation) ? "Landscape" : orientation!;
+        scale = string.IsNullOrWhiteSpace(scale) ? "Fit" : scale!;
+        plotStyle = string.IsNullOrWhiteSpace(plotStyle) ? "." : plotStyle!;
+        units ??= paperSize.Contains("MM", StringComparison.OrdinalIgnoreCase) ? "Millimeters" : "Inches";
+
+        if (!string.IsNullOrWhiteSpace(layout))
+        {
+            try
+            {
+                LayoutManager.Current.CurrentLayout = layout;
+            }
+            catch (Autodesk.AutoCAD.Runtime.Exception)
+            {
+                error = $"Layout not found: {layout}";
+                return false;
+            }
+        }
+
+        var layoutName = LayoutManager.Current.CurrentLayout;
+        var isModel = string.Equals(layoutName, "Model", StringComparison.OrdinalIgnoreCase);
+        plotArea = string.IsNullOrWhiteSpace(plotArea)
+            ? (isModel ? "Extents" : "Layout")
+            : plotArea!;
+
+        var previousFileDia = Application.GetSystemVariable("FILEDIA");
+        var previousBgPlot = Application.GetSystemVariable("BACKGROUNDPLOT");
+        Application.SetSystemVariable("FILEDIA", 0);
+        Application.SetSystemVariable("BACKGROUNDPLOT", 0);
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+            var tokens = new List<object>
+            {
+                "-PLOT",
+                "Yes",
+                layoutName,
+                device,
+                paperSize,
+                units,
+                orientation,
+                "No",
+                plotArea,
+                scale,
+                "0,0",
+                "Yes",
+                plotStyle,
+                "Yes",
+            };
+
+            if (isModel)
+            {
+                tokens.Add("As displayed");
+            }
+            else
+            {
+                tokens.Add("No");
+                tokens.Add("No");
+                tokens.Add("No");
+            }
+
+            tokens.Add(outputPath);
+            tokens.Add("No");
+            tokens.Add("Yes");
+
+            ActiveEditor.Command(tokens.ToArray());
+        }
+        catch (System.Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+        finally
+        {
+            Application.SetSystemVariable("FILEDIA", previousFileDia);
+            Application.SetSystemVariable("BACKGROUNDPLOT", previousBgPlot);
+        }
+
+        if (!File.Exists(outputPath))
+        {
+            error = $"No PDF at {outputPath}";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static ForgeResult BuildPublishSuccess(
+        ForgeCommand command,
+        string? dwgPath,
+        string outputPath,
+        PublishArgs args,
+        bool dsd,
+        string? fallback,
+        QaReport? preflightReport,
+        object? extraData = null)
+    {
+        var probe = PdfProbeResult.Probe(outputPath, expectedPages: args.SinglePdf ? Math.Max(1, args.Layouts.Length) : 1);
+        if (fallback == "plot_to_pdf" && args.SinglePdf && args.Layouts.Length > 1)
+        {
+            // Per-layout PDFs: probe the primary file only (1 page expected).
+            probe = PdfProbeResult.Probe(outputPath, expectedPages: 1);
+        }
+
         var receipt = new PublishReceipt
         {
             DocumentPath = dwgPath,
             OutputPath = outputPath,
             Layouts = args.Layouts,
             SinglePdf = args.SinglePdf,
-            PreflightReportId = args.RequirePreflight ? "preflight" : null,
+            DeviceName = "DWG To PDF.pc3",
+            PreflightReportId = preflightReport?.Id ?? (args.RequirePreflight ? "preflight" : null),
+            PreflightHash = preflightReport is null ? null : new PublishReceipt().ComputePreflightHash(preflightReport),
             OutputBytes = new FileInfo(outputPath).Length,
             OutputMtimeUtc = File.GetLastWriteTimeUtc(outputPath),
             PdfProbe = probe,
             VerificationPassed = probe.Passed,
-            Message = probe.Passed ? "Publish + PDF probe passed." : "Publish wrote a file but PDF probe failed."
+            Message = fallback is null
+                ? (probe.Passed ? "Publish + PDF probe passed." : "Publish wrote a file but PDF probe failed.")
+                : (probe.Passed
+                    ? $"Publish via fallback '{fallback}' + PDF probe passed."
+                    : $"Publish via fallback '{fallback}' wrote a file but PDF probe failed.")
         };
         receipt.ArtifactPath = PublishReceipt.TryWriteArtifact(receipt);
 
@@ -1163,8 +1374,10 @@ public sealed partial class PluginCommandProcessor
                 layouts = args.Layouts,
                 singlePdf = args.SinglePdf,
                 bytes = receipt.OutputBytes,
-                dsd = true,
-                receipt
+                dsd,
+                fallback,
+                receipt,
+                extra = extraData
             },
             verification: new ForgeVerification
             {

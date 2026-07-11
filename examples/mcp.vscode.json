@@ -1,0 +1,17 @@
+{
+  "servers": {
+    "765t-forge": {
+      "type": "stdio",
+      "command": "C:\\path\\to\\Forge.Server.exe",
+      "args": [],
+      "env": {
+        "FORGE_AUTOCAD_TOKEN": "REQUIRED-set-a-long-random-secret",
+        "FORGE_PIPE_NAME": "765T.Forge.AutoCAD",
+        "FORGE_BACKUP_DIR": "%LOCALAPPDATA%\\765T-Forge\\backups",
+        "FORGE_AUDIT_DIR": "%LOCALAPPDATA%\\765T-Forge\\audit",
+        "AUTOCAD_2026_ROOT": "C:\\Program Files\\Autodesk\\AutoCAD 2026",
+        "FORGE_ENABLE_UNSAFE_OPS": "false"
+      }
+    }
+  }
+}

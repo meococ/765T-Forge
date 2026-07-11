@@ -22,13 +22,17 @@ public static class ToolProfiles
             "forge_system_health",
             "forge_system_capabilities",
             "forge_qa_preflight",
+            "forge_qa_plot_fingerprint",
+            "forge_qa_modal_trap",
             "forge_issue_set_validate",
             "forge_plot_to_pdf",
             "forge_plot_publish",
             "forge_recipe_issue_set",
             "forge_layout_page_setup_apply",
             "forge_layer_state_restore",
-            "forge_xref_normalize_relative"
+            "forge_xref_normalize_relative",
+            "forge_publish_ceremony_check",
+            "forge_transmittal_seal"
         ],
         ["qa"] =
         [
@@ -39,6 +43,14 @@ public static class ToolProfiles
             "forge_qa_audit_layers",
             "forge_qa_readback",
             "forge_qa_readback_after_timeout",
+            "forge_qa_plot_fingerprint",
+            "forge_qa_dependency_closure",
+            "forge_qa_dual_source",
+            "forge_qa_modal_trap",
+            "forge_xref_closure",
+            "forge_xref_pin_verify",
+            "forge_cde_gate_evaluate",
+            "forge_publish_ceremony_check",
             "forge_audit_summarize",
             "forge_issue_set_diff",
             "forge_xref_list",

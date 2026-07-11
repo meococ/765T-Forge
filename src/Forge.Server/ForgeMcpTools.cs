@@ -136,7 +136,7 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_plot_to_pdf", new { outputPath, layout, device, paperSize, plotStyle, plotArea, orientation, scale, units, overwriteAcknowledged }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_plot_publish", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(ForgeResult))]
-    [Description("Publish layouts to PDF via real DSD + Publisher.PublishDsd; returns PublishReceipt with PDF probe. Preflight gate unless force=true.")]
+    [Description("Publish layouts to PDF via DSD + Publisher.PublishDsd when possible; falls back to per-layout -PLOT if DSD yields no file. Returns PublishReceipt with PDF probe. Preflight gate unless force=true.")]
     public static Task<ForgeResult> PlotPublish(
         ForgeToolRunner runner,
         string outputPath,
@@ -290,6 +290,111 @@ public sealed class ForgeMcpTools
     [Description("Freeze or thaw a layer inside a specific viewport by handle (VP freeze), without changing global layer state.")]
     public static Task<ForgeResult> ViewportSetLayerFreeze(ForgeToolRunner runner, string handle, string layer, bool freeze = true, bool dryRun = false, CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_viewport_set_layer_freeze", new { handle, layer, freeze }, dryRun, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_qa_plot_fingerprint", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(ForgeResult))]
+    [Description("Capture plot environment fingerprint (PSTYLEMODE, BACKGROUNDPLOT, devices) and evaluate against the loaded standards pack.")]
+    public static Task<ForgeResult> QaPlotFingerprint(ForgeToolRunner runner, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_qa_plot_fingerprint", new { }, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_qa_dependency_closure", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(ForgeResult))]
+    [Description("Scan xref and pack plot-style dependencies for missing files before publish.")]
+    public static Task<ForgeResult> QaDependencyClosure(ForgeToolRunner runner, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_qa_dependency_closure", new { }, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_qa_dual_source", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(ForgeResult))]
+    [Description("Compare drawing-registry expected titleblock values against live attributes (dual-source truth).")]
+    public static Task<ForgeResult> QaDualSource(ForgeToolRunner runner, string? layout = null, string? drawingNo = null, string? titleblockBlockName = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_qa_dual_source", new { layout, drawingNo, titleblockBlockName }, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_qa_modal_trap", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(ForgeResult))]
+    [Description("Detect automation modal traps (FILEDIA, EXPERT) before plot/publish.")]
+    public static Task<ForgeResult> QaModalTrap(ForgeToolRunner runner, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_qa_modal_trap", new { }, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_xref_closure", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(ForgeResult))]
+    [Description("List host xref closure graph (flat) with path existence for issue-set freeze.")]
+    public static Task<ForgeResult> XrefClosure(ForgeToolRunner runner, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_xref_closure", new { }, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_xref_pin_save", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(ForgeResult))]
+    [Description("Save an xref closure pin snapshot (path/length/hash) for later verify before publish.")]
+    public static Task<ForgeResult> XrefPinSave(ForgeToolRunner runner, bool dryRun = false, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_xref_pin_save", new { }, dryRun, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_xref_pin_verify", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(ForgeResult))]
+    [Description("Compare current xref closure against a saved pin artifact.")]
+    public static Task<ForgeResult> XrefPinVerify(ForgeToolRunner runner, string pinPath, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_xref_pin_verify", new { pinPath }, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_transmittal_seal", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(ForgeResult))]
+    [Description("Create a cryptographic transmittal seal over host DWG, xrefs, and optional PDF/receipt (SHA256 or HMAC).")]
+    public static Task<ForgeResult> TransmittalSealTool(
+        ForgeToolRunner runner,
+        string? outputPdfPath = null,
+        string? receiptId = null,
+        string? hmacKey = null,
+        string? outputDirectory = null,
+        bool dryRun = false,
+        CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_transmittal_seal", new { outputPdfPath, receiptId, hmacKey, outputDirectory }, dryRun, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_publish_ceremony_check", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(ForgeResult))]
+    [Description("Evaluate publish ceremony (dry-run, preflight, human issue ack) and blast-radius budgets.")]
+    public static Task<ForgeResult> PublishCeremonyCheck(
+        ForgeToolRunner runner,
+        bool dryRunDone = false,
+        bool preflightPassed = false,
+        bool issueAcknowledged = false,
+        bool publishedStatusAck = false,
+        bool requirePublishedAck = false,
+        int? maxSheets = null,
+        int? sheetsUsed = null,
+        int? maxDestructiveExecs = null,
+        int? destructiveExecsUsed = null,
+        int? maxPathRewrites = null,
+        int? pathRewritesUsed = null,
+        CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_publish_ceremony_check", new
+        {
+            dryRunDone,
+            preflightPassed,
+            issueAcknowledged,
+            publishedStatusAck,
+            requirePublishedAck,
+            maxSheets,
+            sheetsUsed,
+            maxDestructiveExecs,
+            destructiveExecsUsed,
+            maxPathRewrites,
+            pathRewritesUsed
+        }, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_cde_gate_evaluate", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(ForgeResult))]
+    [Description("CAD-side ISO 19650-lite CDE gate for status/rev/naming; optional sidecar JSON for upload metadata.")]
+    public static Task<ForgeResult> CdeGateEvaluate(
+        ForgeToolRunner runner,
+        string? status = null,
+        string? rev = null,
+        string? drawingNo = null,
+        bool treatingAsIssued = false,
+        string? namingRegex = null,
+        string? revisionScheme = null,
+        string[]? allowedStatuses = null,
+        bool writeSidecar = false,
+        string? sidecarDirectory = null,
+        CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_cde_gate_evaluate", new
+        {
+            status,
+            rev,
+            drawingNo,
+            treatingAsIssued,
+            namingRegex,
+            revisionScheme,
+            allowedStatuses,
+            writeSidecar,
+            sidecarDirectory
+        }, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_batch_run", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(ForgeResult))]
     [Description("Run an AccoreConsole job queue over multiple DWG/script pairs with partial-success reporting and optional resume batchId.")]

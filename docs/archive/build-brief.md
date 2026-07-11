@@ -4,7 +4,7 @@
 Thương hiệu: 765T · Bộ ba: **Flow** (Revit) · **Fly** (Navisworks) · **Forge** (AutoCAD)
 Người review: Huỳnh Trung Trực (Mèo Cọc) · Ngày lập: 08/07/2026 · Version: 0.2 (đã chốt)
 
-> **Disclaimer (publish):** Tài liệu này là **catalog / quyết định lịch sử** (aspirational). Bề mặt đã ship = [`../capability-matrix.md`](../capability-matrix.md) + SemVer trong `CHANGELOG.md`. Không dùng §5 như checklist “đã implement”. Định vị công khai: **reliable issue-set publish + agent safety**, không đua số tool.
+> **Disclaimer (publish):** Tài liệu này là **catalog / quyết định lịch sử** (aspirational), archived under `docs/archive/`. Bề mặt đã ship = [`../capability-matrix.md`](../capability-matrix.md) + SemVer trong `CHANGELOG.md`. Không dùng §5 như checklist “đã implement”. Định vị công khai: **reliable issue-set publish + agent safety**, không đua số tool.
 
 > Tài liệu này để anh **review** rồi **dán thẳng cho Codex** lên plan & build. Các quyết định lớn **đã chốt**: toàn bộ stack **all-C#**, **AutoCAD full**, fork base cố định.
 

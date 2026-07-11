@@ -20,7 +20,7 @@ Default install directory: `%LOCALAPPDATA%\765T-Forge\plugin\Forge.Plugin.dll`.
 
 ## Autoloader bundle (optional)
 
-Copy [`plugin-bundle/765T-Forge.bundle`](../plugin-bundle/765T-Forge.bundle) into an AutoCAD `ApplicationPlugins` folder. Prefer (in order):
+Copy [`plugin-bundle/765T-Forge.bundle`](../../plugin-bundle/765T-Forge.bundle) into an AutoCAD `ApplicationPlugins` folder. Prefer (in order):
 
 1. **`%APPDATA%\Autodesk\ApplicationPlugins`** — per-user; works reliably on AutoCAD 2026
 2. **`%PROGRAMFILES%\Autodesk\ApplicationPlugins`** — machine-wide (requires admin)
@@ -32,4 +32,4 @@ Place `Forge.Plugin.dll` at `Contents/Windows/Forge.Plugin.dll` relative to the 
 
 ## Releases
 
-CI does **not** build the plugin (no AutoCAD on GitHub-hosted runners). Download **`765T-Forge.Plugin.zip`** from the GitHub Release (maintainer-attached) in addition to the server zip. A release without the plugin zip is **incomplete**. See [CONTRIBUTING.md](../CONTRIBUTING.md) release checklist.
+CI does **not** build the plugin (no AutoCAD on GitHub-hosted runners). Download **`765T-Forge.Plugin.zip`** from the GitHub Release in addition to the server zip. A release without the plugin zip is **incomplete**. See [../getting-started.md](../getting-started.md) and [CONTRIBUTING.md](../../CONTRIBUTING.md) release checklist.

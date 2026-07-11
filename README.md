@@ -1,24 +1,28 @@
 # 765T-Forge
 
+[![CI Server](https://github.com/765T/765T-Forge/actions/workflows/ci-server.yml/badge.svg)](https://github.com/765T/765T-Forge/actions/workflows/ci-server.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/765T/765T-Forge?include_prereleases)](https://github.com/765T/765T-Forge/releases)
+
 All-C# MCP server and AutoCAD 2026 plugin for **metro/AEC issue-set drawing production** — inspect → fix → fill → gate → publish → verify.
 
-Not affiliated with Autodesk. Requires a licensed AutoCAD 2026 seat. See [NOTICE.md](NOTICE.md).
+**Technical Preview** — Windows + AutoCAD **2026** only. Not affiliated with Autodesk. See [NOTICE.md](NOTICE.md).
+
+**Download:** [Latest Release](https://github.com/765T/765T-Forge/releases) — you need **both** `765T-Forge.Server-win-x64.zip` and `765T-Forge.Plugin.zip`.
 
 ## Positioning
 
 Forge competes on **reliable sheet-set publish**, not geometry tool count:
 
-- Configurable plot (device / paper / CTB·STB)
-- Real DSD multi-layout publish with PDF verify
+- Configurable plot (device / paper / CTB·STB) — single-layout `forge_plot_to_pdf` smoke-verified
+- DSD multi-layout publish path + PDF verify (**partial** on some seats; fallback to per-layout plot)
 - Publish readiness gate (`forge_qa_preflight`)
 - Titleblock campaigns + issue-set recipe
 - Audit, backup, dry-run, named-pipe ACL + required token
 
-Honest status: [docs/capability-matrix.md](docs/capability-matrix.md) · Roadmap: [docs/roadmap.md](docs/roadmap.md) · Smoke lab: [docs/smoke-lab.md](docs/smoke-lab.md)
+Honest status: [docs/capability-matrix.md](docs/capability-matrix.md) · Start here: [docs/getting-started.md](docs/getting-started.md) · Roadmap: [docs/roadmap.md](docs/roadmap.md)
 
-The Vietnamese [docs/history/build-brief.md](docs/history/build-brief.md) is an **aspirational catalog / decision log** — not the shipped tool list. Prefer the capability matrix for what works today.
-
-**Release note:** GitHub Actions packs the **server** zip on tag; maintainers must also attach **`765T-Forge.Plugin.zip`** (AutoCAD required to build). Server alone is not a usable install.
+Historical planning notes live under [docs/archive/](docs/archive/) — not the shipped tool list.
 
 ## Shape
 
@@ -27,23 +31,25 @@ The Vietnamese [docs/history/build-brief.md](docs/history/build-brief.md) is an 
 - `src/Forge.Shared` — envelope, safety, audit, backup, QA report
 - `tests/Forge.Tests` — unit tests (no AutoCAD required)
 - `skills/765t-forge` — companion agent skill
-- `examples/` — Cursor / Claude Desktop MCP configs
+- `examples/` — Cursor / Claude Desktop / VS Code MCP configs
 
 ## Requirements
 
-- Windows + .NET 8 SDK
+- Windows + .NET 8 (SDK to build; runtime for Release zip)
 - AutoCAD 2026 (for plugin / live tools)
 - `FORGE_AUTOCAD_TOKEN` (or `MCP_AUTOCAD_TOKEN`) **required** — no production default secret
 
-## Quick install (Cursor)
+## Quick install
 
-1. Build server: `.\scripts\build-server.ps1`
-2. Build plugin (with AutoCAD installed): `.\scripts\build-plugin.ps1`
-3. Install plugin copy + checklist: `.\scripts\install-plugin.ps1`
-4. `NETLOAD` the installed `Forge.Plugin.dll`, run `MCP_STATUS`
-5. Copy [examples/mcp.cursor.json](examples/mcp.cursor.json) into your MCP config and set the token + exe path
+See **[docs/getting-started.md](docs/getting-started.md)** for the full dual-install matrix (Release zips or build-from-source, Autoloader, Cursor / Claude / VS Code).
 
-Details: [docs/install-cursor.md](docs/install-cursor.md) · [docs/install-claude-desktop.md](docs/install-claude-desktop.md) · [docs/install-plugin.md](docs/install-plugin.md)
+```powershell
+.\scripts\build-server.ps1 -Configuration Release
+.\scripts\build-plugin.ps1 -Configuration Release
+.\scripts\install-plugin.ps1 -Configuration Release -SkipBuild
+```
+
+Then copy [examples/mcp.cursor.json](examples/mcp.cursor.json) and set the token + absolute `Forge.Server.exe` path.
 
 ## Build
 
@@ -86,7 +92,7 @@ See [docs/safety.md](docs/safety.md) and [SECURITY.md](SECURITY.md).
 
 ## Versioning
 
-Product SemVer **0.2.0** ≠ roadmap phase ≠ MCP protocol. See [docs/versioning.md](docs/versioning.md).
+Product SemVer **0.2.1** ≠ roadmap phase ≠ MCP protocol. See [docs/versioning.md](docs/versioning.md).
 
 ## License
 

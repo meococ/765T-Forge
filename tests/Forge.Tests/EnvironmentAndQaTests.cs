@@ -46,9 +46,9 @@ public sealed class EnvironmentAndQaTests
     }
 
     [Fact]
-    public void ProductVersionIs020AndMoatToolsAreRegistered()
+    public void ProductVersionIs021AndMoatToolsAreRegistered()
     {
-        Assert.Equal("0.2.0", ForgeConstants.ProductVersion);
+        Assert.Equal("0.2.1", ForgeConstants.ProductVersion);
         var names = ForgeToolRegistry.All.Select(x => x.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
         Assert.Contains("forge_qa_preflight", names);
         Assert.Contains("forge_recipe_issue_set", names);
@@ -60,6 +60,10 @@ public sealed class EnvironmentAndQaTests
         Assert.Contains("forge_registry_load", names);
         Assert.Contains("forge_pack_load", names);
         Assert.Contains("forge_viewport_list", names);
+        Assert.Contains("forge_qa_plot_fingerprint", names);
+        Assert.Contains("forge_xref_pin_verify", names);
+        Assert.Contains("forge_transmittal_seal", names);
+        Assert.Contains("forge_cde_gate_evaluate", names);
         Assert.False(ForgeToolRegistry.Get("forge_batch_run").OpenWorld);
     }
 

@@ -12,6 +12,8 @@ jobs:
   pack-server:
     name: Pack Forge.Server
     runs-on: windows-latest
+    outputs:
+      server_zip: ${{ steps.pack.outputs.server_zip }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,50 +24,122 @@ jobs:
           global-json-file: global.json
 
       - name: Pack server (win-x64)
+        id: pack
         shell: pwsh
         run: |
           .\scripts\pack-release.ps1 -Configuration Release -SkipPlugin
+          .\scripts\generate-sbom.ps1 -Configuration Release
+          $zip = Get-ChildItem artifacts/release/765T-Forge.Server-win-x64.zip | Select-Object -First 1
+          "server_zip=$($zip.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Upload server artifact
         uses: actions/upload-artifact@v4
         with:
           name: forge-server-win-x64
-          path: artifacts/release/server/**
+          path: |
+            artifacts/release/765T-Forge.Server-win-x64.zip
+            artifacts/release/RELEASE_STATUS.txt
+            artifacts/release/765T-Forge.Server.sbom.cdx.json
 
-      - name: Create GitHub Release (server)
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          files: |
-            artifacts/release/*.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # Plugin build requires Autodesk AutoCAD 2026 reference assemblies.
-  # GitHub-hosted runners do not include AutoCAD. Maintainers should build
-  # the plugin locally (or on a self-hosted runner with AUTOCAD_2026_ROOT)
-  # and attach Forge.Plugin.dll to the release, or run pack-release.ps1
-  # without -SkipPlugin on a machine that has AutoCAD installed.
-  pack-plugin-note:
-    name: Plugin packaging note
-    runs-on: windows-latest
-    needs: pack-server
+  pack-plugin:
+    name: Pack Forge.Plugin (self-hosted)
+    runs-on: [self-hosted, Windows, autocad-2026]
+    continue-on-error: true
+    outputs:
+      plugin_ok: ${{ steps.pack.outputs.plugin_ok }}
     steps:
-      - name: Document plugin expectation
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Pack plugin
+        id: pack
         shell: pwsh
         run: |
-          Write-Host @"
-          Plugin artifact is NOT built on GitHub-hosted runners (no AutoCAD).
-          A release without 765T-Forge.Plugin.zip is INCOMPLETE — server alone is insufficient.
-          Do NOT announce the tag as a complete product until the plugin zip is attached.
-          Maintainer steps:
-            1. Set AUTOCAD_2026_ROOT to the AutoCAD 2026 install.
-            2. Run: .\scripts\pack-release.ps1 -Configuration Release
-            3. Attach artifacts/release/765T-Forge.Plugin.zip to the GitHub Release for tag $($env:GITHUB_REF_NAME).
-            4. Confirm docs/smoke-lab.md has a maintainer pass (or note deferral in release notes).
-            5. Confirm server zip contains docs/capability-matrix.md and docs/safety.md.
-          See CONTRIBUTING.md release checklist.
-          "@
-          if ($env:FORGE_REQUIRE_PLUGIN_ZIP -eq "true") {
-            throw "FORGE_REQUIRE_PLUGIN_ZIP=true but plugin was not packed on this runner."
+          if (-not $env:AUTOCAD_2026_ROOT) {
+            $env:AUTOCAD_2026_ROOT = "C:\Program Files\Autodesk\AutoCAD 2026"
           }
+          .\scripts\pack-release.ps1 -Configuration Release
+          if (Test-Path artifacts/release/765T-Forge.Plugin.zip) {
+            "plugin_ok=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } else {
+            "plugin_ok=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            Write-Warning "Plugin zip missing — release will stay draft."
+          }
+
+      - name: Upload plugin artifact
+        if: steps.pack.outputs.plugin_ok == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: forge-plugin
+          path: artifacts/release/765T-Forge.Plugin.zip
+
+  publish-release:
+    name: Publish GitHub Release
+    runs-on: windows-latest
+    needs: [pack-server, pack-plugin]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download server
+        uses: actions/download-artifact@v4
+        with:
+          name: forge-server-win-x64
+          path: artifacts/release
+
+      - name: Download plugin (optional)
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: forge-plugin
+          path: artifacts/release
+
+      - name: Assess completeness
+        id: status
+        shell: pwsh
+        run: |
+          $plugin = Test-Path "artifacts/release/765T-Forge.Plugin.zip"
+          $complete = $plugin
+          "complete=$complete" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "draft=$(-not $complete)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          if (-not $complete) {
+            Write-Warning "INCOMPLETE: missing 765T-Forge.Plugin.zip — creating DRAFT release only."
+            @"
+            765T-Forge release pack status
+            ServerZip=yes
+            PluginZip=false
+            Complete=false
+            Note=DRAFT until 765T-Forge.Plugin.zip is attached. Do not announce as complete.
+            "@ | Set-Content artifacts/release/RELEASE_STATUS.txt -Encoding utf8
+          } else {
+            @"
+            765T-Forge release pack status
+            ServerZip=yes
+            PluginZip=true
+            Complete=true
+            "@ | Set-Content artifacts/release/RELEASE_STATUS.txt -Encoding utf8
+          }
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: ${{ steps.status.outputs.draft == 'true' }}
+          generate_release_notes: true
+          body: |
+            ## Install
+            Download **both** zips. See [docs/getting-started.md](https://github.com/765T/765T-Forge/blob/main/docs/getting-started.md).
+
+            | Artifact | Required |
+            |----------|----------|
+            | `765T-Forge.Server-win-x64.zip` | yes |
+            | `765T-Forge.Plugin.zip` | yes (release is draft if missing) |
+            | `765T-Forge.Server.sbom.cdx.json` | SBOM |
+
+            Platform: **Windows + AutoCAD 2026** Technical Preview.
+          files: |
+            artifacts/release/765T-Forge.Server-win-x64.zip
+            artifacts/release/765T-Forge.Plugin.zip
+            artifacts/release/RELEASE_STATUS.txt
+            artifacts/release/765T-Forge.Server.sbom.cdx.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

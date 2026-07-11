@@ -1,12 +1,13 @@
-# CODEOWNERS
-# Adjust GitHub handles when the org is public.
+# CODEOWNERS — require review on trust-sensitive paths.
+# Replace @765T-maintainers with real GitHub team/user handles for the org.
 
-*       @765T
+*                                       @765T-maintainers
 
-# Trust-sensitive paths — require review when org membership is set up
-/src/Forge.Shared/SafetyPolicy.cs       @765T
-/src/Forge.Plugin/                      @765T
-/docs/capability-matrix.md              @765T
-/docs/safety.md                         @765T
-/skills/                                @765T
-/.github/                               @765T
+/src/Forge.Shared/SafetyPolicy.cs       @765T-maintainers
+/src/Forge.Plugin/                      @765T-maintainers
+/docs/capability-matrix.md              @765T-maintainers
+/docs/safety.md                         @765T-maintainers
+/docs/getting-started.md                @765T-maintainers
+/skills/                                @765T-maintainers
+/.github/                               @765T-maintainers
+/scripts/pack-release.ps1               @765T-maintainers

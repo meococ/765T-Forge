@@ -4,8 +4,8 @@ Connect Claude Desktop to 765T-Forge over MCP stdio.
 
 ## Prerequisites
 
-1. Build `Forge.Server` (see [CONTRIBUTING.md](../CONTRIBUTING.md) or `scripts/build-server.ps1`).
-2. For live drawing tools: AutoCAD 2026 with `Forge.Plugin` loaded (`NETLOAD`), then `MCP_STATUS`.
+1. Build or download `Forge.Server` (see [../getting-started.md](../getting-started.md) or `scripts/build-server.ps1`).
+2. For live drawing tools: AutoCAD 2026 with `Forge.Plugin` loaded (`NETLOAD` / Autoloader), then `MCP_STATUS`.
 3. Set **`FORGE_AUTOCAD_TOKEN`** to a long random secret shared with the AutoCAD process. Do not use a default token.
 
 ## Claude Desktop config
@@ -32,7 +32,7 @@ Edit Claude Desktop’s MCP config (Windows typical path):
 }
 ```
 
-Template: [examples/mcp.claude-desktop.json](../examples/mcp.claude-desktop.json).
+Template: [examples/mcp.claude-desktop.json](../../examples/mcp.claude-desktop.json).
 
 ## Token requirement
 
@@ -48,8 +48,8 @@ Ensure AutoCAD inherits the same environment (or set the variable for the Window
 
 ## Skill
 
-Use [skills/765t-forge/SKILL.md](../skills/765t-forge/SKILL.md) for agent workflow rules (health first, dry-run, never invent drawing numbers, preflight before publish when available).
+Use [skills/765t-forge/SKILL.md](../../skills/765t-forge/SKILL.md) for agent workflow rules (health first, dry-run, never invent drawing numbers, preflight before publish when available).
 
 ## Troubleshooting
 
-See [troubleshooting.md](troubleshooting.md) for pipe down, missing token, NETLOAD, and locked DLL issues.
+See [../troubleshooting.md](../troubleshooting.md) for pipe down, missing token, NETLOAD, and locked DLL issues.

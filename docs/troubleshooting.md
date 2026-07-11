@@ -16,7 +16,7 @@
 
 - Place the DLL under a path listed in AutoCAD `TRUSTEDPATHS`, or adjust trust settings for your org policy.
 - Prefer `.\scripts\install-plugin.ps1` after `.\scripts\build-plugin.ps1` — it copies into `%LOCALAPPDATA%\765T-Forge\plugin` and prints the checklist.
-- Optional Autoloader bundle: `plugin-bundle/765T-Forge.bundle/` (see [install-plugin.md](install-plugin.md)).
+- Optional Autoloader bundle: `plugin-bundle/765T-Forge.bundle/` (see [install/plugin.md](install/plugin.md)).
 - Build for `net8.0-windows` and AutoCAD 2026 managed references from `AUTOCAD_2026_ROOT`.
 - Confirm you are loading the DLL you just built (install dir, `bin\Release\net8.0-windows\`, or `-OutDir`).
 

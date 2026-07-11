@@ -422,7 +422,29 @@ public sealed partial class PluginCommandProcessor
                 // Best effort.
             }
 
-            findings.AddRange(pack.EvaluatePlotBindings(null, null, null, bgPlot));
+            findings.AddRange(pack.EvaluatePlotBindings(
+                pack.PlotDevice,
+                pack.PaperSize,
+                pack.CtbPath ?? pack.StbPath,
+                bgPlot));
+
+            if (!string.IsNullOrWhiteSpace(pack.CtbPath) && !File.Exists(pack.CtbPath))
+            {
+                findings.Add(new QaFinding(
+                    "dependency_missing",
+                    "error",
+                    $"Pack CTB missing: {pack.CtbPath}",
+                    SuggestedTool: "forge_qa_dependency_closure"));
+            }
+
+            if (!string.IsNullOrWhiteSpace(pack.StbPath) && !File.Exists(pack.StbPath))
+            {
+                findings.Add(new QaFinding(
+                    "dependency_missing",
+                    "error",
+                    $"Pack STB missing: {pack.StbPath}",
+                    SuggestedTool: "forge_qa_dependency_closure"));
+            }
 
             foreach (var tag in pack.RequiredTitleblockTags)
             {
@@ -474,13 +496,44 @@ public sealed partial class PluginCommandProcessor
             findings.AddRange(contract.ValidateAgainst(layoutNames, DrawingRegistryStore.Current));
         }
 
+        var fingerprint = CapturePlotFingerprint();
+        findings.AddRange(fingerprint.EvaluateAgainstPack(pack));
+
+        var registry = DrawingRegistryStore.Current;
+        if (registry is not null)
+        {
+            var layout = LayoutManager.Current.CurrentLayout;
+            var sheet = registry.Sheets.FirstOrDefault(s =>
+                s.Layout is not null && s.Layout.Equals(layout, StringComparison.OrdinalIgnoreCase));
+            if (sheet is not null)
+            {
+                var expected = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["DWG_NO"] = sheet.DrawingNo
+                };
+                if (!string.IsNullOrWhiteSpace(sheet.Rev))
+                {
+                    expected["REV"] = sheet.Rev!;
+                }
+
+                var attrs = FindBlockAttributes(titleblockBlockName, null, forWrite: false)
+                    .ToDictionary(a => a.Tag, a => a.Value ?? "", StringComparer.OrdinalIgnoreCase);
+                findings.AddRange(TitleblockDualSource.Compare(expected, attrs, pack?.TitleBlockAttrMap));
+            }
+        }
+
+        int? fileDia = null;
+        try { fileDia = Convert.ToInt32(Application.GetSystemVariable("FILEDIA")); } catch { }
+        findings.AddRange(ModalTrapHints.EvaluateAutomationSysvars(fileDia));
+
         return QaReport.FromFindings(document, findings, new
         {
             xrefCount = xrefs.Length,
             pstyleMode,
             packId = pack?.PackId,
             contractId = contract?.ContractId,
-            registryProjectId = DrawingRegistryStore.Current?.ProjectId
+            registryProjectId = DrawingRegistryStore.Current?.ProjectId,
+            plotFingerprint = fingerprint.FingerprintHash
         });
     }
 

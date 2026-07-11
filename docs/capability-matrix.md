@@ -40,8 +40,8 @@ Honest status of MCP tools. AutoCAD target: **2026**. Civil 3D, full SSM **write
 
 | Tool | Status | Notes |
 |------|--------|-------|
-| `forge_plot_to_pdf` | implemented | Configurable device/paper/CTB·STB/area; overwrite ack |
-| `forge_plot_publish` | implemented | DSD + `Publisher.PublishDsd`; **PublishReceipt** + PDF probe; preflight gate |
+| `forge_plot_to_pdf` | implemented | Configurable device/paper/CTB·STB/area; overwrite ack; smoke-verified |
+| `forge_plot_publish` | partial | DSD + `Publisher.PublishDsd` + **PublishReceipt** + PDF probe + preflight gate; on DSD no-output / failure, **falls back** to per-layout `-PLOT` (`fallback=plot_to_pdf` in data); always require `verification.passed` |
 | `forge_qa_*` (verify/check/audit/readback) | implemented | |
 | `forge_qa_readback_after_timeout` | implemented | Timeout recovery protocol — never retry write blind |
 | `forge_qa_preflight` | implemented | QaReport + pack v2 + foreground plot + issue-set contract findings |
@@ -63,6 +63,20 @@ Honest status of MCP tools. AutoCAD target: **2026**. Civil 3D, full SSM **write
 | `forge_system_tool_profile` | implemented | Profiles `core` / `plot` / `qa` (server-side) |
 | `forge_viewport_list` | implemented | Paper-space viewports |
 | `forge_viewport_set_layer_freeze` | implemented | VP freeze/thaw by handle |
+
+## Exclusive AEC gates (0.2.1+)
+
+| Tool | Status | Notes |
+|------|--------|-------|
+| `forge_qa_plot_fingerprint` | implemented | Plot env fingerprint + pack lock findings |
+| `forge_qa_dependency_closure` | implemented | Xref + pack CTB/STB existence |
+| `forge_qa_dual_source` | implemented | Registry vs live titleblock compare |
+| `forge_qa_modal_trap` | implemented | FILEDIA/EXPERT automation readiness |
+| `forge_xref_closure` | implemented | Flat host xref closure list |
+| `forge_xref_pin_save` / `_verify` | implemented | Issue-set xref pin snapshot |
+| `forge_transmittal_seal` | implemented | SHA256/HMAC seal over DWG+xref+PDF |
+| `forge_publish_ceremony_check` | implemented | Human ack + blast-radius budget |
+| `forge_cde_gate_evaluate` | implemented | ISO 19650-lite status/rev/naming + optional sidecar |
 
 ## Executors
 

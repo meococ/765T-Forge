@@ -6,9 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 765T-Forge is an **all-C# MCP (Model Context Protocol) stdio server that drives AutoCAD 2026** for **metro/AEC issue-set drawing production** (inspect → fix → fill → preflight gate → publish → verify). An AI agent calls MCP tools; the server forwards them to an in-process AutoCAD plugin, which executes the Autodesk `.NET`/ObjectARX API.
 
-**Product SemVer:** `0.2.0` (see `CHANGELOG.md`). Honest shipped surface: [`docs/capability-matrix.md`](docs/capability-matrix.md). Roadmap map: [`docs/roadmap.md`](docs/roadmap.md).
+**Product SemVer:** `0.2.1` (see `CHANGELOG.md`). Honest shipped surface: [`docs/capability-matrix.md`](docs/capability-matrix.md). Roadmap map: [`docs/roadmap.md`](docs/roadmap.md). Start here: [`docs/getting-started.md`](docs/getting-started.md).
 
-The Vietnamese build brief (`docs/history/build-brief.md`) is the **aspirational catalog / historical decisions** (tool catalog §5, safety §6, phases §7). It is **not** the shipped capability list — prefer the capability matrix for what works today. Positioning: compete on **reliable publish + agent safety**, not geometry tool count.
+The Vietnamese build brief (`docs/archive/build-brief.md`) is the **aspirational catalog / historical decisions** (tool catalog §5, safety §6, phases §7). It is **not** the shipped capability list — prefer the capability matrix for what works today. Positioning: compete on **reliable publish + agent safety**, not geometry tool count.
 
 Typed "structured" tools cover the hot path; four generic executors (`forge_exec_command`, `forge_exec_lisp`, `forge_run_script`, `forge_exec_dotnet`) cover the long tail — all behind a mandatory safety layer.
 

@@ -23,7 +23,7 @@ Automated helper: [`scripts/smoke-lab.ps1`](../scripts/smoke-lab.ps1) (Autoloade
 | 3 | `forge_qa_preflight` missing required tag | `passed=false`, `titleblock_tag_missing` + SuggestedTool | PASS |
 | 4 | `forge_plot_publish` existing PDF, no overwrite ack | `publish_overwrite_not_acknowledged` | PASS |
 | 5a | `forge_plot_publish` dryRun | ok | PASS |
-| 5b | Real PDF output | file exists, verify passed | PASS via `forge_plot_to_pdf` (Layout1); DSD `PublishDsd` returned `publish_no_output` on this seat — tracked |
+| 5b | Real PDF output | file exists, verify passed | PASS via `forge_plot_to_pdf` (Layout1); DSD `PublishDsd` returned `publish_no_output` on this seat — **0.2.1 adds plot fallback** inside `forge_plot_publish` (re-smoke recommended) |
 | 6 | `forge_issue_set_validate` bad layout | `issue_set_layout_missing` | PASS |
 
 ## Record
@@ -46,9 +46,12 @@ Notes:
 
 ## Maintainer pass log
 
-### Pass 2026-07-11
+### Pass 2026-07-11 (post 0.2.1 tree)
 
-- Tag: untagged / product SemVer 0.2.0
+- Tag target: **v0.2.1** Technical Preview (Windows + AutoCAD 2026)
 - Operator: agent (Cursor) + AutoCAD 2026 local
-- Result: **PASS** (critical: health, preflight, overwrite ack, issue-set validate, plot_to_pdf)
-- Notes: DSD multi-layout publish path needs follow-up on this workstation; single-layout `forge_plot_to_pdf` verified end-to-end with backup + PDF verify.
+- Unit tests: ServerOnly **57 passed**
+- Plugin: Release build succeeded with exclusive tools
+- Live DSD re-smoke: recommended after NETLOAD of new plugin (fallback path added)
+- Result: **READY TO TAG** when both zips attached to GitHub Release (draft until plugin zip present)
+

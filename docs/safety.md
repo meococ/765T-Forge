@@ -42,7 +42,7 @@ Do **not** run shared or production hosts on a documented default pipe secret. S
 FORGE_AUTOCAD_TOKEN=<long random value>
 ```
 
-on both the MCP server process and the AutoCAD process. See [install-cursor.md](install-cursor.md) and [SECURITY.md](../SECURITY.md).
+on both the MCP server process and the AutoCAD process. See [install/cursor.md](install/cursor.md) and [SECURITY.md](../SECURITY.md).
 
 ## Overwrite acknowledgement
 

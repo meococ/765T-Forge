@@ -1,0 +1,39 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/draft/server.schema.json",
+  "name": "io.github.765T/765t-forge",
+  "description": "Agent-safe AutoCAD 2026 MCP for metro/AEC issue-set publish (inspect → gate → plot/publish → verify).",
+  "version": "0.2.1",
+  "repository": {
+    "url": "https://github.com/765T/765T-Forge",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registry_type": "nuget",
+      "identifier": "765T.Forge.Server",
+      "version": "0.2.1",
+      "runtime_hint": "dotnet",
+      "transport": {
+        "type": "stdio"
+      },
+      "environment_variables": [
+        {
+          "name": "FORGE_AUTOCAD_TOKEN",
+          "description": "Required shared secret with the AutoCAD plugin named pipe.",
+          "is_required": true,
+          "is_secret": true
+        },
+        {
+          "name": "FORGE_PIPE_NAME",
+          "description": "Named pipe name (default 765T.Forge.AutoCAD).",
+          "is_required": false
+        },
+        {
+          "name": "AUTOCAD_2026_ROOT",
+          "description": "AutoCAD 2026 install root for AccoreConsole / HintPath.",
+          "is_required": false
+        }
+      ]
+    }
+  ]
+}

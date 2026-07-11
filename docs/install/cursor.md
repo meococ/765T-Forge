@@ -4,8 +4,8 @@ Connect Cursor to 765T-Forge over MCP stdio.
 
 ## Prerequisites
 
-1. Build `Forge.Server` (see [CONTRIBUTING.md](../CONTRIBUTING.md) or `scripts/build-server.ps1`).
-2. For live drawing tools: AutoCAD 2026 running with `Forge.Plugin` loaded (`NETLOAD`), then `MCP_STATUS`.
+1. Build or download `Forge.Server` (see [../getting-started.md](../getting-started.md) or `scripts/build-server.ps1`).
+2. For live drawing tools: AutoCAD 2026 running with `Forge.Plugin` loaded (`NETLOAD` / Autoloader), then `MCP_STATUS`.
 3. A **strong** shared token in the environment — **required**. Do not rely on any default secret.
 
 ## `mcp.json` example
@@ -30,7 +30,7 @@ Place this in your Cursor MCP config (user or project). Adjust the `command` pat
 }
 ```
 
-A checked-in template with placeholders lives at [examples/mcp.cursor.json](../examples/mcp.cursor.json).
+A checked-in template with placeholders lives at [examples/mcp.cursor.json](../../examples/mcp.cursor.json).
 
 ## Token requirement
 
@@ -43,10 +43,10 @@ Set the same token for AutoCAD (user or session environment) before `NETLOAD`, o
 
 ## Agent skill
 
-Point Cursor skills at [skills/765t-forge/SKILL.md](../skills/765t-forge/SKILL.md) so agents prefer typed tools, health checks, dry-run, and preflight when available.
+Point Cursor skills at [skills/765t-forge/SKILL.md](../../skills/765t-forge/SKILL.md) so agents prefer typed tools, health checks, dry-run, and preflight when available.
 
 ## Verify
 
 1. Restart Cursor MCP / reload servers.
 2. Call `forge_system_health`.
-3. If the pipe is down, see [troubleshooting.md](troubleshooting.md).
+3. If the pipe is down, see [../troubleshooting.md](../troubleshooting.md).

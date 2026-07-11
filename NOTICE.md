@@ -29,7 +29,7 @@ Early product planning referenced community AutoCAD MCP / plugin experiments for
 
 If you believe a specific file retains third-party copyrighted material that should be attributed differently, open a private report per [SECURITY.md](SECURITY.md).
 
-Historical planning notes (Vietnamese, aspirational — not the shipped tool list): [docs/history/build-brief.md](docs/history/build-brief.md).
+Historical planning notes (Vietnamese, aspirational — not the shipped tool list): [docs/archive/build-brief.md](docs/archive/build-brief.md).
 
 ## Third-party notices
 
