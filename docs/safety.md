@@ -54,7 +54,7 @@ Silent clobber is refused with a typed error code.
 
 ## Publish preflight
 
-`forge_qa_preflight` (and recipes that call it) can **block** publish when xrefs, required titleblock tags, unresolved `####` fields, or standards-pack rules fail. Pass `force=true` only with human approval.
+`forge_qa_preflight` (and recipes that call it) can **block** publish when xrefs, required titleblock tags, unresolved `####` fields, or standards-pack rules fail. Pass `force=true` only with human approval **and** `FORGE_ALLOW_FORCE_PUBLISH=true` on server + AutoCAD (default deny → `force_not_allowed`).
 
 ## Drawing number registry
 
@@ -78,3 +78,17 @@ Open-world executors that still queue AutoCAD commands expose `queued` / `comple
 ## Agent rules of thumb
 
 Prefer typed tools → health first → load registry/pack when available → inspect → dry-run → write → verify → preflight → publish. Never invent drawing numbers. Full agent guidance: [skills/765t-forge/SKILL.md](../skills/765t-forge/SKILL.md).
+
+## Attestation vs enforcement (read this)
+
+| Mechanism | Class | Meaning |
+|-----------|--------|---------|
+| `SafetyPolicy` denylist (pipe: server+plugin; Accore: server script scan) | **Enforced** | Known-bad open-world idioms blocked; not a complete CAD semantic firewall |
+| Registry drawing-number fail-closed (when loaded) | **Enforced** | |
+| Overwrite acknowledgement | **Enforced** | |
+| Preflight block | **Enforced until** `force=true` **and** `FORGE_ALLOW_FORCE_PUBLISH=true` | `force` is an **ops accept** — treat as human-only process, not agent convenience |
+| `forge_publish_ceremony_check` flags | **Attested** | Caller can lie; does not prove dry-run/preflight/human |
+| AccoreConsole exit code | **Not publish verification** | Never issue-set PDF SoT |
+| `verification.passed` / PublishReceipt | **Evidence-backed probe** | File/probe contract — not nested visual truth |
+
+Compromised or reckless agents with the pipe token are **out of scope** as a solved security problem (see [SECURITY.md](../SECURITY.md)). Forge reduces accident surface; it does not sandbox a hostile same-user agent. See [ADR 0004](adr/0004-attestation-vs-enforcement.md).

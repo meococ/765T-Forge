@@ -11,9 +11,11 @@
 | Gate | `forge_qa_preflight`, `forge_qa_plot_fingerprint`, `forge_qa_dependency_closure`, `forge_qa_dual_source`, `forge_qa_modal_trap`, `forge_qa_check_xrefs` |
 | Timeout | `forge_qa_readback_after_timeout`, `forge_audit_summarize` |
 | Xref pin | `forge_xref_closure`, `forge_xref_pin_save`, `forge_xref_pin_verify` |
-| Ceremony / CDE | `forge_publish_ceremony_check`, `forge_cde_gate_evaluate`, `forge_transmittal_seal` |
-| Publish | `forge_plot_to_pdf`, `forge_plot_publish` (receipt; DSD partial + plot fallback), `forge_recipe_issue_set` |
-| Batch | `forge_batch_run` (+ `resumeBatchId`), `forge_batch_status` |
+| Ceremony / CDE | `forge_publish_ceremony_check` (optional AuditId evidence), `forge_cde_gate_evaluate`, `forge_transmittal_seal` — **attested** flags, not human/CDE proof (ADR 0004) |
+| Publish | `forge_plot_to_pdf`, `forge_plot_publish` (receipt+AuditId; DSD partial + plot fallback; force needs `FORGE_ALLOW_FORCE_PUBLISH`), `forge_recipe_issue_set` |
+| Xref depth | `forge_xref_closure` / pin / `forge_qa_dependency_closure` (`maxDepth`, optional `failClosed`) |
+| Batch / Accore | `forge_batch_run` (+ `resumeBatchId`), `forge_batch_status`, `forge_run_script` (AccoreConsole; server-only safety — **not** PDF SoT) |
+| Pack | `forge_pack_and_go` |
 | Exec (last resort) | `forge_exec_command` / `_lisp` — check `completed`; `forge_exec_dotnet` dual-gated |
 
-Honest status: [docs/capability-matrix.md](../../docs/capability-matrix.md)
+Honest status: [docs/capability-matrix.md](../../../docs/capability-matrix.md)

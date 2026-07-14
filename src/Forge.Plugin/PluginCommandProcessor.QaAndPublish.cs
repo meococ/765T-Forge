@@ -752,6 +752,16 @@ public sealed partial class PluginCommandProcessor
 
         var preflight = BuildPreflightReport(args.RequiredTitleblockTags, args.TitleblockBlockName, args.ExpectedLayers);
         steps.Add(new { step = "preflight", preflight.Passed, preflight });
+
+        if (!ForcePublishGate.IsAllowed(args.Force, _environment.AllowForcePublish))
+        {
+            return ForgeResult.Failure(
+                command.Id,
+                ForcePublishGate.DenyCode,
+                ForcePublishGate.DenyMessage,
+                ForcePublishGate.DenySuggestion);
+        }
+
         if (!preflight.Passed && !args.Force)
         {
             return new ForgeResult
@@ -761,7 +771,7 @@ public sealed partial class PluginCommandProcessor
                 Error = new ForgeError(
                     "issue_set_preflight_failed",
                     "Issue-set recipe stopped: publish readiness gate failed.",
-                    "Fix QA findings or pass force=true."),
+                    "Fix QA findings or pass force=true with FORGE_ALLOW_FORCE_PUBLISH=true."),
                 Data = new { steps, preflight }
             };
         }
@@ -784,7 +794,8 @@ public sealed partial class PluginCommandProcessor
                 requirePreflight = false,
                 force = args.Force
             }),
-            DryRun = false
+            DryRun = false,
+            AuditId = command.AuditId
         });
         steps.Add(new { step = "publish", publish.Ok, publish.Data, publish.Error });
         if (!publish.Ok)

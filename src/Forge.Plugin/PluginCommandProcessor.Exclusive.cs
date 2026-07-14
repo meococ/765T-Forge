@@ -59,14 +59,15 @@ public sealed partial class PluginCommandProcessor
 
     private static ForgeResult QaDependencyClosure(ForgeCommand command)
     {
+        var args = Args<ClosureWalkArgs>(command);
+        var maxDepth = XrefClosureEval.ClampMaxDepth(args.MaxDepth);
+        var walked = WalkXrefClosure(maxDepth);
         var nodes = new List<DependencyNode>();
-        foreach (var xref in ReadXrefs())
+        foreach (var xref in walked)
         {
-            var type = xref.GetType();
-            var path = type.GetProperty("path")?.GetValue(xref)?.ToString();
-            if (!string.IsNullOrWhiteSpace(path))
+            if (!string.IsNullOrWhiteSpace(xref.Path))
             {
-                nodes.Add(DependencyClosure.FromPath(path, "xref"));
+                nodes.Add(DependencyClosure.FromPath(xref.Path, xref.Depth <= 1 ? "xref" : "xref_nested"));
             }
         }
 
@@ -81,8 +82,13 @@ public sealed partial class PluginCommandProcessor
             nodes.Add(DependencyClosure.FromPath(pack!.StbPath!, "plotstyle"));
         }
 
-        var findings = DependencyClosure.Evaluate(nodes);
-        var report = QaReport.FromFindings(ActiveDocumentPath(), findings, new { nodes });
+        var findings = DependencyClosure.Evaluate(nodes).ToList();
+        if (args.FailClosed)
+        {
+            findings.AddRange(XrefClosureEval.EvaluateFailClosed(walked));
+        }
+
+        var report = QaReport.FromFindings(ActiveDocumentPath(), findings, new { maxDepth, nodeCount = walked.Count, nodes });
         return ForgeResult.Success(command.Id, report, verification: new ForgeVerification
         {
             Attempted = true,
@@ -167,45 +173,56 @@ public sealed partial class PluginCommandProcessor
 
     private static ForgeResult XrefClosure(ForgeCommand command)
     {
-        var nodes = ReadXrefs().Select(xref =>
-        {
-            var type = xref.GetType();
-            return new
-            {
-                name = type.GetProperty("name")?.GetValue(xref)?.ToString(),
-                path = type.GetProperty("path")?.GetValue(xref)?.ToString(),
-                isUnloaded = Equals(type.GetProperty("isUnloaded")?.GetValue(xref), true),
-                isOverlay = Equals(type.GetProperty("isOverlay")?.GetValue(xref), true),
-                pathExists = Equals(type.GetProperty("pathExists")?.GetValue(xref), true),
-                status = type.GetProperty("status")?.GetValue(xref)?.ToString()
-            };
-        }).ToArray();
+        var args = Args<ClosureWalkArgs>(command);
+        var maxDepth = XrefClosureEval.ClampMaxDepth(args.MaxDepth);
+        var nodes = WalkXrefClosure(maxDepth);
+        var findings = args.FailClosed
+            ? XrefClosureEval.EvaluateFailClosed(nodes)
+            : Array.Empty<QaFinding>();
+        var truncated = nodes.Any(n => n.Depth >= maxDepth && n.WalkStatus == XrefWalkStatuses.Ok);
+        var unreadable = nodes.Where(n => n.WalkStatus is XrefWalkStatuses.Missing or XrefWalkStatuses.Unreadable or XrefWalkStatuses.Unloaded)
+            .Select(n => n.PinKey)
+            .ToArray();
 
         return ForgeResult.Success(command.Id, new
         {
             document = ActiveDocumentPath(),
-            nodeCount = nodes.Length,
+            maxDepth,
+            failClosed = args.FailClosed,
+            nodeCount = nodes.Count,
+            truncated,
+            unreadable,
             nodes,
-            note = "Flat host xref closure; nested DWG walk is best-effort via pathExists only."
+            findings,
+            note = "Nested DWG BFS depth report (default maxDepth=4). Not a complete nested SoT until multi-seat smoke; failClosed opt-in."
+        }, verification: new ForgeVerification
+        {
+            Attempted = true,
+            Passed = !args.FailClosed || findings.Count == 0,
+            Message = args.FailClosed && findings.Count > 0 ? "Nested xref incomplete (failClosed)." : "Xref closure depth report.",
+            ReadBack = nodes
         });
     }
 
     private static ForgeResult XrefPinSave(ForgeCommand command)
     {
+        var args = Args<ClosureWalkArgs>(command);
+        var maxDepth = XrefClosureEval.ClampMaxDepth(args.MaxDepth);
+        var walked = WalkXrefClosure(maxDepth);
         if (command.DryRun)
         {
-            return DryRun(command, new { nodeCount = ReadXrefs().Length });
+            return DryRun(command, new { nodeCount = walked.Count, maxDepth });
         }
 
         var pin = new XrefClosurePin
         {
             DocumentPath = ActiveDocumentPath(),
-            Nodes = ReadXrefs().Select(ToPinNode).ToList()
+            Nodes = walked.Select(XrefClosureEval.ToPinNode).ToList()
         };
         var path = XrefClosurePin.TrySave(pin);
         return path is null
             ? ForgeResult.Failure(command.Id, "xref_pin_save_failed", "Could not write xref pin artifact.")
-            : ForgeResult.Success(command.Id, new { pinPath = path, pin });
+            : ForgeResult.Success(command.Id, new { pinPath = path, maxDepth, pin });
     }
 
     private static ForgeResult XrefPinVerify(ForgeCommand command)
@@ -222,9 +239,15 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, "xref_pin_invalid", "Could not load pin JSON.");
         }
 
-        var current = ReadXrefs().Select(ToPinNode);
-        var findings = XrefClosurePin.Compare(current, pin);
-        var report = QaReport.FromFindings(ActiveDocumentPath(), findings, new { pin.PinId, args.PinPath });
+        var maxDepth = XrefClosureEval.ClampMaxDepth(args.MaxDepth);
+        var current = WalkXrefClosure(maxDepth).Select(XrefClosureEval.ToPinNode);
+        var findings = XrefClosurePin.Compare(current, pin).ToList();
+        if (args.FailClosed)
+        {
+            findings.AddRange(XrefClosureEval.EvaluateFailClosed(WalkXrefClosure(maxDepth)));
+        }
+
+        var report = QaReport.FromFindings(ActiveDocumentPath(), findings, new { pin.PinId, args.PinPath, maxDepth });
         return ForgeResult.Success(command.Id, report, verification: new ForgeVerification
         {
             Attempted = true,
@@ -234,41 +257,209 @@ public sealed partial class PluginCommandProcessor
         });
     }
 
+    private sealed record ClosureWalkArgs
+    {
+        public int? MaxDepth { get; init; }
+        public bool FailClosed { get; init; }
+    }
+
     private sealed record PinVerifyArgs
     {
         public string? PinPath { get; init; }
+        public int? MaxDepth { get; init; }
+        public bool FailClosed { get; init; }
     }
 
-    private static XrefPinNode ToPinNode(object xref)
+    /// <summary>
+    /// BFS host + nested DWG xref walk (side Database.ReadDwgFile). Depth 1 = host attachments.
+    /// </summary>
+    private static List<XrefClosureNode> WalkXrefClosure(int maxDepth)
     {
-        var type = xref.GetType();
-        var path = type.GetProperty("path")?.GetValue(xref)?.ToString() ?? "";
-        long? length = null;
-        DateTimeOffset? mtime = null;
-        string? hash = null;
+        maxDepth = XrefClosureEval.ClampMaxDepth(maxDepth);
+        var results = new List<XrefClosureNode>();
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var queue = new Queue<(string? ParentName, string Name, string Path, bool IsOverlay, bool IsUnloaded, string? Status, int Depth)>();
+
+        foreach (var xref in ReadXrefs())
+        {
+            var type = xref.GetType();
+            var name = type.GetProperty("name")?.GetValue(xref)?.ToString() ?? "";
+            var path = ResolveXrefFullPath(type.GetProperty("path")?.GetValue(xref)?.ToString());
+            var isUnloaded = Equals(type.GetProperty("isUnloaded")?.GetValue(xref), true);
+            var isOverlay = Equals(type.GetProperty("isOverlay")?.GetValue(xref), true);
+            var status = type.GetProperty("status")?.GetValue(xref)?.ToString();
+            queue.Enqueue((null, name, path, isOverlay, isUnloaded, status, 1));
+        }
+
+        while (queue.Count > 0)
+        {
+            var (parent, name, path, isOverlay, isUnloaded, status, depth) = queue.Dequeue();
+            var normKey = string.IsNullOrWhiteSpace(path) ? $"{parent}>{name}" : path;
+            if (!visited.Add(normKey))
+            {
+                results.Add(new XrefClosureNode
+                {
+                    Name = name,
+                    Path = path,
+                    Depth = depth,
+                    ParentName = parent,
+                    WalkStatus = XrefWalkStatuses.Cycle,
+                    IsOverlay = isOverlay,
+                    IsUnloaded = isUnloaded,
+                    Status = status
+                });
+                continue;
+            }
+
+            string walkStatus;
+            if (isUnloaded)
+            {
+                walkStatus = XrefWalkStatuses.Unloaded;
+            }
+            else if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                walkStatus = XrefWalkStatuses.Missing;
+            }
+            else
+            {
+                walkStatus = XrefWalkStatuses.Ok;
+            }
+
+            results.Add(new XrefClosureNode
+            {
+                Name = name,
+                Path = path,
+                Depth = depth,
+                ParentName = parent,
+                WalkStatus = walkStatus,
+                IsOverlay = isOverlay,
+                IsUnloaded = isUnloaded,
+                Status = status
+            });
+
+            if (walkStatus != XrefWalkStatuses.Ok || depth >= maxDepth)
+            {
+                continue;
+            }
+
+            if (!TryReadNestedXrefs(path, out var children, out _))
+            {
+                results[^1] = new XrefClosureNode
+                {
+                    Name = name,
+                    Path = path,
+                    Depth = depth,
+                    ParentName = parent,
+                    WalkStatus = XrefWalkStatuses.Unreadable,
+                    IsOverlay = isOverlay,
+                    IsUnloaded = isUnloaded,
+                    Status = status
+                };
+                continue;
+            }
+
+            foreach (var child in children)
+            {
+                queue.Enqueue((name, child.Name, child.Path, child.IsOverlay, child.IsUnloaded, child.Status, depth + 1));
+            }
+        }
+
+        return results;
+    }
+
+    private static string ResolveXrefFullPath(string? pathName)
+    {
+        if (string.IsNullOrWhiteSpace(pathName))
+        {
+            return "";
+        }
+
         try
         {
-            if (File.Exists(path))
+            if (Path.IsPathRooted(pathName))
             {
-                var info = new FileInfo(path);
-                length = info.Length;
-                mtime = info.LastWriteTimeUtc;
-                hash = DependencyClosure.TryHashFile(path);
+                return Path.GetFullPath(pathName);
             }
+
+            var host = ActiveDocumentPath();
+            if (string.IsNullOrWhiteSpace(host))
+            {
+                return pathName;
+            }
+
+            return Path.GetFullPath(Path.Combine(Path.GetDirectoryName(host)!, pathName));
         }
         catch
         {
-            // Best effort.
+            return pathName;
+        }
+    }
+
+    private sealed record NestedXrefRef(string Name, string Path, bool IsOverlay, bool IsUnloaded, string? Status);
+
+    private static bool TryReadNestedXrefs(string dwgPath, out List<NestedXrefRef> children, out string? error)
+    {
+        children = [];
+        error = null;
+        Database? db = null;
+        try
+        {
+            db = new Database(false, true);
+            db.ReadDwgFile(dwgPath, FileOpenMode.OpenForReadAndAllShare, true, null);
+            using var tr = db.TransactionManager.StartTransaction();
+            var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+            foreach (ObjectId id in blockTable)
+            {
+                var btr = (BlockTableRecord)tr.GetObject(id, OpenMode.ForRead);
+                if (!btr.IsFromExternalReference && !btr.IsFromOverlayReference)
+                {
+                    continue;
+                }
+
+                var resolved = ResolveXrefFullPathAgainst(btr.PathName, dwgPath);
+                children.Add(new NestedXrefRef(
+                    btr.Name,
+                    resolved,
+                    btr.IsFromOverlayReference,
+                    btr.IsUnloaded,
+                    btr.XrefStatus.ToString()));
+            }
+
+            tr.Commit();
+            return true;
+        }
+        catch (System.Exception ex)
+        {
+            error = ex.Message;
+            children = [];
+            return false;
+        }
+        finally
+        {
+            db?.Dispose();
+        }
+    }
+
+    private static string ResolveXrefFullPathAgainst(string? pathName, string parentDwgPath)
+    {
+        if (string.IsNullOrWhiteSpace(pathName))
+        {
+            return "";
         }
 
-        return new XrefPinNode
+        try
         {
-            Name = type.GetProperty("name")?.GetValue(xref)?.ToString() ?? "",
-            Path = path,
-            Length = length,
-            MtimeUtc = mtime,
-            ContentHash = hash
-        };
+            if (Path.IsPathRooted(pathName))
+            {
+                return Path.GetFullPath(pathName);
+            }
+
+            return Path.GetFullPath(Path.Combine(Path.GetDirectoryName(parentDwgPath)!, pathName));
+        }
+        catch
+        {
+            return pathName;
+        }
     }
 
     private static ForgeResult TransmittalSealCreate(ForgeCommand command)
@@ -281,12 +472,11 @@ public sealed partial class PluginCommandProcessor
             paths.Add(doc!);
         }
 
-        foreach (var xref in ReadXrefs())
+        foreach (var xref in WalkXrefClosure(XrefClosureEval.DefaultMaxDepth))
         {
-            var path = xref.GetType().GetProperty("path")?.GetValue(xref)?.ToString();
-            if (!string.IsNullOrWhiteSpace(path))
+            if (!string.IsNullOrWhiteSpace(xref.Path) && xref.WalkStatus == XrefWalkStatuses.Ok)
             {
-                paths.Add(path!);
+                paths.Add(xref.Path);
             }
         }
 
@@ -315,7 +505,7 @@ public sealed partial class PluginCommandProcessor
         public string? OutputDirectory { get; init; }
     }
 
-    private static ForgeResult PublishCeremonyCheck(ForgeCommand command)
+    private ForgeResult PublishCeremonyCheck(ForgeCommand command)
     {
         var args = Args<CeremonyArgs>(command);
         var budget = new BlastRadiusBudget
@@ -327,13 +517,19 @@ public sealed partial class PluginCommandProcessor
             DestructiveExecsUsed = args.DestructiveExecsUsed ?? 0,
             PathRewritesUsed = args.PathRewritesUsed ?? 0
         };
+        var evidence = CeremonyEvidence.Evaluate(
+            _environment.AuditDirectory,
+            args.DryRunAuditId,
+            args.PreflightAuditId,
+            args.ReceiptAuditId);
         var findings = PublishCeremony.Evaluate(
             args.DryRunDone,
             args.PreflightPassed,
             args.IssueAcknowledged,
             args.PublishedStatusAck,
             args.RequirePublishedAck,
-            budget);
+            budget,
+            evidence);
         var report = QaReport.FromFindings(ActiveDocumentPath(), findings, budget);
         return ForgeResult.Success(command.Id, report, verification: new ForgeVerification
         {
@@ -351,6 +547,9 @@ public sealed partial class PluginCommandProcessor
         public bool IssueAcknowledged { get; init; }
         public bool PublishedStatusAck { get; init; }
         public bool RequirePublishedAck { get; init; }
+        public string? DryRunAuditId { get; init; }
+        public string? PreflightAuditId { get; init; }
+        public string? ReceiptAuditId { get; init; }
         public int? MaxSheets { get; init; }
         public int? MaxDestructiveExecs { get; init; }
         public int? MaxPathRewrites { get; init; }

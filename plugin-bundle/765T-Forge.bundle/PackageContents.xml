@@ -5,7 +5,7 @@
   ProductType="Application"
   Name="765T-Forge"
   Description="765T-Forge AutoCAD MCP plugin (named pipe)"
-  AppVersion="0.2.0"
+  AppVersion="0.3.0"
   Author="765T"
   ProductCode="{A7C3E9F1-B765-4F0A-9E00-000000000001}"
   UpgradeCode="{A7C3E9F1-B765-4F0A-9E00-000000000000}">

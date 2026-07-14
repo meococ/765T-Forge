@@ -54,9 +54,27 @@ public sealed class ForgeToolRunner
             Args = command.Args
         }, cancellationToken).ConfigureAwait(false);
 
+        command = command with { AuditId = auditId };
+
         if (!decision.Allowed)
         {
             return ForgeResult.Failure(command.Id, decision.Code, decision.Message, decision.Suggestion, auditId);
+        }
+
+        // Defense-in-depth: refuse force before crossing the pipe when env disallows it.
+        if ((string.Equals(tool, "forge_plot_publish", StringComparison.OrdinalIgnoreCase)
+             || string.Equals(tool, "forge_recipe_issue_set", StringComparison.OrdinalIgnoreCase))
+            && command.Args.ValueKind == JsonValueKind.Object
+            && command.Args.TryGetProperty("force", out var forceEl)
+            && forceEl.ValueKind == JsonValueKind.True
+            && !_environment.AllowForcePublish)
+        {
+            return ForgeResult.Failure(
+                command.Id,
+                ForcePublishGate.DenyCode,
+                ForcePublishGate.DenyMessage,
+                ForcePublishGate.DenySuggestion,
+                auditId);
         }
 
         var result = tool.ToLowerInvariant() switch

@@ -53,7 +53,8 @@ public static class PublishCeremony
         bool issueAcknowledged,
         bool publishedStatusAck = false,
         bool requirePublishedAck = false,
-        BlastRadiusBudget? budget = null)
+        BlastRadiusBudget? budget = null,
+        IEnumerable<QaFinding>? evidenceFindings = null)
     {
         var findings = new List<QaFinding>();
         if (!dryRunDone)
@@ -61,7 +62,7 @@ public static class PublishCeremony
             findings.Add(new QaFinding(
                 "ceremony_dry_run_required",
                 "error",
-                "Publish ceremony requires a completed dry-run before issue.",
+                "Publish ceremony requires a completed dry-run before issue (attested unless dryRunAuditId binds evidence).",
                 SuggestedTool: "forge_plot_publish"));
         }
 
@@ -70,7 +71,7 @@ public static class PublishCeremony
             findings.Add(new QaFinding(
                 "ceremony_preflight_required",
                 "error",
-                "Publish ceremony requires a passing preflight (or explicit human force outside ceremony).",
+                "Publish ceremony requires a passing preflight (attested unless preflightAuditId binds evidence).",
                 SuggestedTool: "forge_qa_preflight"));
         }
 
@@ -79,7 +80,7 @@ public static class PublishCeremony
             findings.Add(new QaFinding(
                 "ceremony_issue_ack_required",
                 "error",
-                "Human issueAcknowledged=true is required for Issued/Published ceremony.",
+                "Human issueAcknowledged=true is required for Issued/Published ceremony (attested — not a security boundary).",
                 SuggestedTool: "forge_publish_ceremony_check"));
         }
 
@@ -95,6 +96,11 @@ public static class PublishCeremony
         if (budget is not null)
         {
             findings.AddRange(budget.Evaluate());
+        }
+
+        if (evidenceFindings is not null)
+        {
+            findings.AddRange(evidenceFindings);
         }
 
         return findings;

@@ -30,7 +30,7 @@ Automated helper: [`scripts/smoke-lab.ps1`](../scripts/smoke-lab.ps1) (Autoloade
 
 ```text
 Date: 2026-07-11
-Build/commit / Release tag: untagged in-tree 0.2.0 (post Wave 0–2)
+Build/commit / Release tag: historical pass — untagged in-tree 0.2.0 (post Wave 0–2); see “Pass 2026-07-11 (post 0.2.1 tree)” below for TP target
 Server zip SHA256: 548B05140466B27F9034AE5F8EABFC7D4CC1D1FF1A8019E5BEC45214BF43FC48
 Plugin zip SHA256: 7468EE43E99F4EB554B987D205EB48B274D6EB1831DC8E60BD21CBDFA23E2E58
 Operator: agent smoke-lab (local AutoCAD 2026 Education)
@@ -54,4 +54,21 @@ Notes:
 - Plugin: Release build succeeded with exclusive tools
 - Live DSD re-smoke: recommended after NETLOAD of new plugin (fallback path added)
 - Result: **READY TO TAG** when both zips attached to GitHub Release (draft until plugin zip present)
+
+## Seat checklist for DSD primary path (0.3.0 evidence)
+
+Use this before claiming dual-seat DSD PASS. Record two seats (A/B) with different AutoCAD installs if possible.
+
+| Check | Seat A | Seat B | Notes |
+|-------|--------|--------|-------|
+| Product | AutoCAD 2026 full (not LT) | | Education may differ from commercial Publisher |
+| `DWG To PDF.pc3` present | | | `forge_system_capabilities` |
+| Project CTB/STB paths resolve | | | pack v2 + `forge_qa_dependency_closure` |
+| Named media / page setups | | | Prefer sync page-setup apply |
+| `BACKGROUNDPLOT=0` / `BGCOREPUBLISH=0` during publish | | | Forge forces for publish window |
+| `Publisher.PublishDsd` produces PDF (`dsd=true`, `fallback=null`) | | | Matrix stays **partial** until ≥2 seats PASS |
+| Nested xref depth report | | | `forge_xref_closure` maxDepth=4; optional failClosed |
+| `FORGE_ALLOW_FORCE_PUBLISH` unset by default | | | force=true → `force_not_allowed` |
+
+**Do not** tag `v0.3.0` until both seats show DSD primary PASS in this table + CHANGELOG evidence.
 

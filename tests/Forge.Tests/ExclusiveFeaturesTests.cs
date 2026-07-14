@@ -9,7 +9,7 @@ public sealed class ExclusiveFeaturesTests
     {
         var fp = new PlotEnvironmentFingerprint
         {
-            ProductVersion = "0.2.1",
+            ProductVersion = "0.3.0",
             PstyleMode = 1,
             BackgroundPlot = 0,
             DeviceNames = ["DWG To PDF.pc3"]

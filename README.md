@@ -92,7 +92,7 @@ See [docs/safety.md](docs/safety.md) and [SECURITY.md](SECURITY.md).
 
 ## Versioning
 
-Product SemVer **0.2.1** ≠ roadmap phase ≠ MCP protocol. See [docs/versioning.md](docs/versioning.md).
+Product SemVer **0.3.0** (Unreleased) ≠ roadmap phase ≠ MCP protocol. Last tagged TP: **0.2.1**. See [docs/versioning.md](docs/versioning.md).
 
 ## License
 

@@ -4,10 +4,12 @@
 
 ## 1. Product SemVer (Git tags / CHANGELOG)
 
-- Format: `MAJOR.MINOR.PATCH` (example `0.1.0`, `0.2.0`)
+- Format: `MAJOR.MINOR.PATCH` (example `0.1.0`, `0.2.0`, current in-tree `0.3.0` Unreleased)
 - Source of truth: [CHANGELOG.md](../CHANGELOG.md) and Git tags `v*`
 - **0.1.x** — Phase 0 foundation + Wave 0 publish hygiene (preview)
 - **0.2.0** — Waves 1–2 (real DSD publish, preflight, campaign, capabilities) and Wave 3 packaging as available
+- **0.2.1** — Technical Preview: exclusive AEC gates, publish honesty / DSD→plot fallback, dual-zip + getting-started
+- **0.3.0** — Unreleased: force env gate, ceremony evidence IDs, nested xref depth report, DSD diagnostics (tag after dual-seat smoke)
 - Breaking MCP tool renames or envelope changes bump **MINOR** while major is `0`, or **MAJOR** after `1.0.0`
 
 ## 2. Phase (docs / brief)

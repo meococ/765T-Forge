@@ -136,7 +136,7 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_plot_to_pdf", new { outputPath, layout, device, paperSize, plotStyle, plotArea, orientation, scale, units, overwriteAcknowledged }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_plot_publish", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(ForgeResult))]
-    [Description("Publish layouts to PDF via DSD + Publisher.PublishDsd when possible; falls back to per-layout -PLOT if DSD yields no file. Returns PublishReceipt with PDF probe. Preflight gate unless force=true.")]
+    [Description("Publish layouts to PDF via DSD + Publisher.PublishDsd when possible; falls back to per-layout -PLOT if DSD yields no file. Returns PublishReceipt with PDF probe. Preflight gate unless force=true (requires FORGE_ALLOW_FORCE_PUBLISH=true).")]
     public static Task<ForgeResult> PlotPublish(
         ForgeToolRunner runner,
         string outputPath,
@@ -213,7 +213,7 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_issue_set_diff", new { currentReceiptPath, previousReceiptPath }, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_recipe_issue_set", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(ForgeResult))]
-    [Description("Orchestrate inspect→normalize→fill→preflight→publish for a metro issue set. Refuses publish when preflight fails unless force=true.")]
+    [Description("Orchestrate inspect→normalize→fill→preflight→publish for a metro issue set. Refuses publish when preflight fails unless force=true (requires FORGE_ALLOW_FORCE_PUBLISH=true).")]
     public static Task<ForgeResult> RecipeIssueSet(
         ForgeToolRunner runner,
         string outputPath,
@@ -297,9 +297,13 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_qa_plot_fingerprint", new { }, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_qa_dependency_closure", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(ForgeResult))]
-    [Description("Scan xref and pack plot-style dependencies for missing files before publish.")]
-    public static Task<ForgeResult> QaDependencyClosure(ForgeToolRunner runner, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_qa_dependency_closure", new { }, cancellationToken: cancellationToken);
+    [Description("Scan nested xref (depth report) and pack plot-style dependencies for missing files before publish. Optional failClosed.")]
+    public static Task<ForgeResult> QaDependencyClosure(
+        ForgeToolRunner runner,
+        int maxDepth = 4,
+        bool failClosed = false,
+        CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_qa_dependency_closure", new { maxDepth, failClosed }, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_qa_dual_source", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(ForgeResult))]
     [Description("Compare drawing-registry expected titleblock values against live attributes (dual-source truth).")]
@@ -312,19 +316,32 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_qa_modal_trap", new { }, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_xref_closure", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(ForgeResult))]
-    [Description("List host xref closure graph (flat) with path existence for issue-set freeze.")]
-    public static Task<ForgeResult> XrefClosure(ForgeToolRunner runner, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_xref_closure", new { }, cancellationToken: cancellationToken);
+    [Description("Nested xref BFS depth report (default maxDepth=4). failClosed=true fails verification when missing/unreadable/unloaded nodes exist.")]
+    public static Task<ForgeResult> XrefClosure(
+        ForgeToolRunner runner,
+        int maxDepth = 4,
+        bool failClosed = false,
+        CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_xref_closure", new { maxDepth, failClosed }, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_xref_pin_save", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(ForgeResult))]
-    [Description("Save an xref closure pin snapshot (path/length/hash) for later verify before publish.")]
-    public static Task<ForgeResult> XrefPinSave(ForgeToolRunner runner, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_xref_pin_save", new { }, dryRun, cancellationToken: cancellationToken);
+    [Description("Save an xref closure pin snapshot including nested nodes when readable (path/length/hash).")]
+    public static Task<ForgeResult> XrefPinSave(
+        ForgeToolRunner runner,
+        int maxDepth = 4,
+        bool dryRun = false,
+        CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_xref_pin_save", new { maxDepth }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_xref_pin_verify", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(ForgeResult))]
-    [Description("Compare current xref closure against a saved pin artifact.")]
-    public static Task<ForgeResult> XrefPinVerify(ForgeToolRunner runner, string pinPath, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_xref_pin_verify", new { pinPath }, cancellationToken: cancellationToken);
+    [Description("Compare current nested xref closure against a saved pin artifact.")]
+    public static Task<ForgeResult> XrefPinVerify(
+        ForgeToolRunner runner,
+        string pinPath,
+        int maxDepth = 4,
+        bool failClosed = false,
+        CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_xref_pin_verify", new { pinPath, maxDepth, failClosed }, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_transmittal_seal", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(ForgeResult))]
     [Description("Create a cryptographic transmittal seal over host DWG, xrefs, and optional PDF/receipt (SHA256 or HMAC).")]
@@ -339,7 +356,7 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_transmittal_seal", new { outputPdfPath, receiptId, hmacKey, outputDirectory }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_publish_ceremony_check", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(ForgeResult))]
-    [Description("Evaluate publish ceremony (dry-run, preflight, human issue ack) and blast-radius budgets.")]
+    [Description("Evaluate publish ceremony. Booleans are attested; optional dryRunAuditId/preflightAuditId/receiptAuditId are enforced against audit/receipt artifacts when supplied (ADR 0004).")]
     public static Task<ForgeResult> PublishCeremonyCheck(
         ForgeToolRunner runner,
         bool dryRunDone = false,
@@ -347,6 +364,9 @@ public sealed class ForgeMcpTools
         bool issueAcknowledged = false,
         bool publishedStatusAck = false,
         bool requirePublishedAck = false,
+        string? dryRunAuditId = null,
+        string? preflightAuditId = null,
+        string? receiptAuditId = null,
         int? maxSheets = null,
         int? sheetsUsed = null,
         int? maxDestructiveExecs = null,
@@ -361,6 +381,9 @@ public sealed class ForgeMcpTools
             issueAcknowledged,
             publishedStatusAck,
             requirePublishedAck,
+            dryRunAuditId,
+            preflightAuditId,
+            receiptAuditId,
             maxSheets,
             sheetsUsed,
             maxDestructiveExecs,

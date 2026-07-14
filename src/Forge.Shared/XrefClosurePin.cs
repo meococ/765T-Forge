@@ -6,6 +6,8 @@ public sealed class XrefPinNode
 {
     public string Name { get; init; } = "";
     public string Path { get; init; } = "";
+    public int Depth { get; init; } = 1;
+    public string? ParentName { get; init; }
     public long? Length { get; init; }
     public DateTimeOffset? MtimeUtc { get; init; }
     public string? ContentHash { get; init; }

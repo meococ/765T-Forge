@@ -43,6 +43,14 @@ We aim to acknowledge reports within **7 days** and to share a remediation plan 
 - Safety is evaluated on **both** server and plugin for named-pipe tools. Do not remove either side without a deliberate trust-model change.
 - **Exception:** `forge_run_script` / `forge_batch_run` run AccoreConsole on the server and are evaluated **server-side only** (see ADR 0002).
 
+### Attested gates (not a security boundary)
+
+`force=true` (also requires `FORGE_ALLOW_FORCE_PUBLISH=true`), `forge_publish_ceremony_check` booleans, and blast-radius counters are **not** authentication or human-presence proofs. Optional ceremony AuditIds (`dryRunAuditId` / `preflightAuditId` / `receiptAuditId`) are enforced when supplied. Do not describe attested booleans as security controls in advisories or customer assurances. See [ADR 0004](docs/adr/0004-attestation-vs-enforcement.md).
+
+### AccoreConsole
+
+Headless scripts are evaluated **server-side only**. Success is process-level (exit code). Do not equate AccoreConsole completion with desktop plot verification.
+
 ### Unsafe operations
 
 - `forge_exec_dotnet` is off by default. It requires **both** `FORGE_ENABLE_UNSAFE_OPS=true` and per-call `unsafeAcknowledged=true`.

@@ -5,7 +5,7 @@ Honest status of MCP tools. AutoCAD target: **2026**. Civil 3D, full SSM **write
 | Status | Meaning |
 |--------|---------|
 | **implemented** | Documented happy path works in current code |
-| **partial** | Present but limited (e.g. import still command-queued) |
+| **partial** | Present but limited (e.g. DSD publish seat-dependent; may fall back) |
 | **planned** | Not shipped |
 
 ## System
@@ -41,7 +41,7 @@ Honest status of MCP tools. AutoCAD target: **2026**. Civil 3D, full SSM **write
 | Tool | Status | Notes |
 |------|--------|-------|
 | `forge_plot_to_pdf` | implemented | Configurable device/paper/CTB·STB/area; overwrite ack; smoke-verified |
-| `forge_plot_publish` | partial | DSD + `Publisher.PublishDsd` + **PublishReceipt** + PDF probe + preflight gate; on DSD no-output / failure, **falls back** to per-layout `-PLOT` (`fallback=plot_to_pdf` in data); always require `verification.passed` |
+| `forge_plot_publish` | partial | DSD + `Publisher.PublishDsd` + **PublishReceipt** (stamps `AuditId`) + PDF probe + preflight gate; on DSD no-output / failure, **falls back** to per-layout `-PLOT` (`fallback=plot_to_pdf`; multi-layout `singlePdf` may be unmerged); forces `BACKGROUNDPLOT`/`BGCOREPUBLISH=0`; `force=true` requires `FORGE_ALLOW_FORCE_PUBLISH` |
 | `forge_qa_*` (verify/check/audit/readback) | implemented | |
 | `forge_qa_readback_after_timeout` | implemented | Timeout recovery protocol — never retry write blind |
 | `forge_qa_preflight` | implemented | QaReport + pack v2 + foreground plot + issue-set contract findings |
@@ -69,13 +69,13 @@ Honest status of MCP tools. AutoCAD target: **2026**. Civil 3D, full SSM **write
 | Tool | Status | Notes |
 |------|--------|-------|
 | `forge_qa_plot_fingerprint` | implemented | Plot env fingerprint + pack lock findings |
-| `forge_qa_dependency_closure` | implemented | Xref + pack CTB/STB existence |
+| `forge_qa_dependency_closure` | implemented | Nested xref depth walk + pack CTB/STB; optional `failClosed` |
 | `forge_qa_dual_source` | implemented | Registry vs live titleblock compare |
 | `forge_qa_modal_trap` | implemented | FILEDIA/EXPERT automation readiness |
-| `forge_xref_closure` | implemented | Flat host xref closure list |
-| `forge_xref_pin_save` / `_verify` | implemented | Issue-set xref pin snapshot |
+| `forge_xref_closure` | implemented | Nested BFS depth report (default maxDepth=4); not complete nested SoT |
+| `forge_xref_pin_save` / `_verify` | implemented | Pin includes nested nodes when readable |
 | `forge_transmittal_seal` | implemented | SHA256/HMAC seal over DWG+xref+PDF |
-| `forge_publish_ceremony_check` | implemented | Human ack + blast-radius budget |
+| `forge_publish_ceremony_check` | implemented | Attested flags + optional AuditId evidence binding (ADR 0004) |
 | `forge_cde_gate_evaluate` | implemented | ISO 19650-lite status/rev/naming + optional sidecar |
 
 ## Executors
@@ -95,4 +95,5 @@ Honest status of MCP tools. AutoCAD target: **2026**. Civil 3D, full SSM **write
 | Civil 3D / geometry megakit / remote multi-tenant MCP | Explicitly out of scope |
 | netDxf offline path | Optional later — not SoT for plot truth |
 | NuGet `McpServer` / registry | After Releases packaging — see docs/packaging-nuget.md |
-| MCP Resources / Prompts | implemented (`forge://…`, issue_set_runbook) |
+
+MCP Resources / Prompts (`forge://…`, `issue_set_runbook`) are **implemented** (not planned).

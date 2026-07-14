@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 765T-Forge is an **all-C# MCP (Model Context Protocol) stdio server that drives AutoCAD 2026** for **metro/AEC issue-set drawing production** (inspect → fix → fill → preflight gate → publish → verify). An AI agent calls MCP tools; the server forwards them to an in-process AutoCAD plugin, which executes the Autodesk `.NET`/ObjectARX API.
 
-**Product SemVer:** `0.2.1` (see `CHANGELOG.md`). Honest shipped surface: [`docs/capability-matrix.md`](docs/capability-matrix.md). Roadmap map: [`docs/roadmap.md`](docs/roadmap.md). Start here: [`docs/getting-started.md`](docs/getting-started.md).
+**Product SemVer:** `0.3.0` Unreleased (see `CHANGELOG.md`; last tagged TP `0.2.1`). Honest shipped surface: [`docs/capability-matrix.md`](docs/capability-matrix.md). Roadmap map: [`docs/roadmap.md`](docs/roadmap.md). Start here: [`docs/getting-started.md`](docs/getting-started.md).
 
 The Vietnamese build brief (`docs/archive/build-brief.md`) is the **aspirational catalog / historical decisions** (tool catalog §5, safety §6, phases §7). It is **not** the shipped capability list — prefer the capability matrix for what works today. Positioning: compete on **reliable publish + agent safety**, not geometry tool count.
 
@@ -61,7 +61,9 @@ Two sources of truth describe each tool and **both must be updated together**:
 1. `ForgeMcpTools.cs` — the `[McpServerTool(ReadOnly=…, Destructive=…, Idempotent=…, OpenWorld=…)]` attributes that the agent sees.
 2. `ToolMetadata.cs` → `ForgeToolRegistry` — the `ToolMetadata` (`ReadOnly`/`Destructive`/`Idempotent`/`RequiresBackup`/`RequiresAutoCad`/`Unsafe`) that `SafetyPolicy` and `PluginCommandProcessor` enforce.
 
-**Adding a tool = three edits:** register it in `ForgeMcpTools` (MCP method), add its `ToolMetadata` in `ForgeToolRegistry`, and add a `case` in the `PluginCommandProcessor.Process` switch. A tool missing from the registry defaults to `Destructive("…", "unknown")` (fail-safe). `ToolMetadataTests` guards MCP↔registry sync and hot-path registration. Also update `docs/capability-matrix.md`, skill, and CHANGELOG.
+**Adding a tool = three edits** (pipe-routed tools): register it in `ForgeMcpTools` (MCP method), add its `ToolMetadata` in `ForgeToolRegistry`, and add a `case` in the `PluginCommandProcessor.Process` switch. A tool missing from the registry defaults to `Destructive("…", "unknown")` (fail-safe). `ToolMetadataTests` guards MCP↔registry sync; `PluginDispatchSyncTests` guards plugin arms.
+
+**Server-only tools** (no plugin switch — handled in `ForgeToolRunner`): `forge_run_script`, `forge_batch_run`, `forge_batch_status`, `forge_system_tool_profile`, `forge_audit_summarize`, `forge_sheet_inventory_import`, `forge_issue_set_diff`. Also update `docs/capability-matrix.md`, skill/cheatsheet, and CHANGELOG.
 
 Tool naming convention: `forge_<group>_<action>` (e.g. `forge_layer_state_restore`, `forge_plot_publish`).
 
@@ -72,7 +74,7 @@ Tool naming convention: `forge_<group>_<action>` (e.g. `forge_layer_state_restor
 - **`forge_exec_dotnet` (Roslyn) is off by default** and needs **both** gates: env `FORGE_ENABLE_UNSAFE_OPS=true` *and* per-call `unsafeAcknowledged=true`. It has full assembly access and no sandbox — highest-risk path.
 - **Backups**: `BackupPlanner.TryBackup` copies the active DWG to `FORGE_BACKUP_DIR` before any non-dry-run write whose metadata has `RequiresBackup`.
 - **Dry-run**: writes accept `dryRun=true` and return what they *would* do without touching the drawing.
-- **Read-back verification**: write tools return a `ForgeVerification`; `forge_qa_*` tools formalize this. Publish can be blocked by `forge_qa_preflight` unless `force=true`.
+- **Read-back verification**: write tools return a `ForgeVerification`; `forge_qa_*` tools formalize this. Publish can be blocked by `forge_qa_preflight` unless `force=true` **and** `FORGE_ALLOW_FORCE_PUBLISH=true`.
 - **`forge_exec_command` / `forge_exec_lisp`:** prefer sync `Editor.Command` when possible; when a path still queues, results must expose `queued=true` / `completed=false` honestly — never treat `Ok=true` alone as command finished.
 
 ## Configuration (environment variables)
@@ -84,6 +86,7 @@ Both processes call `ForgeEnvironment.FromProcess()` independently; they must re
 - `FORGE_BACKUP_DIR`, `FORGE_AUDIT_DIR` (default under `%LOCALAPPDATA%\765T-Forge\`)
 - `AUTOCAD_2026_ROOT` (default `C:\Program Files\Autodesk\AutoCAD 2026`) — used for plugin HintPath + `accoreconsole.exe`
 - `FORGE_ENABLE_UNSAFE_OPS` (default `false`)
+- `FORGE_ALLOW_FORCE_PUBLISH` (default `false`) — required for `force=true` on `forge_plot_publish` / `forge_recipe_issue_set` (ops accept; ADR 0004)
 - `FORGE_PLUGIN_RESPONSE_TIMEOUT_SECONDS` (default `120`)
 
 ## Running against AutoCAD

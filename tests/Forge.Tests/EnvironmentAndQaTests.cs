@@ -46,9 +46,9 @@ public sealed class EnvironmentAndQaTests
     }
 
     [Fact]
-    public void ProductVersionIs021AndMoatToolsAreRegistered()
+    public void ProductVersionIs030AndMoatToolsAreRegistered()
     {
-        Assert.Equal("0.2.1", ForgeConstants.ProductVersion);
+        Assert.Equal("0.3.0", ForgeConstants.ProductVersion);
         var names = ForgeToolRegistry.All.Select(x => x.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
         Assert.Contains("forge_qa_preflight", names);
         Assert.Contains("forge_recipe_issue_set", names);

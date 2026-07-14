@@ -72,7 +72,7 @@ Assume the drawing may already have changed. Call QA/list tools before retrying.
 
 - `forge_plot_to_pdf` is **configurable** (device, paper, CTB/STB, area, orientation, scale). Unexpected paper usually means wrong args or missing `forge_system_capabilities` discovery — not a hardcoded Phase 0 path.
 - `forge_plot_publish` uses real DSD + `Publisher.PublishDsd` with optional preflight gate and overwrite acknowledgement. `Ok=true` with PDF verify means the publisher finished; if preflight fails, publish refuses unless `force=true`.
-- `forge_layout_page_setup_import` may still be **partial** (command-queued) — check [capability-matrix.md](capability-matrix.md). Prefer `forge_layout_page_setup_apply` for sync apply of an existing setup.
+- `forge_layout_page_setup_import` is **implemented** (prefers sync `PlotSettings` copy from template DWG/DWT). If the sync path cannot run, it may fall back to queued `-PSETUPIN` with `queued=true` / `completed=false` — check [capability-matrix.md](capability-matrix.md). Prefer `forge_layout_page_setup_apply` for sync apply of an existing setup.
 - Open-world `forge_exec_command` / `forge_exec_lisp`: if the result includes `queued=true` or `completed=false`, do **not** treat success as command finished — read back before chaining.
 
 ## Release artifacts incomplete

@@ -14,6 +14,8 @@ public sealed record ForgeEnvironment
         "audit");
     public string AutoCadRoot { get; init; } = DefaultAutoCadRoot();
     public bool EnableUnsafeOps { get; init; }
+    /// <summary>When false (default), <c>force=true</c> on publish/recipe is refused (<c>force_not_allowed</c>).</summary>
+    public bool AllowForcePublish { get; init; }
     public int PluginResponseTimeoutSeconds { get; init; } = 120;
     public bool UsingDevDefaultToken { get; init; }
 
@@ -58,6 +60,7 @@ public sealed record ForgeEnvironment
                 "audit")),
             AutoCadRoot = Get("AUTOCAD_2026_ROOT", DefaultAutoCadRoot()),
             EnableUnsafeOps = bool.TryParse(Environment.GetEnvironmentVariable("FORGE_ENABLE_UNSAFE_OPS"), out var unsafeOps) && unsafeOps,
+            AllowForcePublish = bool.TryParse(Environment.GetEnvironmentVariable("FORGE_ALLOW_FORCE_PUBLISH"), out var allowForce) && allowForce,
             PluginResponseTimeoutSeconds = int.TryParse(Environment.GetEnvironmentVariable("FORGE_PLUGIN_RESPONSE_TIMEOUT_SECONDS"), out var timeout)
                 ? Math.Clamp(timeout, 5, 3600)
                 : 120

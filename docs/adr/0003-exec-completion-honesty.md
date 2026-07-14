@@ -1,7 +1,8 @@
 # ADR 0003: Executor completion honesty
 
-- **Status:** Accepted
+- **Status:** Accepted (amended)
 - **Date:** 2026-07-11
+- **Amended:** 2026-07-14 (docs hygiene + red team Wave 2)
 
 ## Context
 
@@ -18,4 +19,6 @@
 
 - Some LISP/command strings that need interactive prompts still cannot be fully sync-verified.
 - Completion tokens / wait APIs may evolve; honesty flags are the minimum contract now.
-- Page-setup import remains `partial` until a sync Database API path replaces `-PSETUPIN` queueing.
+- Page-setup import prefers a sync Database/`PlotSettings` path; when it must still queue `-PSETUPIN`, results expose `queued=true` / `completed=false` (matrix: **implemented** with fallback honesty — not a forever-`partial` tool).
+- Dry-run on open-world / Accore paths must not be described as full behavioral simulation. Agents must re-read state before write; ceremony `dryRunDone` is **attested**, not proven (see ADR 0004).
+- `Ok=true` with `completed=false` / Accore exit 0 / DSD `fallback=plot_to_pdf` are distinct honesty signals — skills must branch on them, not collapse to “success.”

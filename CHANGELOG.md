@@ -10,9 +10,24 @@ See [docs/versioning.md](docs/versioning.md).
 
 ## [Unreleased]
 
+## [0.3.0] - Unreleased
+
 ### Added
 
-- (none yet)
+- `FORGE_ALLOW_FORCE_PUBLISH` (default false) — `force=true` on publish/recipe returns `force_not_allowed` unless enabled (ADR 0004)
+- `forge_publish_ceremony_check` optional evidence: `dryRunAuditId`, `preflightAuditId`, `receiptAuditId`
+- Nested xref BFS depth report on `forge_xref_closure` / pin / dependency_closure (`maxDepth` default 4, optional `failClosed`)
+- DSD publish seat checklist in [docs/smoke-lab.md](docs/smoke-lab.md)
+
+### Changed
+
+- `PublishReceipt.AuditId` stamped from command audit correlation
+- DSD publish forces `BGCOREPUBLISH=0` (with restore) and richer fallback diagnostics (`singlePdfUnmerged`, exception type, fallback reason)
+- Product SemVer **0.3.0** (Unreleased — do not tag until dual-seat DSD primary PASS)
+
+### Fixed
+
+- (none yet beyond honesty/trust hardening above)
 
 ## [0.2.1] - 2026-07-11
 

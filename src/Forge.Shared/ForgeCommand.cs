@@ -14,6 +14,9 @@ public sealed record ForgeCommand
 
     public string? AuthToken { get; init; }
 
+    /// <summary>Correlates pipe round-trip with audit JSONL / PublishReceipt.</summary>
+    public string? AuditId { get; init; }
+
     public ForgeCommand WithToken(string token) => this with { AuthToken = token };
 }
 

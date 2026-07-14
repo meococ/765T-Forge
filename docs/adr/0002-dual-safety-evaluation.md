@@ -23,3 +23,12 @@ The MCP server may run in an agent environment that is easier to compromise or m
 - Changing deny patterns requires tests in `SafetyPolicyTests` and docs in `docs/safety.md` / `SECURITY.md`.
 - Open-world `*` denylist is **scoped** to broad selection idioms (not every asterisk) so production AccoreConsole scripts remain usable.
 - SECURITY.md and skill docs must describe the AccoreConsole exception explicitly.
+
+## Amendment 2026-07-14 (red team) — AccoreConsole operational limits
+
+In addition to server-only evaluation:
+
+1. AccoreConsole **Ok** means process exit code 0 (and script passed denylist scan), **not** PDF/plot verification.
+2. Accore dry-run is a **plan** (paths / wouldRun), not a rehearsal of mutation or plot output.
+3. `forge_batch_run` uses `OpenWorld=false` on MCP args by design; safety depends on **per-script file scan** at execution — document this so agents do not assume job JSON is denylisted.
+4. Skill, cheatsheet, and `docs/safety.md` must name `forge_run_script` / `forge_batch_run` and the dual-eval exception; omission is a safety defect.

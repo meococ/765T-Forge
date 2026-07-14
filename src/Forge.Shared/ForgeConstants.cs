@@ -6,7 +6,7 @@ public static class ForgeConstants
     public const string ServerName = "765T-Forge";
 
     /// <summary>Product SemVer shipped in releases and CHANGELOG.</summary>
-    public const string ProductVersion = "0.2.1";
+    public const string ProductVersion = "0.3.0";
 
     /// <summary>Named-pipe / JSON envelope contract version.</summary>
     public const string EnvelopeVersion = "forge.envelope.v1";

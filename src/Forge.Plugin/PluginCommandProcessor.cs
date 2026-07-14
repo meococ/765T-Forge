@@ -50,6 +50,8 @@ public sealed partial class PluginCommandProcessor
             Args = command.Args
         });
 
+        command = command with { AuditId = auditId };
+
         if (!decision.Allowed)
         {
             return ForgeResult.Failure(command.Id, decision.Code, decision.Message, decision.Suggestion, auditId);
@@ -1050,12 +1052,21 @@ public sealed partial class PluginCommandProcessor
             });
     }
 
-    private static ForgeResult PlotPublish(ForgeCommand command)
+    private ForgeResult PlotPublish(ForgeCommand command)
     {
         var args = Args<PublishArgs>(command);
         if (string.IsNullOrWhiteSpace(args.OutputPath) || args.Layouts.Length == 0)
         {
             return ForgeResult.Failure(command.Id, "missing_publish_args", "outputPath and at least one layout are required.");
+        }
+
+        if (!ForcePublishGate.IsAllowed(args.Force, _environment.AllowForcePublish))
+        {
+            return ForgeResult.Failure(
+                command.Id,
+                ForcePublishGate.DenyCode,
+                ForcePublishGate.DenyMessage,
+                ForcePublishGate.DenySuggestion);
         }
 
         var outputPath = Path.GetFullPath(args.OutputPath!);
@@ -1074,7 +1085,9 @@ public sealed partial class PluginCommandProcessor
                 args.Layouts,
                 args.SinglePdf,
                 args.OverwriteAcknowledged,
-                sheetType = args.SinglePdf ? "MultiPdf" : "SinglePdf"
+                sheetType = args.SinglePdf ? "MultiPdf" : "SinglePdf",
+                force = args.Force,
+                allowForcePublish = _environment.AllowForcePublish
             });
         }
 
@@ -1100,7 +1113,7 @@ public sealed partial class PluginCommandProcessor
                     Error = new ForgeError(
                         "publish_preflight_failed",
                         "Publish readiness gate failed.",
-                        "Fix findings from forge_qa_preflight or pass force=true to override."),
+                        "Fix findings from forge_qa_preflight or pass force=true with FORGE_ALLOW_FORCE_PUBLISH=true."),
                     Data = preflightReport
                 };
             }
@@ -1108,14 +1121,29 @@ public sealed partial class PluginCommandProcessor
 
         var dsdPath = Path.Combine(Path.GetTempPath(), $"forge-publish-{command.Id}.dsd");
         var previousBgPlot = Application.GetSystemVariable("BACKGROUNDPLOT");
+        object? previousBgCore = null;
+        var bgCoreRestored = false;
         Application.SetSystemVariable("BACKGROUNDPLOT", 0);
+        try
+        {
+            previousBgCore = Application.GetSystemVariable("BGCOREPUBLISH");
+            Application.SetSystemVariable("BGCOREPUBLISH", 0);
+        }
+        catch
+        {
+            previousBgCore = null;
+        }
+
         var dsdFailed = false;
         string? dsdError = null;
+        string? dsdExceptionType = null;
+        var dsdWritten = false;
 
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
             WriteDsdFile(dsdPath, dwgPath!, outputPath, args.Layouts, args.SinglePdf);
+            dsdWritten = File.Exists(dsdPath);
             using var progress = new PlotProgressDialog(false, args.Layouts.Length, true);
             Application.Publisher.PublishDsd(dsdPath, progress);
         }
@@ -1123,10 +1151,24 @@ public sealed partial class PluginCommandProcessor
         {
             dsdFailed = true;
             dsdError = ex.Message;
+            dsdExceptionType = ex.GetType().FullName;
         }
         finally
         {
             Application.SetSystemVariable("BACKGROUNDPLOT", previousBgPlot);
+            if (previousBgCore is not null)
+            {
+                try
+                {
+                    Application.SetSystemVariable("BGCOREPUBLISH", previousBgCore);
+                    bgCoreRestored = true;
+                }
+                catch
+                {
+                    // Best-effort restore.
+                }
+            }
+
             try
             {
                 if (File.Exists(dsdPath))
@@ -1142,7 +1184,23 @@ public sealed partial class PluginCommandProcessor
 
         if (dsdFailed || !File.Exists(outputPath))
         {
-            var fallback = TryPublishViaPlotFallback(command, outputPath, args.Layouts, args.SinglePdf, preflightReport);
+            var fallbackReason = dsdFailed ? "dsd_exception" : "publish_no_output";
+            var fallback = TryPublishViaPlotFallback(
+                command,
+                outputPath,
+                args.Layouts,
+                args.SinglePdf,
+                preflightReport,
+                new
+                {
+                    fallbackReason,
+                    dsdFailed,
+                    dsdError,
+                    dsdExceptionType,
+                    dsdWritten,
+                    bgCorePublishForced = previousBgCore is not null,
+                    bgCoreRestored
+                });
             if (fallback is not null)
             {
                 return fallback;
@@ -1152,12 +1210,20 @@ public sealed partial class PluginCommandProcessor
                 command.Id,
                 dsdFailed ? "publish_failed" : "publish_no_output",
                 dsdFailed
-                    ? $"DSD publish failed: {dsdError}"
+                    ? $"DSD publish failed ({dsdExceptionType}): {dsdError}"
                     : $"Publisher finished but output was not found at {outputPath}, and plot fallback also failed.",
                 "Check plot log and that layouts contain plottable content.");
         }
 
-        return BuildPublishSuccess(command, dwgPath, outputPath, args, dsd: true, fallback: null, preflightReport);
+        return BuildPublishSuccess(
+            command,
+            dwgPath,
+            outputPath,
+            args,
+            dsd: true,
+            fallback: null,
+            preflightReport,
+            extraData: new { dsdWritten, bgCorePublishForced = previousBgCore is not null, bgCoreRestored });
     }
 
     private static ForgeResult? TryPublishViaPlotFallback(
@@ -1165,7 +1231,8 @@ public sealed partial class PluginCommandProcessor
         string outputPath,
         string[] layouts,
         bool singlePdf,
-        QaReport? preflightReport)
+        QaReport? preflightReport,
+        object? diagnostics = null)
     {
         var produced = new List<string>();
         var dir = Path.GetDirectoryName(outputPath)!;
@@ -1194,7 +1261,8 @@ public sealed partial class PluginCommandProcessor
             ? outputPath
             : produced[0];
 
-        if (singlePdf && layouts.Length > 1 && !File.Exists(outputPath) && produced.Count > 0)
+        var singlePdfUnmerged = singlePdf && layouts.Length > 1 && !File.Exists(outputPath) && produced.Count > 0;
+        if (singlePdfUnmerged)
         {
             primary = produced[0];
         }
@@ -1213,7 +1281,16 @@ public sealed partial class PluginCommandProcessor
             dsd: false,
             fallback: "plot_to_pdf",
             preflightReport: preflightReport,
-            extraData: new { producedFiles = produced.ToArray(), requestedSinglePdf = singlePdf });
+            extraData: new
+            {
+                producedFiles = produced.ToArray(),
+                requestedSinglePdf = singlePdf,
+                singlePdfUnmerged,
+                note = singlePdfUnmerged
+                    ? "singlePdf requested but DSD fallback cannot merge multi-layout into one PDF; primary is first layout only."
+                    : null,
+                diagnostics
+            });
     }
 
     private static string SanitizeFileToken(string value)
@@ -1345,6 +1422,16 @@ public sealed partial class PluginCommandProcessor
             probe = PdfProbeResult.Probe(outputPath, expectedPages: 1);
         }
 
+        var message = fallback is null
+            ? (probe.Passed ? "Publish + PDF probe passed." : "Publish wrote a file but PDF probe failed.")
+            : (probe.Passed
+                ? $"Publish via fallback '{fallback}' + PDF probe passed."
+                : $"Publish via fallback '{fallback}' wrote a file but PDF probe failed.");
+        if (fallback == "plot_to_pdf" && args.SinglePdf && args.Layouts.Length > 1)
+        {
+            message += " Warning: singlePdf+multi-layout fallback did not produce one merged PDF.";
+        }
+
         var receipt = new PublishReceipt
         {
             DocumentPath = dwgPath,
@@ -1354,15 +1441,12 @@ public sealed partial class PluginCommandProcessor
             DeviceName = "DWG To PDF.pc3",
             PreflightReportId = preflightReport?.Id ?? (args.RequirePreflight ? "preflight" : null),
             PreflightHash = preflightReport is null ? null : new PublishReceipt().ComputePreflightHash(preflightReport),
+            AuditId = command.AuditId,
             OutputBytes = new FileInfo(outputPath).Length,
             OutputMtimeUtc = File.GetLastWriteTimeUtc(outputPath),
             PdfProbe = probe,
             VerificationPassed = probe.Passed,
-            Message = fallback is null
-                ? (probe.Passed ? "Publish + PDF probe passed." : "Publish wrote a file but PDF probe failed.")
-                : (probe.Passed
-                    ? $"Publish via fallback '{fallback}' + PDF probe passed."
-                    : $"Publish via fallback '{fallback}' wrote a file but PDF probe failed.")
+            Message = message
         };
         receipt.ArtifactPath = PublishReceipt.TryWriteArtifact(receipt);
 

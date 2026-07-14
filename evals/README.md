@@ -1,4 +1,6 @@
-# Forge eval scenarios (Phase 4)
+# Forge eval scenarios (product 0.2.x — brief “Phase 4”)
+
+Phase labels are historical (build brief). Shipped truth: SemVer + [docs/capability-matrix.md](../docs/capability-matrix.md). Roadmap map: [docs/roadmap.md](../docs/roadmap.md).
 
 These scenarios are designed for MCP Inspector / agent dry-runs against a sample metro sheet DWG.
 Fixtures intentionally contain **metadata only** — no customer DWGs in-repo.
