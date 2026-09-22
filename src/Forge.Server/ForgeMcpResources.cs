@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json;
 using Forge.Shared;
+using ModelContextProtocol;
 using ModelContextProtocol.Server;
 
 namespace Forge.Server;
@@ -20,7 +21,9 @@ public sealed class ForgeMcpResources
     {
         if (!ToolProfiles.TryGet(name, out var tools))
         {
-            return JsonSerializer.Serialize(new { error = "unknown_profile", known = ToolProfiles.Names }, ForgeJson.Options);
+            throw new McpProtocolException(
+                $"Unknown profile '{name}'. Known: {string.Join(", ", ToolProfiles.Names)}.",
+                McpErrorCode.ResourceNotFound);
         }
 
         return JsonSerializer.Serialize(new { name, tools }, ForgeJson.Options);

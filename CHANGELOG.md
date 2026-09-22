@@ -21,7 +21,8 @@ See [docs/versioning.md](docs/versioning.md).
 
 ### Changed
 
-- MCP contract: `Ok=false` is `tools/call` `isError`, read from structured content or the JSON text (output schema stays off). Failed gates, probes, missing read-back, `updated=0`, and queued commands are not success. Backup path sits beside the payload. `forge_qa_preflight` and `forge_sheet_inventory_import` are not read-only. Server name `765T-Forge` with instructions. Task support is forbidden. Linework tools stay on the surface.
+- MCP P1: per-tool output schemas (`queued`, `completed`, `passed`, `verificationPassed` required where they apply). Overwrite tools advertise `destructiveHint=true`. `forge_system_version` reports `hostVersion`, `builtForYear`, `configuredAutoCadRoot`, and `hostMismatch`. Profiles are allowlists unless `FORGE_TOOL_PROFILE` is set at startup. Preflight checks every title block, fails when no tags are required, treats `layer_missing` as an error, and compares pack device/paper/CTB. Publish rejects unknown layouts. `singlePdf` dry-run labels match the flag. Typed setvar blocks security sysvars without changing the command denylist. Linework tools stay on the surface with their own schemas.
+- MCP contract: `Ok=false` is `tools/call` `isError`, read from structured content or the JSON text. Failed gates, probes, missing read-back, `updated=0`, and queued commands are not success. Backup path sits beside the payload. `forge_qa_preflight` and `forge_sheet_inventory_import` are not read-only. Server name `765T-Forge` with instructions. Task support is forbidden.
 - Roadmap SemVer reconciled with capability matrix (registry/packs/resources are 0.2.0 shipped, not 0.3.0 targets)
 - Removed `companion-skill/` stub; added `docs/README.md` + `AGENTS.md`
 - Maintainer smoke-lab pass recorded (2026-07-11) against live AutoCAD 2026; `scripts/smoke-lab.ps1` helper

@@ -356,31 +356,19 @@ public sealed partial class PluginCommandProcessor
             $"PSTYLEMODE={pstyleMode} (1=CTB color-dependent, 0=STB named).",
             "Confirm plot style type matches office CTB/STB standards."));
 
-        if (requiredTags is { Length: > 0 })
+        var callerHasTags = requiredTags is { Length: > 0 };
+        var packForTags = StandardsPackStore.Current;
+        var packHasTags = packForTags?.RequiredTitleblockTags.Count > 0;
+        if (TitleblockPreflight.MissingRequirements(callerHasTags, packHasTags) is { } missingRequirements)
         {
-            var attrs = FindBlockAttributes(titleblockBlockName, null, forWrite: false).ToArray();
-            foreach (var tag in requiredTags)
-            {
-                var match = attrs.FirstOrDefault(a => a.Tag.Equals(tag, StringComparison.OrdinalIgnoreCase));
-                if (match is null)
-                {
-                    findings.Add(new QaFinding(
-                        "titleblock_tag_missing",
-                        "error",
-                        $"Required titleblock tag '{tag}' was not found.",
-                        "Confirm block name / paper-space titleblock.",
-                        "forge_block_list_attributes"));
-                }
-                else if (string.IsNullOrWhiteSpace(match.Value) || match.Value.Contains("####", StringComparison.Ordinal))
-                {
-                    findings.Add(new QaFinding(
-                        "titleblock_tag_empty",
-                        "error",
-                        $"Titleblock tag '{tag}' is empty or unresolved ('{match.Value}').",
-                        "Fill via forge_block_set_attr or forge_block_campaign.",
-                        "forge_block_set_attr"));
-                }
-            }
+            findings.Add(missingRequirements);
+        }
+
+        if (callerHasTags)
+        {
+            var attrs = FindBlockAttributes(titleblockBlockName, null, forWrite: false)
+                .Select(attr => new TitleblockSample(attr.BlockHandle, attr.Tag, attr.Value));
+            findings.AddRange(TitleblockPreflight.Evaluate(attrs, requiredTags));
         }
 
         if (expectedLayers is { Length: > 0 })
@@ -397,7 +385,7 @@ public sealed partial class PluginCommandProcessor
                 {
                     findings.Add(new QaFinding(
                         "layer_missing",
-                        "warning",
+                        "error",
                         $"Expected layer '{layer}' is missing.",
                         SuggestedTool: "forge_qa_audit_layers"));
                 }
@@ -436,8 +424,27 @@ public sealed partial class PluginCommandProcessor
                 // Best effort.
             }
 
-            findings.AddRange(pack.EvaluatePlotBindings(null, null, null, bgPlot));
+            var plotSettings = ReadPaperLayoutPlotSettings().ToArray();
+            if (plotSettings.Length == 0)
+            {
+                findings.AddRange(pack.EvaluatePlotBindings(null, null, null, bgPlot));
+            }
+            else
+            {
+                for (var i = 0; i < plotSettings.Length; i++)
+                {
+                    var setting = plotSettings[i];
+                    findings.AddRange(pack.EvaluatePlotBindings(
+                        setting.Device,
+                        setting.Paper,
+                        setting.Style,
+                        i == 0 ? bgPlot : 0));
+                }
+            }
 
+            var packAttrs = FindBlockAttributes(titleblockBlockName, null, forWrite: false)
+                .Select(attr => new TitleblockSample(attr.BlockHandle, attr.Tag, attr.Value))
+                .ToArray();
             foreach (var tag in pack.RequiredTitleblockTags)
             {
                 if (requiredTags is { Length: > 0 } &&
@@ -446,17 +453,14 @@ public sealed partial class PluginCommandProcessor
                     continue;
                 }
 
-                var attrs = FindBlockAttributes(titleblockBlockName, null, forWrite: false).ToArray();
-                var match = attrs.FirstOrDefault(a => a.Tag.Equals(tag, StringComparison.OrdinalIgnoreCase));
-                if (match is null || string.IsNullOrWhiteSpace(match.Value) || match.Value.Contains("####", StringComparison.Ordinal))
+                findings.AddRange(TitleblockPreflight.Evaluate(packAttrs, [tag]).Select(finding => finding with
                 {
-                    findings.Add(new QaFinding(
-                        "pack_titleblock_required",
-                        "error",
-                        $"Standards pack '{pack.PackId}' requires titleblock tag '{tag}'.",
-                        "Fill via forge_block_campaign from the drawing registry.",
-                        "forge_block_set_attr"));
-                }
+                    Code = finding.Code == "titleblock_tag_missing" || finding.Code == "titleblock_tag_empty"
+                        ? "pack_titleblock_required"
+                        : finding.Code,
+                    Message = $"Standards pack '{pack.PackId}' requires titleblock tag '{tag}'. {finding.Message}",
+                    SuggestedTool = "forge_block_set_attr"
+                }));
             }
         }
         else
@@ -496,6 +500,30 @@ public sealed partial class PluginCommandProcessor
             contractId = contract?.ContractId,
             registryProjectId = DrawingRegistryStore.Current?.ProjectId
         });
+    }
+
+    private readonly record struct LayoutPlotSetting(string Layout, string? Device, string? Paper, string? Style);
+
+    private static IEnumerable<LayoutPlotSetting> ReadPaperLayoutPlotSettings()
+    {
+        using var tr = ActiveDb.TransactionManager.StartTransaction();
+        var dict = (DBDictionary)tr.GetObject(ActiveDb.LayoutDictionaryId, OpenMode.ForRead);
+        foreach (DBDictionaryEntry entry in dict)
+        {
+            var layout = (Layout)tr.GetObject(entry.Value, OpenMode.ForRead);
+            if (layout.ModelType)
+            {
+                continue;
+            }
+
+            yield return new LayoutPlotSetting(
+                layout.LayoutName,
+                layout.PlotConfigurationName,
+                layout.CanonicalMediaName,
+                layout.CurrentStyleSheet);
+        }
+
+        tr.Commit();
     }
 
     private static string[] ListLayoutNames()
@@ -584,16 +612,10 @@ public sealed partial class PluginCommandProcessor
 
         foreach (var entry in args.Entries)
         {
-            if (!string.IsNullOrWhiteSpace(entry.Layout))
+            if (!string.IsNullOrWhiteSpace(entry.Layout) &&
+                !ListLayoutNames().Any(name => name.Equals(entry.Layout, StringComparison.OrdinalIgnoreCase)))
             {
-                try
-                {
-                    LayoutManager.Current.CurrentLayout = entry.Layout;
-                }
-                catch (Autodesk.AutoCAD.Runtime.Exception)
-                {
-                    return ForgeResult.Failure(command.Id, "layout_not_found", $"Layout not found: {entry.Layout}");
-                }
+                return ForgeResult.Failure(command.Id, "layout_not_found", $"Layout not found: {entry.Layout}");
             }
 
             if (string.IsNullOrWhiteSpace(entry.Handle) && string.IsNullOrWhiteSpace(entry.BlockName))
@@ -626,6 +648,18 @@ public sealed partial class PluginCommandProcessor
                 if (command.DryRun)
                 {
                     continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(entry.Layout))
+                {
+                    try
+                    {
+                        LayoutManager.Current.CurrentLayout = entry.Layout;
+                    }
+                    catch (Autodesk.AutoCAD.Runtime.Exception)
+                    {
+                        return ForgeResult.Failure(command.Id, "layout_not_found", $"Layout not found: {entry.Layout}");
+                    }
                 }
 
                 var setCommand = new ForgeCommand
@@ -690,6 +724,24 @@ public sealed partial class PluginCommandProcessor
         }
 
         var steps = new List<object>();
+        var preflight = BuildPreflightReport(args.RequiredTitleblockTags, args.TitleblockBlockName, args.ExpectedLayers);
+        var preflightBypassed = !preflight.Passed && args.Force;
+        steps.Add(new { step = "preflight", preflight.Passed, preflight, preflightBypassed });
+        if (!preflight.Passed && !args.Force)
+        {
+            return new ForgeResult
+            {
+                Id = command.Id,
+                Ok = false,
+                Error = new ForgeError(
+                    "issue_set_preflight_failed",
+                    "Issue-set recipe stopped before changing the drawing: publish readiness gate failed.",
+                    "Fix the preflight findings before publish."),
+                Data = new { steps, preflight, drawingMutated = false }
+            };
+        }
+
+        var drawingMutated = false;
 
         if (args.NormalizeXrefs)
         {
@@ -701,9 +753,10 @@ public sealed partial class PluginCommandProcessor
                 DryRun = command.DryRun
             });
             steps.Add(new { step = "normalize_xrefs", normalize.Ok, normalize.Data, normalize.Error });
+            drawingMutated |= !command.DryRun;
             if (!normalize.Ok)
             {
-                return normalize;
+                return normalize with { Data = new { steps, preflight, drawingMutated, step = normalize.Data } };
             }
         }
 
@@ -717,9 +770,10 @@ public sealed partial class PluginCommandProcessor
                 DryRun = command.DryRun
             });
             steps.Add(new { step = "layer_state", restore.Ok, restore.Data, restore.Error });
+            drawingMutated |= !command.DryRun;
             if (!restore.Ok)
             {
-                return restore;
+                return restore with { Data = new { steps, preflight, drawingMutated, step = restore.Data } };
             }
         }
 
@@ -733,27 +787,11 @@ public sealed partial class PluginCommandProcessor
                 DryRun = command.DryRun
             });
             steps.Add(new { step = "titleblock_campaign", campaign.Ok, campaign.Data, campaign.Error });
+            drawingMutated |= !command.DryRun;
             if (!campaign.Ok)
             {
-                return campaign;
+                return campaign with { Data = new { steps, preflight, drawingMutated, step = campaign.Data } };
             }
-        }
-
-        var preflight = BuildPreflightReport(args.RequiredTitleblockTags, args.TitleblockBlockName, args.ExpectedLayers);
-        var preflightBypassed = !preflight.Passed && args.Force;
-        steps.Add(new { step = "preflight", preflight.Passed, preflight, preflightBypassed });
-        if (!preflight.Passed && !args.Force)
-        {
-            return new ForgeResult
-            {
-                Id = command.Id,
-                Ok = false,
-                Error = new ForgeError(
-                    "issue_set_preflight_failed",
-                    "Issue-set recipe stopped: publish readiness gate failed.",
-                    "Fix the preflight findings before publish."),
-                Data = new { steps, preflight }
-            };
         }
 
         if (command.DryRun)
@@ -766,10 +804,10 @@ public sealed partial class PluginCommandProcessor
                     "preflight_forced",
                     "Dry-run stopped: preflight did not pass.",
                     "Fix the preflight findings. This plan is not a passed issue set.",
-                    new { dryRun = true, steps, wouldPublish = args.OutputPath, layouts = args.Layouts, preflight, preflightBypassed = true });
+                    new { dryRun = true, steps, wouldPublish = args.OutputPath, layouts = args.Layouts, preflight, preflightBypassed = true, drawingMutated = false });
             }
 
-            return DryRun(command, new { steps, wouldPublish = args.OutputPath, args.Layouts });
+            return DryRun(command, new { steps, wouldPublish = args.OutputPath, args.Layouts, drawingMutated = false });
         }
 
         var publish = PlotPublish(new ForgeCommand
@@ -790,7 +828,7 @@ public sealed partial class PluginCommandProcessor
         steps.Add(new { step = "publish", publish.Ok, publish.Data, publish.Error });
         if (!publish.Ok)
         {
-            return publish with { Data = new { steps, publish = publish.Data, preflight, preflightBypassed } };
+            return publish with { Data = new { steps, publish = publish.Data, preflight, preflightBypassed, drawingMutated = true } };
         }
 
         if (preflightBypassed)
@@ -801,13 +839,13 @@ public sealed partial class PluginCommandProcessor
                 "preflight_forced",
                 "The issue set was written, but preflight did not pass.",
                 "Fix the preflight findings. This result is not a passed issue set.",
-                new { steps, publish = publish.Data, preflight, preflightBypassed = true },
+                new { steps, publish = publish.Data, preflight, preflightBypassed = true, drawingMutated = true },
                 publish.Verification);
         }
 
         return ForgeResult.Success(
             command.Id,
-            new { steps, publish = publish.Data, preflight, preflightBypassed = false },
+            new { steps, publish = publish.Data, preflight, preflightBypassed = false, drawingMutated = true },
             verification: publish.Verification);
     }
 

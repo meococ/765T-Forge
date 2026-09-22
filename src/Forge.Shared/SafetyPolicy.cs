@@ -47,7 +47,7 @@ public sealed class SafetyPolicy
             return SafetyDecision.Deny(
                 "unsafe_not_acknowledged",
                 $"{command.Tool} is disabled unless unsafe operations are explicitly acknowledged.",
-                "Set enable_unsafe_ops in config and pass unsafeAcknowledged=true only for trusted snippets.");
+                "Set FORGE_ENABLE_UNSAFE_OPS=true on both the server and the plugin, and pass unsafeAcknowledged=true on every call. There is no enable_unsafe_ops config key.");
         }
 
         if (metadata.ReadOnly)
@@ -78,7 +78,7 @@ public sealed class SafetyPolicy
 
         if (Purge.IsMatch(text))
         {
-            return SafetyDecision.Deny("deny_purge", "Blocked PURGE through generic execution.", "Use a typed purge/audit tool with backup and dry-run.");
+            return SafetyDecision.Deny("deny_purge", "Blocked PURGE through generic execution.", "There is no purge tool. Stop. Do not switch to forge_exec_command, forge_exec_lisp, forge_run_script, or forge_exec_dotnet.");
         }
 
         if (Overkill.IsMatch(text))

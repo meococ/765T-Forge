@@ -23,8 +23,8 @@ public static class DsdWriter
         sb.AppendLine("[DWF6MinorVersion]");
         sb.AppendLine("MinorVer=1");
         sb.AppendLine("[Target]");
-        // Type 6 = multi-sheet PDF; Type 7 = single-sheet PDF per layout (AutoCAD DSD convention).
-        sb.AppendLine(singlePdf ? "Type=6" : "Type=7");
+        // Type 6 = one multi-sheet PDF; Type 7 = one PDF per layout (AutoCAD DSD convention).
+        sb.AppendLine($"Type={TypeCode(singlePdf)}");
         sb.AppendLine($"Path={outputPath}");
         sb.AppendLine("PWD=");
         sb.AppendLine("[SheetSet]");
@@ -46,6 +46,13 @@ public static class DsdWriter
 
         return sb.ToString();
     }
+
+    public static int TypeCode(bool singlePdf) => singlePdf ? 6 : 7;
+
+    /// <summary>
+    /// Label that matches the <paramref name="singlePdf"/> flag. Dry-run must echo this, not the inverted MultiPdf/SinglePdf pair.
+    /// </summary>
+    public static string SheetTypeLabel(bool singlePdf) => singlePdf ? "SinglePdf" : "MultiPdf";
 
     public static void WriteFile(string dsdPath, string dwgPath, string outputPath, IReadOnlyList<string> layouts, bool singlePdf)
     {

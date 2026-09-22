@@ -56,7 +56,7 @@ public sealed class StandardsPack
             {
                 findings.Add(new QaFinding(
                     "pack_layer_missing",
-                    "warning",
+                    "error",
                     $"Standards pack '{PackId}' expected layer '{layer}'.",
                     SuggestedTool: "forge_qa_audit_layers"));
             }
@@ -98,40 +98,46 @@ public sealed class StandardsPack
         }
 
         if (!string.IsNullOrWhiteSpace(PlotDevice)
-            && !string.IsNullOrWhiteSpace(deviceName)
-            && !PlotDevice.Equals(deviceName, StringComparison.OrdinalIgnoreCase))
+            && (string.IsNullOrWhiteSpace(deviceName)
+                || !PlotDevice.Equals(deviceName, StringComparison.OrdinalIgnoreCase)))
         {
             findings.Add(new QaFinding(
                 "pack_plot_device_mismatch",
                 "error",
-                $"Pack expects plot device '{PlotDevice}' but got '{deviceName}'.",
+                string.IsNullOrWhiteSpace(deviceName)
+                    ? $"Pack expects plot device '{PlotDevice}' but the layout device was not supplied."
+                    : $"Pack expects plot device '{PlotDevice}' but got '{deviceName}'.",
                 "Use forge_system_capabilities and pass the pack device.",
                 "forge_system_capabilities"));
         }
 
         if (!string.IsNullOrWhiteSpace(PaperSize)
-            && !string.IsNullOrWhiteSpace(paperSize)
-            && !PaperSize.Equals(paperSize, StringComparison.OrdinalIgnoreCase))
+            && (string.IsNullOrWhiteSpace(paperSize)
+                || !PaperSize.Equals(paperSize, StringComparison.OrdinalIgnoreCase)))
         {
             findings.Add(new QaFinding(
                 "pack_paper_mismatch",
                 "error",
-                $"Pack expects paper '{PaperSize}' but got '{paperSize}'.",
+                string.IsNullOrWhiteSpace(paperSize)
+                    ? $"Pack expects paper '{PaperSize}' but the layout paper was not supplied."
+                    : $"Pack expects paper '{PaperSize}' but got '{paperSize}'.",
                 SuggestedTool: "forge_system_capabilities"));
         }
 
         var expectedStyle = CtbPath ?? StbPath;
         if (!string.IsNullOrWhiteSpace(expectedStyle)
-            && !string.IsNullOrWhiteSpace(plotStylePath)
-            && !string.Equals(
-                Path.GetFileName(expectedStyle),
-                Path.GetFileName(plotStylePath),
-                StringComparison.OrdinalIgnoreCase))
+            && (string.IsNullOrWhiteSpace(plotStylePath)
+                || !string.Equals(
+                    Path.GetFileName(expectedStyle),
+                    Path.GetFileName(plotStylePath),
+                    StringComparison.OrdinalIgnoreCase)))
         {
             findings.Add(new QaFinding(
                 "pack_plot_style_mismatch",
                 "error",
-                $"Pack expects plot style '{Path.GetFileName(expectedStyle)}' but got '{Path.GetFileName(plotStylePath)}'.",
+                string.IsNullOrWhiteSpace(plotStylePath)
+                    ? $"Pack expects plot style '{Path.GetFileName(expectedStyle)}' but the layout style was not supplied."
+                    : $"Pack expects plot style '{Path.GetFileName(expectedStyle)}' but got '{Path.GetFileName(plotStylePath)}'.",
                 SuggestedTool: "forge_plot_to_pdf"));
         }
 

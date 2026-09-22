@@ -2,6 +2,8 @@ using System.Text.Json;
 
 namespace Forge.Shared;
 
+public readonly record struct AuditWrite(string AuditId, bool Written);
+
 public sealed record AuditRecord
 {
     public string AuditId { get; init; } = Guid.NewGuid().ToString("N");
@@ -29,36 +31,32 @@ public sealed class FileAuditSink
         Directory.CreateDirectory(_directory);
     }
 
-    public string WriteBestEffort(AuditRecord record)
+    public AuditWrite WriteBestEffort(AuditRecord record)
     {
         try
         {
             WriteCore(record);
+            return new AuditWrite(record.AuditId, true);
         }
         catch (Exception ex)
         {
-            // Audit must never abort a CAD operation. The caller still receives
-            // the generated audit id so the command path stays correlated.
             ReportAuditFailure(record, ex);
+            return new AuditWrite(record.AuditId, false);
         }
-
-        return record.AuditId;
     }
 
-    public async Task<string> WriteAsync(AuditRecord record, CancellationToken cancellationToken = default)
+    public async Task<AuditWrite> WriteAsync(AuditRecord record, CancellationToken cancellationToken = default)
     {
         try
         {
             await Task.Run(() => WriteCore(record), cancellationToken).ConfigureAwait(false);
+            return new AuditWrite(record.AuditId, true);
         }
         catch (Exception ex)
         {
-            // Same guarantee as the synchronous path: logging failures should not
-            // become drawing failures.
             ReportAuditFailure(record, ex);
+            return new AuditWrite(record.AuditId, false);
         }
-
-        return record.AuditId;
     }
 
     private void WriteCore(AuditRecord record)

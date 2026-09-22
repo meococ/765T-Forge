@@ -49,6 +49,23 @@ builder.Services
             var result = await next(request, cancellationToken).ConfigureAwait(false);
             return ForgeCallToolResults.MarkBusinessFailure(result);
         });
+        filters.AddListToolsFilter(next => async (request, cancellationToken) =>
+        {
+            var result = await next(request, cancellationToken).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(environment.ToolProfile) || result.Tools is null)
+            {
+                return result;
+            }
+
+            if (!ToolProfiles.TryGet(environment.ToolProfile, out var allow))
+            {
+                return result;
+            }
+
+            var allowed = new HashSet<string>(allow, StringComparer.OrdinalIgnoreCase);
+            result.Tools = result.Tools.Where(tool => allowed.Contains(tool.Name)).ToList();
+            return result;
+        });
     });
 
 await builder.Build().RunAsync().ConfigureAwait(false);

@@ -1,6 +1,9 @@
 namespace Forge.Shared;
 
-/// <summary>Named tool profiles to reduce agent tool-selection noise.</summary>
+/// <summary>
+/// Named allowlists. They do not remove tools from tools/list unless the server
+/// was started with FORGE_TOOL_PROFILE.
+/// </summary>
 public static class ToolProfiles
 {
     private static readonly Dictionary<string, string[]> Profiles = new(StringComparer.OrdinalIgnoreCase)
@@ -21,6 +24,10 @@ public static class ToolProfiles
         [
             "forge_system_health",
             "forge_system_capabilities",
+            "forge_doc_list_layouts",
+            "forge_registry_lookup",
+            "forge_xref_list",
+            "forge_block_campaign",
             "forge_qa_preflight",
             "forge_issue_set_validate",
             "forge_plot_to_pdf",

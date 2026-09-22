@@ -19,6 +19,7 @@ public sealed class ForgePipeClient
 
     public async Task<ForgeResult> SendAsync(ForgeCommand command, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var authenticated = command.WithToken(_environment.Token);
         await using var pipe = new NamedPipeClientStream(
             ".",

@@ -17,14 +17,23 @@ public sealed class HeadlessAccoreConsoleRunner
         _safetyPolicy = safetyPolicy;
     }
 
-    public async Task<ForgeResult> RunScriptAsync(ForgeCommand command, CancellationToken cancellationToken = default)
+    public async Task<ForgeResult> RunScriptAsync(
+        ForgeCommand command,
+        CancellationToken cancellationToken = default,
+        Action<float, float?, string?>? reportProgress = null)
     {
         var args = ForgeJson.FromElement<RunScriptArgs>(command.Args) ?? new RunScriptArgs();
-        return await RunOneAsync(command.Id, args.DwgPath, args.ScriptPath, args.TimeoutSeconds, command.DryRun, cancellationToken)
+        reportProgress?.Invoke(0, 1, "Script scan starting.");
+        var result = await RunOneAsync(command.Id, args.DwgPath, args.ScriptPath, args.TimeoutSeconds, command.DryRun, cancellationToken)
             .ConfigureAwait(false);
+        reportProgress?.Invoke(1, 1, result.Ok ? "Script process finished." : "Script process returned an error.");
+        return result;
     }
 
-    public async Task<ForgeResult> RunBatchAsync(ForgeCommand command, CancellationToken cancellationToken = default)
+    public async Task<ForgeResult> RunBatchAsync(
+        ForgeCommand command,
+        CancellationToken cancellationToken = default,
+        Action<float, float?, string?>? reportProgress = null)
     {
         var args = ForgeJson.FromElement<BatchArgs>(command.Args) ?? new BatchArgs();
         BatchResumeState state;
@@ -118,15 +127,20 @@ public sealed class HeadlessAccoreConsoleRunner
 
         var results = new List<object>();
         var failures = 0;
+        var total = state.Jobs.Count;
+        var index = 0;
         foreach (var job in state.Jobs)
         {
+            index++;
             if (job.Status == "ok")
             {
                 results.Add(new { job.DwgPath, job.ScriptPath, Ok = true, skipped = true, status = job.Status });
+                reportProgress?.Invoke(index, total, $"Skipped completed job {index} of {total}.");
                 continue;
             }
 
             cancellationToken.ThrowIfCancellationRequested();
+            reportProgress?.Invoke(index - 1, total, $"Starting job {index} of {total}.");
             job.Status = "running";
             state.Save();
             var one = await RunOneAsync(command.Id, job.DwgPath, job.ScriptPath, null, dryRun: false, cancellationToken)
@@ -145,6 +159,7 @@ public sealed class HeadlessAccoreConsoleRunner
             }
 
             state.Save();
+            reportProgress?.Invoke(index, total, $"Finished job {index} of {total}.");
             results.Add(new
             {
                 job.DwgPath,
@@ -166,6 +181,7 @@ public sealed class HeadlessAccoreConsoleRunner
             {
                 batchId = state.BatchId,
                 artifactPath = state.ArtifactPath,
+                jobCount = results.Count,
                 completed = results.Count,
                 failures,
                 results
@@ -182,6 +198,7 @@ public sealed class HeadlessAccoreConsoleRunner
                 {
                     batchId = state.BatchId,
                     artifactPath = state.ArtifactPath,
+                    jobCount = results.Count,
                     completed = results.Count,
                     failures,
                     results
@@ -212,6 +229,7 @@ public sealed class HeadlessAccoreConsoleRunner
             return ForgeResult.Failure(commandId, "script_not_found", $"Script file not found: {scriptPath}");
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         var scriptText = await File.ReadAllTextAsync(scriptPath, cancellationToken).ConfigureAwait(false);
         var scriptDecision = _safetyPolicy.EvaluateText("forge_run_script", scriptText);
         if (!scriptDecision.Allowed)
@@ -274,9 +292,30 @@ public sealed class HeadlessAccoreConsoleRunner
             var stdout = await stdoutTask.ConfigureAwait(false);
             var stderr = await stderrTask.ConfigureAwait(false);
 
+            var stamp = AccoreConsoleTranscript.ReadStamp(dwgPath);
+            var payload = new
+            {
+                exitCode = process.ExitCode,
+                stdout,
+                stderr,
+                backupPath,
+                dwgMtimeUtc = stamp.MtimeUtc,
+                dwgLength = stamp.Length,
+                sha256 = stamp.Sha256
+            };
+            if (AccoreConsoleTranscript.HasScriptError(stdout, stderr))
+            {
+                return ForgeResult.Failure(
+                    commandId,
+                    "accoreconsole_script_error",
+                    "accoreconsole exited but the transcript contains *Cancel*, Unknown command, or *Invalid*.",
+                    "Do not treat exit code 0 as a finished script. Read the transcript and fix the script.",
+                    data: payload);
+            }
+
             return process.ExitCode == 0
-                ? ForgeResult.Success(commandId, new { exitCode = process.ExitCode, stdout, stderr, backupPath })
-                : ForgeResult.Failure(commandId, "accoreconsole_failed", $"accoreconsole exited with code {process.ExitCode}.", stderr);
+                ? ForgeResult.Success(commandId, payload)
+                : ForgeResult.Failure(commandId, "accoreconsole_failed", $"accoreconsole exited with code {process.ExitCode}.", stderr, data: payload);
         }
         catch (OperationCanceledException)
         {
@@ -289,7 +328,12 @@ public sealed class HeadlessAccoreConsoleRunner
             }
             catch
             {
-                // Best effort cleanup after timeout.
+                // Best effort cleanup after timeout or client cancel.
+            }
+
+            if (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
 
             return ForgeResult.Failure(commandId, "accoreconsole_timeout", $"accoreconsole exceeded timeout {timeout.TotalSeconds:n0}s.");

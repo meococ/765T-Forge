@@ -13,9 +13,10 @@ Honest status of MCP tools. AutoCAD target: **2026**. Civil 3D, full SSM **write
 | Tool | Status | Notes |
 |------|--------|-------|
 | `forge_system_health` | implemented | |
-| `forge_system_version` | implemented | Product + envelope versions |
+| `forge_system_version` | implemented | `hostVersion`, `builtForYear`, `configuredAutoCadRoot`, `hostMismatch` |
 | `forge_system_getvar` / `_setvar` | implemented | |
 | `forge_system_capabilities` | implemented | Devices, media, page setups, layouts, layer states, plot styles |
+| MCP resources / prompts | implemented | `forge://docs/capability-matrix`, `forge://safety`, `forge://profiles`, `issue_set_runbook`, `safety_first` |
 
 ## Document / xref / layer
 
@@ -40,11 +41,11 @@ Honest status of MCP tools. AutoCAD target: **2026**. Civil 3D, full SSM **write
 
 | Tool | Status | Notes |
 |------|--------|-------|
-| `forge_plot_to_pdf` | implemented | Configurable device/paper/CTB·STB/area; overwrite ack |
+| `forge_plot_to_pdf` | implemented | Requires layout, device, and paper. Does not default to A1 / DWG To PDF.pc3 and does not run preflight |
 | `forge_plot_publish` | implemented | DSD + `Publisher.PublishDsd`; **PublishReceipt** + PDF probe; preflight gate |
 | `forge_qa_*` (verify/check/audit/readback) | implemented | |
 | `forge_qa_readback_after_timeout` | implemented | Timeout recovery protocol — never retry write blind |
-| `forge_qa_preflight` | implemented | Writes a QaReport file (not read-only). `passed=false` is `Ok=false` |
+| `forge_qa_preflight` | implemented | Writes a QaReport file. Empty title-block requirements fail the gate. `layer_missing` is an error. Pack device/paper/CTB are compared |
 | `forge_audit_summarize` | implemented | Server-side last-N audit summary (no raw args) |
 | `forge_issue_set_validate` | implemented | IssueSetContract layouts↔drawingNos↔rev |
 | `forge_sheet_inventory_import` | implemented | CSV → contract JSON. Writes `outputContractPath` when set (no DST/SSM). Not idempotent when `contractId` is omitted |
@@ -60,7 +61,7 @@ Honest status of MCP tools. AutoCAD target: **2026**. Civil 3D, full SSM **write
 |------|--------|-------|
 | `forge_registry_load` / `_lookup` | implemented | Fail-closed drawing numbers for titleblock tags |
 | `forge_pack_load` / `_status` | implemented | Declarative project standards pack (v2 plot bindings) |
-| `forge_system_tool_profile` | implemented | Profiles `core` / `plot` / `qa` (server-side) |
+| `forge_system_tool_profile` | implemented | Allowlist only. `tools/list` is filtered when `FORGE_TOOL_PROFILE` is set at startup |
 | `forge_viewport_list` | implemented | Paper-space viewports |
 | `forge_viewport_set_layer_freeze` | implemented | VP freeze/thaw by handle |
 
@@ -95,4 +96,3 @@ Layer filtering on all `forge_linework_*`: `layerFilter` patterns match the full
 | Civil 3D / geometry megakit / remote multi-tenant MCP | Explicitly out of scope |
 | netDxf offline path | Optional later — not SoT for plot truth |
 | NuGet `McpServer` / registry | After Releases packaging — see docs/packaging-nuget.md |
-| MCP Resources / Prompts | implemented (`forge://…`, issue_set_runbook) |

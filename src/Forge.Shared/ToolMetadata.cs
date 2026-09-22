@@ -18,27 +18,27 @@ public static class ForgeToolRegistry
         ["forge_system_health"] = Read("forge_system_health", "system", requiresAutoCad: false),
         ["forge_system_version"] = Read("forge_system_version", "system"),
         ["forge_system_getvar"] = Read("forge_system_getvar", "system"),
-        ["forge_system_setvar"] = Write("forge_system_setvar", "system", idempotent: true),
+        ["forge_system_setvar"] = Write("forge_system_setvar", "system", idempotent: true, destructive: true),
         ["forge_system_capabilities"] = Read("forge_system_capabilities", "system"),
         ["forge_doc_list_open"] = Read("forge_doc_list_open", "document"),
         ["forge_doc_list_layouts"] = Read("forge_doc_list_layouts", "document"),
         ["forge_doc_open"] = Write("forge_doc_open", "document", idempotent: true),
         ["forge_doc_save"] = Write("forge_doc_save", "document", idempotent: true),
         ["forge_xref_list"] = Read("forge_xref_list", "xref"),
-        ["forge_xref_reload"] = Write("forge_xref_reload", "xref", idempotent: true),
-        ["forge_xref_repath"] = Write("forge_xref_repath", "xref", idempotent: true),
-        ["forge_xref_normalize_relative"] = Write("forge_xref_normalize_relative", "xref", idempotent: true),
+        ["forge_xref_reload"] = Write("forge_xref_reload", "xref", idempotent: true, destructive: true),
+        ["forge_xref_repath"] = Write("forge_xref_repath", "xref", idempotent: true, destructive: true),
+        ["forge_xref_normalize_relative"] = Write("forge_xref_normalize_relative", "xref", idempotent: true, destructive: true),
         ["forge_layer_list"] = Read("forge_layer_list", "layer"),
         ["forge_layer_state_list"] = Read("forge_layer_state_list", "layer"),
-        ["forge_layer_state_restore"] = Write("forge_layer_state_restore", "layer", idempotent: true),
+        ["forge_layer_state_restore"] = Write("forge_layer_state_restore", "layer", idempotent: true, destructive: true),
         ["forge_block_list_attributes"] = Read("forge_block_list_attributes", "block"),
         ["forge_block_get_attr"] = Read("forge_block_get_attr", "block"),
-        ["forge_block_set_attr"] = Write("forge_block_set_attr", "block", idempotent: true),
-        ["forge_block_campaign"] = Write("forge_block_campaign", "block", idempotent: true),
-        ["forge_layout_page_setup_import"] = Write("forge_layout_page_setup_import", "layout", idempotent: true),
-        ["forge_layout_page_setup_apply"] = Write("forge_layout_page_setup_apply", "layout", idempotent: true),
-        ["forge_plot_to_pdf"] = Write("forge_plot_to_pdf", "plot", idempotent: false),
-        ["forge_plot_publish"] = Write("forge_plot_publish", "plot", idempotent: false),
+        ["forge_block_set_attr"] = Write("forge_block_set_attr", "block", idempotent: true, destructive: true),
+        ["forge_block_campaign"] = Write("forge_block_campaign", "block", idempotent: true, destructive: true),
+        ["forge_layout_page_setup_import"] = Write("forge_layout_page_setup_import", "layout", idempotent: true, destructive: true),
+        ["forge_layout_page_setup_apply"] = Write("forge_layout_page_setup_apply", "layout", idempotent: true, destructive: true),
+        ["forge_plot_to_pdf"] = Write("forge_plot_to_pdf", "plot", idempotent: false, destructive: true),
+        ["forge_plot_publish"] = Write("forge_plot_publish", "plot", idempotent: false, destructive: true),
         ["forge_qa_verify_titleblock"] = Read("forge_qa_verify_titleblock", "qa"),
         ["forge_qa_check_xrefs"] = Read("forge_qa_check_xrefs", "qa"),
         ["forge_qa_audit_layers"] = Read("forge_qa_audit_layers", "qa"),
@@ -49,7 +49,7 @@ public static class ForgeToolRegistry
         ["forge_issue_set_validate"] = Read("forge_issue_set_validate", "recipe"),
         ["forge_sheet_inventory_import"] = new ToolMetadata("forge_sheet_inventory_import", "recipe", false, false, false, false, false, RequiresAutoCad: false),
         ["forge_issue_set_diff"] = Read("forge_issue_set_diff", "recipe", requiresAutoCad: false),
-        ["forge_recipe_issue_set"] = Write("forge_recipe_issue_set", "recipe"),
+        ["forge_recipe_issue_set"] = Write("forge_recipe_issue_set", "recipe", destructive: true),
         ["forge_pack_and_go"] = Write("forge_pack_and_go", "pack"),
         ["forge_registry_load"] = new ToolMetadata("forge_registry_load", "registry", false, false, true, false, false),
         ["forge_registry_lookup"] = Read("forge_registry_lookup", "registry"),
@@ -87,9 +87,9 @@ public static class ForgeToolRegistry
         return new ToolMetadata(name, group, true, false, true, false, false, requiresAutoCad);
     }
 
-    private static ToolMetadata Write(string name, string group, bool idempotent = false)
+    private static ToolMetadata Write(string name, string group, bool idempotent = false, bool destructive = false)
     {
-        return new ToolMetadata(name, group, false, false, idempotent, false, true);
+        return new ToolMetadata(name, group, false, destructive, idempotent, false, true);
     }
 
     private static ToolMetadata Destructive(string name, string group, bool requiresAutoCad = true, bool unsafeTool = false)

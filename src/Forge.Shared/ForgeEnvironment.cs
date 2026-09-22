@@ -17,6 +17,9 @@ public sealed record ForgeEnvironment
     public int PluginResponseTimeoutSeconds { get; init; } = 120;
     public bool UsingDevDefaultToken { get; init; }
 
+    /// <summary>When set, tools/list is limited to this profile. Unset means the full catalog.</summary>
+    public string? ToolProfile { get; init; }
+
     public static string DefaultAutoCadRoot()
     {
         return @"C:\Program Files\Autodesk\AutoCAD 2026";
@@ -43,6 +46,13 @@ public sealed record ForgeEnvironment
             token = ForgeConstants.DevOnlyInsecureToken;
         }
 
+        var toolProfile = Environment.GetEnvironmentVariable("FORGE_TOOL_PROFILE");
+        if (!string.IsNullOrWhiteSpace(toolProfile) && !ToolProfiles.TryGet(toolProfile, out _))
+        {
+            throw new InvalidOperationException(
+                $"FORGE_TOOL_PROFILE '{toolProfile}' is unknown. Known: {string.Join(", ", ToolProfiles.Names)}.");
+        }
+
         return new ForgeEnvironment
         {
             PipeName = Get("FORGE_PIPE_NAME", ForgeConstants.DefaultPipeName),
@@ -60,7 +70,8 @@ public sealed record ForgeEnvironment
             EnableUnsafeOps = bool.TryParse(Environment.GetEnvironmentVariable("FORGE_ENABLE_UNSAFE_OPS"), out var unsafeOps) && unsafeOps,
             PluginResponseTimeoutSeconds = int.TryParse(Environment.GetEnvironmentVariable("FORGE_PLUGIN_RESPONSE_TIMEOUT_SECONDS"), out var timeout)
                 ? Math.Clamp(timeout, 5, 3600)
-                : 120
+                : 120,
+            ToolProfile = string.IsNullOrWhiteSpace(toolProfile) ? null : toolProfile
         };
     }
 

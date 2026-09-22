@@ -58,7 +58,7 @@ Silent clobber is refused with a typed error code.
 
 ## Drawing number registry
 
-When a sheet register is loaded (`forge_registry_load`), attribute writes that claim a drawing number must match the registry — agents must not invent sheet numbers. See [standards-and-registry.md](standards-and-registry.md).
+Drawing-number tags (`DRAWING_NO`, `DWG_NO`, `SHEET_NO`, `SO_HIEU`) cannot be written until `forge_registry_load` succeeds (`registry_not_loaded`). After that, the value must match the registry. Agents must not invent sheet numbers. See [standards-and-registry.md](standards-and-registry.md).
 
 ## Unsafe ops
 

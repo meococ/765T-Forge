@@ -39,7 +39,7 @@ public sealed partial class PluginCommandProcessor
         }
 
         var decision = _safetyPolicy.Evaluate(command);
-        var auditId = _auditSink.WriteBestEffort(new AuditRecord
+        var started = _auditSink.WriteBestEffort(new AuditRecord
         {
             Source = "plugin",
             Tool = command.Tool,
@@ -49,10 +49,22 @@ public sealed partial class PluginCommandProcessor
             DecisionCode = decision.Code,
             Args = command.Args
         });
+        var auditId = started.AuditId;
+        var metadata = ForgeToolRegistry.Get(command.Tool);
 
         if (!decision.Allowed)
         {
             return ForgeResult.Failure(command.Id, decision.Code, decision.Message, decision.Suggestion, auditId);
+        }
+
+        if (!started.Written && AuditDecisions.BlocksDispatchWhenUnwritten(metadata))
+        {
+            return ForgeResult.Failure(
+                command.Id,
+                "audit_failed",
+                "Refusing to modify the drawing because the audit log could not be written.",
+                "Check FORGE_AUDIT_DIR is writable, then retry.",
+                auditId);
         }
 
         if (ForgeToolRegistry.Get(command.Tool).Unsafe && !_environment.EnableUnsafeOps)
@@ -60,10 +72,19 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, "unsafe_ops_disabled", "Unsafe operations are disabled by FORGE_ENABLE_UNSAFE_OPS.", "Leave exec_dotnet disabled unless this is a controlled local session.", auditId);
         }
 
-        var metadata = ForgeToolRegistry.Get(command.Tool);
         string? backupPath = null;
         if (!metadata.ReadOnly && metadata.RequiresBackup && !command.DryRun)
         {
+            if (DocumentHasUnsavedChanges())
+            {
+                return ForgeResult.Failure(
+                    command.Id,
+                    "backup_requires_saved_document",
+                    "The drawing has unsaved changes (DBMOD is not 0). A backup would copy only the last saved file.",
+                    "Call forge_doc_save so the backup includes the current edits, then retry the write.",
+                    auditId);
+            }
+
             backupPath = _backupPlanner.TryBackup(ActiveDocumentPath());
             if (backupPath is null)
             {
@@ -134,6 +155,21 @@ public sealed partial class PluginCommandProcessor
             ? Dispatch()
             : WithUndoMark(Dispatch);
 
+        _auditSink.WriteBestEffort(new AuditRecord
+        {
+            AuditId = auditId,
+            Source = "plugin",
+            Tool = command.Tool,
+            CommandId = command.Id,
+            DryRun = command.DryRun,
+            Allowed = true,
+            DecisionCode = AuditDecisions.For(result, command.DryRun),
+            Args = command.Args,
+            Ok = result.Ok,
+            ErrorCode = result.Error?.Code,
+            Message = result.Error?.Message
+        });
+
         return result with
         {
             AuditId = auditId,
@@ -181,6 +217,35 @@ public sealed partial class PluginCommandProcessor
         return ForgeJson.FromElement<T>(command.Args) ?? new T();
     }
 
+    public void RecordClientCancelledAfterDispatch(ForgeCommand command, ForgeResult result)
+    {
+        _auditSink.WriteBestEffort(new AuditRecord
+        {
+            Source = "plugin",
+            Tool = command.Tool,
+            CommandId = command.Id,
+            DryRun = command.DryRun,
+            Allowed = true,
+            DecisionCode = "cancelled_after_dispatch",
+            Args = command.Args,
+            Ok = result.Ok,
+            ErrorCode = result.Error?.Code,
+            Message = "MCP client disconnected after the command was dispatched to AutoCAD. The drawing may already have changed."
+        });
+    }
+
+    private static bool DocumentHasUnsavedChanges()
+    {
+        try
+        {
+            return Convert.ToInt32(Application.GetSystemVariable("DBMOD"), CultureInfo.InvariantCulture) != 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static string? ActiveDocumentPath()
     {
         var name = Documents.MdiActiveDocument?.Name;
@@ -214,14 +279,19 @@ public sealed partial class PluginCommandProcessor
         });
     }
 
-    private static ForgeResult Version(ForgeCommand command)
+    private ForgeResult Version(ForgeCommand command)
     {
+        var hostVersion = Application.Version.ToString();
+        var builtForYear = ForgeConstants.AutoCadVersion;
         return ForgeResult.Success(command.Id, new
         {
             forge = ForgeConstants.ProductVersion,
             envelope = ForgeConstants.EnvelopeVersion,
-            autocadTarget = ForgeConstants.AutoCadVersion,
-            autocadApplication = Application.Version.ToString(),
+            hostVersion,
+            builtForYear,
+            configuredAutoCadRoot = _environment.AutoCadRoot,
+            hostMismatch = AutoCadHostInfo.IsMismatch(hostVersion, builtForYear),
+            autocadApplication = hostVersion,
             dotnet = Environment.Version.ToString()
         });
     }
@@ -244,6 +314,15 @@ public sealed partial class PluginCommandProcessor
         if (string.IsNullOrWhiteSpace(args.Name))
         {
             return ForgeResult.Failure(command.Id, "missing_var_name", "System variable name is required.");
+        }
+
+        if (SysvarPolicy.IsForbidden(args.Name))
+        {
+            return ForgeResult.Failure(
+                command.Id,
+                "deny_sysvar",
+                $"System variable '{args.Name}' is blocked on the typed setvar tool.",
+                "Do not change security, trust path, or expert variables through Forge. The command denylist is unchanged.");
         }
 
         if (command.DryRun)
@@ -329,8 +408,15 @@ public sealed partial class PluginCommandProcessor
 
         var previousFileDia = Application.GetSystemVariable("FILEDIA");
         Application.SetSystemVariable("FILEDIA", 0);
-        Documents.Open(args.Path, false);
-        Application.SetSystemVariable("FILEDIA", previousFileDia);
+        try
+        {
+            Documents.Open(args.Path, false);
+        }
+        finally
+        {
+            Application.SetSystemVariable("FILEDIA", previousFileDia);
+        }
+
         return ForgeResult.Success(command.Id, new { opened = args.Path });
     }
 
@@ -715,6 +801,15 @@ public sealed partial class PluginCommandProcessor
 
     private static ForgeResult? AuthorizeAttributeWrite(ForgeCommand command, string tag, string? value)
     {
+        if (DrawingRegistry.IsDrawingNumberTag(tag) && DrawingRegistryStore.Current is null)
+        {
+            return ForgeResult.Failure(
+                command.Id,
+                "registry_not_loaded",
+                $"Drawing-number tag '{tag}' cannot be written until a registry is loaded.",
+                "Call forge_registry_load, then copy drawingNo from forge_registry_lookup. Do not invent a number.");
+        }
+
         var registry = DrawingRegistryStore.Current;
         if (registry is not null && !registry.TryAuthorizeAttribute(tag, value ?? "", out var code, out var message))
         {
@@ -967,9 +1062,18 @@ public sealed partial class PluginCommandProcessor
             return reject;
         }
 
+        if (string.IsNullOrWhiteSpace(args.Layout) || string.IsNullOrWhiteSpace(args.Device) || string.IsNullOrWhiteSpace(args.PaperSize))
+        {
+            return ForgeResult.Failure(
+                command.Id,
+                "plot_args_required",
+                "layout, device, and paperSize are required. Blank values are not filled with ISO A1 or DWG To PDF.pc3.",
+                "Copy layout from forge_doc_list_layouts and device/paper from forge_system_capabilities. This tool does not run preflight.");
+        }
+
         var outputPath = Path.GetFullPath(args.OutputPath!);
-        var device = string.IsNullOrWhiteSpace(args.Device) ? "DWG To PDF.pc3" : args.Device!;
-        var paperSize = string.IsNullOrWhiteSpace(args.PaperSize) ? "ISO A1 (841.00 x 594.00 MM)" : args.PaperSize!;
+        var device = args.Device!;
+        var paperSize = args.PaperSize!;
         var orientation = string.IsNullOrWhiteSpace(args.Orientation) ? "Landscape" : args.Orientation!;
         var scale = string.IsNullOrWhiteSpace(args.Scale) ? "Fit" : args.Scale!;
         var plotStyle = string.IsNullOrWhiteSpace(args.PlotStyle) ? "." : args.PlotStyle!;
@@ -1117,6 +1221,19 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, "document_not_saved", "Active document must be saved to a DWG path before DSD publish.");
         }
 
+        var knownLayouts = ListLayoutNames();
+        foreach (var layout in args.Layouts)
+        {
+            if (!knownLayouts.Any(name => name.Equals(layout, StringComparison.OrdinalIgnoreCase)))
+            {
+                return ForgeResult.Failure(
+                    command.Id,
+                    "layout_not_found",
+                    $"Layout not found: {layout}",
+                    "Call forge_doc_list_layouts and pass those names. Publish does not start until every layout exists.");
+            }
+        }
+
         if (command.DryRun)
         {
             return DryRun(command, new
@@ -1124,9 +1241,10 @@ public sealed partial class PluginCommandProcessor
                 outputPath,
                 dwgPath,
                 args.Layouts,
-                args.SinglePdf,
+                singlePdf = args.SinglePdf,
                 args.OverwriteAcknowledged,
-                sheetType = args.SinglePdf ? "MultiPdf" : "SinglePdf"
+                sheetType = DsdWriter.SheetTypeLabel(args.SinglePdf),
+                dsdType = DsdWriter.TypeCode(args.SinglePdf)
             });
         }
 

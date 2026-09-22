@@ -103,6 +103,10 @@ public sealed class NamedPipePluginServer : IDisposable
         {
             result = ForgeResult.Failure("", "empty_request", "No command was received over the named pipe.");
         }
+        else if (pipe is NamedPipeServerStream serverPipe && !serverPipe.IsConnected)
+        {
+            result = ForgeResult.Failure("", "cancelled", "MCP client disconnected before the command was sent to AutoCAD.");
+        }
         else
         {
             try
@@ -110,7 +114,7 @@ public sealed class NamedPipePluginServer : IDisposable
                 var command = JsonSerializer.Deserialize<ForgeCommand>(line, ForgeJson.Options);
                 result = command is null
                     ? ForgeResult.Failure("", "invalid_request", "Command JSON could not be parsed.")
-                    : await ExecuteOnMainThreadAsync(command).ConfigureAwait(false);
+                    : await ExecuteOnMainThreadAsync(command, () => pipe is not NamedPipeServerStream named || named.IsConnected).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -122,14 +126,26 @@ public sealed class NamedPipePluginServer : IDisposable
         await writer.WriteLineAsync(json.AsMemory(), cancellationToken).ConfigureAwait(false);
     }
 
-    private Task<ForgeResult> ExecuteOnMainThreadAsync(ForgeCommand command)
+    private Task<ForgeResult> ExecuteOnMainThreadAsync(ForgeCommand command, Func<bool> clientConnected)
     {
         var tcs = new TaskCompletionSource<ForgeResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        if (!clientConnected())
+        {
+            tcs.TrySetResult(ForgeResult.Failure(command.Id, "cancelled", "MCP client disconnected before the command was sent to AutoCAD."));
+            return tcs.Task;
+        }
 
         Application.DocumentManager.ExecuteInCommandContextAsync(_ =>
         {
             try
             {
+                if (!clientConnected())
+                {
+                    tcs.TrySetResult(ForgeResult.Failure(command.Id, "cancelled", "MCP client disconnected before the command was sent to AutoCAD."));
+                    return Task.CompletedTask;
+                }
+
                 var current = Application.DocumentManager.MdiActiveDocument;
                 Document? doc;
 
@@ -180,7 +196,13 @@ public sealed class NamedPipePluginServer : IDisposable
                     {
                         using (doc.LockDocument())
                         {
-                            tcs.TrySetResult(_processor.Process(command));
+                            var processed = _processor.Process(command);
+                            if (!clientConnected())
+                            {
+                                _processor.RecordClientCancelledAfterDispatch(command, processed);
+                            }
+
+                            tcs.TrySetResult(processed);
                         }
                     }
                     finally
@@ -200,7 +222,13 @@ public sealed class NamedPipePluginServer : IDisposable
                 }
                 else
                 {
-                    tcs.TrySetResult(_processor.Process(command));
+                    var processed = _processor.Process(command);
+                    if (!clientConnected())
+                    {
+                        _processor.RecordClientCancelledAfterDispatch(command, processed);
+                    }
+
+                    tcs.TrySetResult(processed);
                 }
             }
             catch (Exception ex)

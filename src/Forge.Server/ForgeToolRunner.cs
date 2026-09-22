@@ -31,6 +31,7 @@ public sealed class ForgeToolRunner
         bool dryRun = false,
         string? document = null,
         bool unsafeAcknowledged = false,
+        Action<float, float?, string?>? reportProgress = null,
         CancellationToken cancellationToken = default)
     {
         var command = new ForgeCommand
@@ -43,7 +44,7 @@ public sealed class ForgeToolRunner
         };
 
         var decision = _safetyPolicy.Evaluate(command);
-        var auditId = await _auditSink.WriteAsync(new AuditRecord
+        var started = await _auditSink.WriteAsync(new AuditRecord
         {
             Source = "server",
             Tool = command.Tool,
@@ -53,16 +54,28 @@ public sealed class ForgeToolRunner
             DecisionCode = decision.Code,
             Args = command.Args
         }, cancellationToken).ConfigureAwait(false);
+        var auditId = started.AuditId;
+        var metadata = ForgeToolRegistry.Get(command.Tool);
 
         if (!decision.Allowed)
         {
             return ForgeResult.Failure(command.Id, decision.Code, decision.Message, decision.Suggestion, auditId);
         }
 
+        if (!started.Written && AuditDecisions.BlocksDispatchWhenUnwritten(metadata))
+        {
+            return ForgeResult.Failure(
+                command.Id,
+                "audit_failed",
+                "Refusing to run because the audit log could not be written.",
+                "Check FORGE_AUDIT_DIR is writable, then retry.",
+                auditId);
+        }
+
         var result = tool.ToLowerInvariant() switch
         {
-            "forge_run_script" => await _headlessRunner.RunScriptAsync(command, cancellationToken).ConfigureAwait(false),
-            "forge_batch_run" => await _headlessRunner.RunBatchAsync(command, cancellationToken).ConfigureAwait(false),
+            "forge_run_script" => await _headlessRunner.RunScriptAsync(command, cancellationToken, reportProgress).ConfigureAwait(false),
+            "forge_batch_run" => await _headlessRunner.RunBatchAsync(command, cancellationToken, reportProgress).ConfigureAwait(false),
             "forge_batch_status" => ResolveBatchStatus(command),
             "forge_system_tool_profile" => ResolveToolProfile(command),
             "forge_audit_summarize" => ResolveAuditSummarize(command),
@@ -85,7 +98,7 @@ public sealed class ForgeToolRunner
             CommandId = command.Id,
             DryRun = command.DryRun,
             Allowed = true,
-            DecisionCode = "completed",
+            DecisionCode = AuditDecisions.For(result, command.DryRun),
             Args = command.Args,
             Ok = result.Ok,
             ErrorCode = result.Error?.Code,
