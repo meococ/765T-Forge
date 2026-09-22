@@ -254,6 +254,11 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, "missing_var_name", "System variable name is required.");
         }
 
+        if (SysvarPolicy.Reject(command.Id, args.Name) is { } denied)
+        {
+            return denied;
+        }
+
         if (command.DryRun)
         {
             return DryRun(command, new { args.Name, args.Value });
