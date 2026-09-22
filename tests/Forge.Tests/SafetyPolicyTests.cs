@@ -116,6 +116,24 @@ public sealed class SafetyPolicyTests
     }
 
     [Theory]
+    [InlineData("ERASE\nF")]
+    [InlineData("ERASE\nW")]
+    [InlineData("ERASE\nC")]
+    [InlineData("ERASE\nWP")]
+    [InlineData("ERASE\nCP")]
+    [InlineData("_.ERASE\n_C")]
+    [InlineData("ERASE CROSSING")]
+    [InlineData("ERASE WINDOW")]
+    [InlineData("(command \"ERASE\" \"C\")")]
+    [InlineData("E\nC")]
+    public void EraseRegionSelectIsDenied(string commandText)
+    {
+        var decision = _policy.EvaluateText("forge_exec_command", commandText);
+        Assert.False(decision.Allowed);
+        Assert.Equal("deny_erase_region", decision.Code);
+    }
+
+    [Theory]
     [InlineData("-LAYER\nD\n*")]
     [InlineData("-LAYER\nD\nALL")]
     [InlineData("-LAYER\nDelete\n*")]
@@ -167,6 +185,10 @@ public sealed class SafetyPolicyTests
     [InlineData("ARX")]
     [InlineData("OPEN\nC:\\ARX\\a.dwg")]
     [InlineData("-LAYER\nD\n0")]
+    [InlineData("ERASE\nC:\\drawings\\a.dwg")]
+    [InlineData("E\nC:\\drawings\\a.dwg")]
+    [InlineData("ZOOM W")]
+    [InlineData("END\nC")]
     public void HarmlessExecutorTextStaysAllowed(string commandText)
     {
         var decision = _policy.EvaluateText("forge_exec_command", commandText);

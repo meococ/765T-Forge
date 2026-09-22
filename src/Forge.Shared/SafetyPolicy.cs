@@ -33,6 +33,12 @@ public sealed class SafetyPolicy
     private static readonly Regex SsgGetAllErase = new(@"\bSSGET\b(?:[\s\r\n;'""]|\(|\))*""X""[\s\S]*\b_?-?ERASE\b|\b_?-?ERASE\b[\s\S]*\bSSGET\b(?:[\s\r\n;'""]|\(|\))*""X""", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     // Alias E / _.E is not the word ERASE. Kept separate so the ERASE pattern is unchanged.
     private static readonly Regex EraseAliasAll = new(@"\b_?-?\.?E\b(?:[\s\r\n;'""]|\(|\))*_?(?:ALL\b|\*)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex EraseRegionSelect = new(
+        @"(?im)(?:^|[;\r\n])\s*(?:\._|\.|_|-)*ERASE\b(?:[\s\r\n;'""]|\(|\))*_?(?:WPOLYGON|CPOLYGON|WINDOW|CROSSING|FENCE|WP|CP|F|W|C)(?=$|[\s;]|[\r\n])|\(\s*command\s+""(?:\._|\.|_|-)*ERASE""\s+""_?(?:WPOLYGON|CPOLYGON|WINDOW|CROSSING|FENCE|WP|CP|F|W|C)""",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex EraseAliasRegionSelect = new(
+        @"(?im)(?:^|[;\r\n])\s*(?:\._|\.|_|-)*E\b(?:[\s\r\n;'""]|\(|\))*_?(?:WPOLYGON|CPOLYGON|WINDOW|CROSSING|FENCE|WP|CP|F|W|C)(?=$|[\s;]|[\r\n])",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex DeleteAll = new(
         @"(?im)(?:^|[;\r\n])\s*(?:\._|\.|_|-)*DELETE\b(?:[\s\r\n;'""]|\(|\))*_?(?:ALL\b|\*)|\(\s*command\s+""(?:\._|\.|_|-)*DELETE\b[^""]*""\s+""?(?:ALL|\*)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -83,6 +89,14 @@ public sealed class SafetyPolicy
         if (EraseAll.IsMatch(text) || EraseAliasAll.IsMatch(text))
         {
             return SafetyDecision.Deny("deny_erase_all", "Blocked destructive ERASE ALL command.", "Use a scoped selection set or entity handles.");
+        }
+
+        if (EraseRegionSelect.IsMatch(text) || EraseAliasRegionSelect.IsMatch(text))
+        {
+            return SafetyDecision.Deny(
+                "deny_erase_region",
+                "Blocked ERASE by fence, window, or crossing.",
+                "Pass explicit entity handles to a typed tool.");
         }
 
         // Before DELETE ALL: "-LAYER" + "Delete" is a layer subcommand, not the DELETE command.
