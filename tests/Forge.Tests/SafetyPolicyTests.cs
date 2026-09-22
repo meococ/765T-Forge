@@ -116,6 +116,19 @@ public sealed class SafetyPolicyTests
     }
 
     [Theory]
+    [InlineData("(ssget \"C\" p1 p2) (entdel e)")]
+    [InlineData("(ssget \"_W\") (vla-erase e)")]
+    [InlineData("(ssget \"F\") (vla-delete e)")]
+    [InlineData("(ssget \"WP\") (command \"ERASE\")")]
+    [InlineData("(ssget \"CP\") (entdel e)")]
+    public void SsgetRegionDestructiveIsDenied(string commandText)
+    {
+        var decision = _policy.EvaluateText("forge_exec_lisp", commandText);
+        Assert.False(decision.Allowed);
+        Assert.Equal("deny_ssget_destructive", decision.Code);
+    }
+
+    [Theory]
     [InlineData("ERASE\nF")]
     [InlineData("ERASE\nW")]
     [InlineData("ERASE\nC")]
@@ -189,6 +202,8 @@ public sealed class SafetyPolicyTests
     [InlineData("E\nC:\\drawings\\a.dwg")]
     [InlineData("ZOOM W")]
     [InlineData("END\nC")]
+    [InlineData("(ssget \"C\")")]
+    [InlineData("(ssget \"WP\")")]
     public void HarmlessExecutorTextStaysAllowed(string commandText)
     {
         var decision = _policy.EvaluateText("forge_exec_command", commandText);
