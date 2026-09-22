@@ -1090,8 +1090,10 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, "plot_no_output", $"Plot ran but no PDF was produced at {outputPath}.", "Check the output directory is writable and the layout has plottable content.");
         }
 
-        return ForgeResult.Success(
+        var probe = PdfProbeResult.Probe(outputPath, expectedPages: 1);
+        return PlotPdfGate.FromProbe(
             command.Id,
+            probe,
             new
             {
                 outputPath,
@@ -1099,14 +1101,8 @@ public sealed partial class PluginCommandProcessor
                 device,
                 paperSize,
                 plotStyle,
-                bytes = new FileInfo(outputPath).Length
-            },
-            verification: new ForgeVerification
-            {
-                Attempted = true,
-                Passed = true,
-                Message = "PDF file exists after plot.",
-                ReadBack = new { outputPath, exists = true }
+                bytes = new FileInfo(outputPath).Length,
+                pdfProbe = probe
             });
     }
 
