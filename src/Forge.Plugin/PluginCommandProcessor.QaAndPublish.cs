@@ -235,13 +235,20 @@ public sealed partial class PluginCommandProcessor
         var report = BuildPreflightReport(args.RequiredTitleblockTags, args.TitleblockBlockName, args.ExpectedLayers);
         var artifactPath = TryWriteQaArtifact(report);
         report = report with { ArtifactPath = artifactPath };
-        return ForgeResult.Success(command.Id, report, verification: new ForgeVerification
-        {
-            Attempted = true,
-            Passed = report.Passed,
-            Message = report.Passed ? "Publish readiness gate passed." : "Publish readiness gate failed.",
-            ReadBack = report
-        });
+        return ForgeResult.Gate(
+            command.Id,
+            report.Passed,
+            "preflight_failed",
+            report.Passed ? "Publish readiness gate passed." : "Publish readiness gate failed.",
+            report.Passed ? null : "Fix the preflight findings before publish.",
+            report,
+            new ForgeVerification
+            {
+                Attempted = true,
+                Passed = report.Passed,
+                Message = report.Passed ? "Publish readiness gate passed." : "Publish readiness gate failed.",
+                ReadBack = report
+            });
     }
 
     private static ForgeResult IssueSetValidate(ForgeCommand command)
@@ -295,13 +302,20 @@ public sealed partial class PluginCommandProcessor
             contractId = contract.ContractId,
             sheetCount = contract.Sheets.Count
         });
-        return ForgeResult.Success(command.Id, report, verification: new ForgeVerification
-        {
-            Attempted = true,
-            Passed = report.Passed,
-            Message = report.Passed ? "Issue set contract valid." : "Issue set contract failed.",
-            ReadBack = report
-        });
+        return ForgeResult.Gate(
+            command.Id,
+            report.Passed,
+            "qa_failed",
+            report.Passed ? "Issue set contract valid." : "Issue set contract failed.",
+            report.Passed ? null : "Fix the issue-set findings before publish.",
+            report,
+            new ForgeVerification
+            {
+                Attempted = true,
+                Passed = report.Passed,
+                Message = report.Passed ? "Issue set contract valid." : "Issue set contract failed.",
+                ReadBack = report
+            });
     }
 
     private sealed record IssueSetValidateArgs
@@ -582,6 +596,15 @@ public sealed partial class PluginCommandProcessor
                 }
             }
 
+            if (string.IsNullOrWhiteSpace(entry.Handle) && string.IsNullOrWhiteSpace(entry.BlockName))
+            {
+                return ForgeResult.Failure(
+                    command.Id,
+                    "ambiguous_block_target",
+                    "Campaign entry is missing both handle and blockName.",
+                    "Pass handle on every entry. Do not write every block in the drawing.");
+            }
+
             foreach (var pair in entry.Attributes)
             {
                 if (AuthorizeAttributeWrite(command, pair.Key, pair.Value) is { } denied)
@@ -619,9 +642,17 @@ public sealed partial class PluginCommandProcessor
                     DryRun = false
                 };
                 var setResult = SetBlockAttribute(setCommand);
-                if (!setResult.Ok)
+                if (!setResult.Ok || setResult.Verification?.Passed != true)
                 {
-                    return setResult;
+                    return setResult.Ok
+                        ? ForgeResult.Failure(
+                            command.Id,
+                            "attr_readback_mismatch",
+                            "Campaign read-back did not match the requested value.",
+                            "Inspect the entry and read the attribute back before retrying.",
+                            data: setResult.Data,
+                            verification: setResult.Verification ?? new ForgeVerification { Attempted = true, Passed = false })
+                        : setResult;
                 }
 
                 updated++;
@@ -633,10 +664,21 @@ public sealed partial class PluginCommandProcessor
             return DryRun(command, new { diffs });
         }
 
+        if (updated == 0)
+        {
+            return ForgeResult.Failure(
+                command.Id,
+                "attr_not_found",
+                "Campaign did not verify any attribute write.",
+                "Confirm handle, block name, and tag, then read attributes before writing.",
+                data: new { updated, diffs },
+                verification: new ForgeVerification { Attempted = true, Passed = false, ReadBack = diffs });
+        }
+
         return ForgeResult.Success(
             command.Id,
             new { updated, diffs },
-            verification: new ForgeVerification { Attempted = true, Passed = updated > 0, ReadBack = diffs });
+            verification: new ForgeVerification { Attempted = true, Passed = true, ReadBack = diffs });
     }
 
     private ForgeResult RecipeIssueSet(ForgeCommand command)
@@ -698,7 +740,8 @@ public sealed partial class PluginCommandProcessor
         }
 
         var preflight = BuildPreflightReport(args.RequiredTitleblockTags, args.TitleblockBlockName, args.ExpectedLayers);
-        steps.Add(new { step = "preflight", preflight.Passed, preflight });
+        var preflightBypassed = !preflight.Passed && args.Force;
+        steps.Add(new { step = "preflight", preflight.Passed, preflight, preflightBypassed });
         if (!preflight.Passed && !args.Force)
         {
             return new ForgeResult
@@ -708,13 +751,24 @@ public sealed partial class PluginCommandProcessor
                 Error = new ForgeError(
                     "issue_set_preflight_failed",
                     "Issue-set recipe stopped: publish readiness gate failed.",
-                    "Fix QA findings or pass force=true."),
+                    "Fix the preflight findings before publish."),
                 Data = new { steps, preflight }
             };
         }
 
         if (command.DryRun)
         {
+            if (preflightBypassed)
+            {
+                return ForgeResult.Gate(
+                    command.Id,
+                    false,
+                    "preflight_forced",
+                    "Dry-run stopped: preflight did not pass.",
+                    "Fix the preflight findings. This plan is not a passed issue set.",
+                    new { dryRun = true, steps, wouldPublish = args.OutputPath, layouts = args.Layouts, preflight, preflightBypassed = true });
+            }
+
             return DryRun(command, new { steps, wouldPublish = args.OutputPath, args.Layouts });
         }
 
@@ -736,12 +790,24 @@ public sealed partial class PluginCommandProcessor
         steps.Add(new { step = "publish", publish.Ok, publish.Data, publish.Error });
         if (!publish.Ok)
         {
-            return publish with { Data = new { steps, publish.Data } };
+            return publish with { Data = new { steps, publish = publish.Data, preflight, preflightBypassed } };
+        }
+
+        if (preflightBypassed)
+        {
+            return ForgeResult.Gate(
+                command.Id,
+                false,
+                "preflight_forced",
+                "The issue set was written, but preflight did not pass.",
+                "Fix the preflight findings. This result is not a passed issue set.",
+                new { steps, publish = publish.Data, preflight, preflightBypassed = true },
+                publish.Verification);
         }
 
         return ForgeResult.Success(
             command.Id,
-            new { steps, publish = publish.Data, preflight },
+            new { steps, publish = publish.Data, preflight, preflightBypassed = false },
             verification: publish.Verification);
     }
 

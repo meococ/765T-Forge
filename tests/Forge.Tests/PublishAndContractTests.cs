@@ -33,6 +33,45 @@ public sealed class PublishAndContractTests
     }
 
     [Fact]
+    public void PdfProbeFailsWithoutPdfHeader()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"forge-probe-{Guid.NewGuid():N}.pdf");
+        File.WriteAllText(path, "not a pdf\n");
+        try
+        {
+            var probe = PdfProbeResult.Probe(path, expectedPages: 1);
+            Assert.True(probe.Exists);
+            Assert.True(probe.NonEmpty);
+            Assert.False(probe.Passed);
+            Assert.Contains("%PDF-", probe.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void PdfProbeFailsWhenExpectedPagesAndPageCountUnknown()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"forge-probe-{Guid.NewGuid():N}.pdf");
+        File.WriteAllText(path, "%PDF-1.4\n%%EOF\n");
+        try
+        {
+            var probe = PdfProbeResult.Probe(path, expectedPages: 2);
+            Assert.Null(probe.PageCount);
+            Assert.False(probe.Passed);
+
+            var withoutExpectation = PdfProbeResult.Probe(path);
+            Assert.True(withoutExpectation.Passed);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void IssueSetContractRejectsUnknownLayout()
     {
         var contract = new IssueSetContract

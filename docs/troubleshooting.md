@@ -71,9 +71,9 @@ Assume the drawing may already have changed. Call QA/list tools before retrying.
 ## Plot / publish surprises
 
 - `forge_plot_to_pdf` is **configurable** (device, paper, CTB/STB, area, orientation, scale). Unexpected paper usually means wrong args or missing `forge_system_capabilities` discovery — not a hardcoded Phase 0 path.
-- `forge_plot_publish` uses real DSD + `Publisher.PublishDsd` with optional preflight gate and overwrite acknowledgement. `Ok=true` with PDF verify means the publisher finished; if preflight fails, publish refuses unless `force=true`.
+- `forge_plot_publish` uses real DSD + `Publisher.PublishDsd` with a preflight gate and overwrite acknowledgement. `Ok=true` means the publisher finished and the PDF probe passed. A failed preflight or probe is `Ok=false`. `force` is only when a human asks, and a bypass still returns `Ok=false` (`preflight_forced`).
 - `forge_layout_page_setup_import` may still be **partial** (command-queued) — check [capability-matrix.md](capability-matrix.md). Prefer `forge_layout_page_setup_apply` for sync apply of an existing setup.
-- Open-world `forge_exec_command` / `forge_exec_lisp`: if the result includes `queued=true` or `completed=false`, do **not** treat success as command finished — read back before chaining.
+- Open-world `forge_exec_command` / `forge_exec_lisp`: `queued=true` or `completed=false` is `Ok=false`. Read back before chaining.
 
 ## Release artifacts incomplete
 

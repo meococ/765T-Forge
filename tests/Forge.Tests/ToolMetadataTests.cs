@@ -76,4 +76,20 @@ public sealed class ToolMetadataTests
             Assert.Equal(meta.OpenWorld, attr.OpenWorld);
         }
     }
+
+    [Fact]
+    public void FileWritingToolsAreNotReadOnlyAndDoNotRequireBackup()
+    {
+        var preflight = ForgeToolRegistry.Get("forge_qa_preflight");
+        Assert.False(preflight.ReadOnly);
+        Assert.False(preflight.Destructive);
+        Assert.False(preflight.RequiresBackup);
+
+        var import = ForgeToolRegistry.Get("forge_sheet_inventory_import");
+        Assert.False(import.ReadOnly);
+        Assert.False(import.Destructive);
+        Assert.False(import.RequiresBackup);
+        Assert.False(import.Idempotent);
+        Assert.False(import.RequiresAutoCad);
+    }
 }

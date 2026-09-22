@@ -38,15 +38,51 @@ public sealed record ForgeResult
         };
     }
 
-    public static ForgeResult Failure(string id, string code, string message, string? suggestion = null, string? auditId = null)
+    public static ForgeResult Failure(
+        string id,
+        string code,
+        string message,
+        string? suggestion = null,
+        string? auditId = null,
+        object? data = null,
+        ForgeVerification? verification = null)
     {
         return new ForgeResult
         {
             Id = id,
             Ok = false,
+            Data = data,
             Error = new ForgeError(code, message, suggestion),
-            AuditId = auditId
+            AuditId = auditId,
+            Verification = verification
         };
+    }
+
+    /// <summary>
+    /// A gate keeps its report in <paramref name="data"/>. Failure is <c>Ok=false</c>, not a successful call with <c>passed=false</c>.
+    /// </summary>
+    public static ForgeResult Gate(
+        string id,
+        bool passed,
+        string code,
+        string message,
+        string? suggestion,
+        object? data,
+        ForgeVerification? verification = null)
+    {
+        var ver = verification ?? new ForgeVerification
+        {
+            Attempted = true,
+            Message = message,
+            ReadBack = data
+        };
+        ver = ver with { Attempted = true, Passed = passed };
+        if (passed)
+        {
+            return Success(id, data, verification: ver);
+        }
+
+        return Failure(id, code, message, suggestion, data: data, verification: ver);
     }
 }
 

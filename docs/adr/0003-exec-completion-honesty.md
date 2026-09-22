@@ -10,7 +10,7 @@
 ## Decision
 
 1. Prefer **synchronous** dispatch via `Editor.Command` for `forge_exec_command` / `forge_exec_lisp` when the payload can be expressed as command tokens.
-2. When a path must still queue, the result **must** include `queued=true` and `completed=false` (never imply finished).
+2. When a path must still queue, the result **must** be `Ok=false` with `queued=true` and `completed=false` (never imply finished). Un-tokenized commands use `command_not_tokenized`; queued fallbacks use `queued_not_completed`.
 3. Typed hot-path tools must not rely on queued success for publish/QA contracts.
 4. Agents and skills must treat open-world exec as last resort and always read back.
 

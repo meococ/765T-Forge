@@ -11,7 +11,7 @@ Forge is designed for AI agents that can mutate production DWGs. Safety is manda
 - `forge_run_script`
 - `forge_exec_dotnet`
 
-Blocked patterns include (non-exhaustive): `ERASE ALL`, `PURGE`, `OVERKILL`, `RECOVER`, `AUDIT` with fix, layer delete commands, **scoped** broad `ALL`/`*` **selection** idioms (not every asterisk — e.g. `ZOOM *` and layer filters are allowed), and certain SAVEAS/WBLOCK + broad-selection combinations.
+Blocked patterns include (non-exhaustive): `ERASE ALL` and the `E` / `_.E` alias with `ALL`, `PURGE`, `OVERKILL`, `RECOVER`, `AUDIT` with fix, layer delete commands, `ssget` `"_X"` / `"_A"` combined with erase/delete/`command`, `strcat`/`eval` combined with `ALL` or `ssget`, command-anchored `NETLOAD` / `APPLOAD` / `ARXLOAD` / `(load` / `SCRIPT` / `SHELL` / `SH` (not a bare `\bSH\b`), **scoped** broad `ALL`/`*` **selection** idioms (not every asterisk — e.g. `ZOOM *` and layer filters are allowed), and `SAVE` / `QSAVE` / `SAVEAS` / `WBLOCK` on executors even when `*` is not next to the command.
 
 **Out of denylist scope:** typed tools’ structured business values (titleblock notes, folder names, attribute text). A note containing the word `PURGE` is not scanned the same way as an executor command string.
 
@@ -54,7 +54,7 @@ Silent clobber is refused with a typed error code.
 
 ## Publish preflight
 
-`forge_qa_preflight` (and recipes that call it) can **block** publish when xrefs, required titleblock tags, unresolved `####` fields, or standards-pack rules fail. Pass `force=true` only with human approval.
+`forge_qa_preflight` (and recipes that call it) **block** publish when xrefs, required titleblock tags, unresolved `####` fields, or standards-pack rules fail (`Ok=false`, report kept in `data`). `force` is only when a human asks in the session. A bypass can still write the file, but the result stays `Ok=false` with `preflight_forced` and `data.preflightBypassed=true`.
 
 ## Drawing number registry
 
@@ -73,7 +73,7 @@ Leave unsafe ops disabled unless a human explicitly enables them for the session
 
 If the plugin response times out, a write may already have committed. **Read back** (`forge_qa_*`, list tools) before retrying. Do not “fix” a timeout by re-sending the same write blindly.
 
-Open-world executors that still queue AutoCAD commands expose `queued` / `completed` flags — `Ok=true` alone is not completion.
+Open-world executors that still queue AutoCAD commands return `Ok=false` with `queued=true` and `completed=false`. That call is not finished.
 
 ## Agent rules of thumb
 

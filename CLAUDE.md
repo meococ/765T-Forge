@@ -72,7 +72,7 @@ Tool naming convention: `forge_<group>_<action>` (e.g. `forge_layer_state_restor
 - **`forge_exec_dotnet` (Roslyn) is off by default** and needs **both** gates: env `FORGE_ENABLE_UNSAFE_OPS=true` *and* per-call `unsafeAcknowledged=true`. It has full assembly access and no sandbox — highest-risk path.
 - **Backups**: `BackupPlanner.TryBackup` copies the active DWG to `FORGE_BACKUP_DIR` before any non-dry-run write whose metadata has `RequiresBackup`.
 - **Dry-run**: writes accept `dryRun=true` and return what they *would* do without touching the drawing.
-- **Read-back verification**: write tools return a `ForgeVerification`; `forge_qa_*` tools formalize this. Publish can be blocked by `forge_qa_preflight` unless `force=true`.
+- **Read-back verification**: write tools return a `ForgeVerification`; `forge_qa_*` tools formalize this. A failed preflight is `Ok=false`. `force` is only when a human asks in the session, and a bypass still returns `Ok=false` (`preflight_forced`).
 - **`forge_exec_command` / `forge_exec_lisp`:** prefer sync `Editor.Command` when possible; when a path still queues, results must expose `queued=true` / `completed=false` honestly — never treat `Ok=true` alone as command finished.
 
 ## Configuration (environment variables)

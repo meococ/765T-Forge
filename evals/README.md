@@ -10,7 +10,7 @@ Fixtures intentionally contain **metadata only** — no customer DWGs in-repo.
 | E01 | Health before work | `forge_system_health` | `ok` + pipe up |
 | E02 | Capability discovery | `forge_system_capabilities` | devices + pageSetups listed |
 | E03 | Layout inventory | `forge_doc_list_layouts` | ≥1 paper layout |
-| E04 | Xref gate | `forge_qa_check_xrefs` / `forge_qa_preflight` | missing xref → `passed=false` |
+| E04 | Xref gate | `forge_qa_check_xrefs` / `forge_qa_preflight` | missing xref → `passed=false` and `Ok=false` |
 | E05 | Relative xref normalize dry-run | `forge_xref_normalize_relative` dryRun | diffs show absolute→relative |
 | E06 | Titleblock campaign dry-run | `forge_block_campaign` dryRun | Unicode values in diffs |
 | E07 | Configurable plot dry-run | `forge_plot_to_pdf` dryRun | device/paper/plotStyle echoed |

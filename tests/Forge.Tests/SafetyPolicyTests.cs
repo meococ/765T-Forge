@@ -85,6 +85,73 @@ public sealed class SafetyPolicyTests
         Assert.True(decision.Allowed);
     }
 
+    [Theory]
+    [InlineData("E ALL")]
+    [InlineData("_.E\nALL")]
+    [InlineData("E\n*")]
+    [InlineData("(ssget \"_X\")\n(entdel e)")]
+    [InlineData("(ssget \"_A\")\n(vla-erase e)")]
+    [InlineData("(vla-delete e)\n(ssget \"_X\")")]
+    [InlineData("(ssget \"_X\")\n(command \"_.ERASE\")")]
+    [InlineData("(strcat \"ER\" \"ASE\")\nALL")]
+    [InlineData("(eval payload)\n(ssget \"_X\")")]
+    [InlineData("SAVEAS\nC:\\out\\sheet.dwg")]
+    [InlineData("QSAVE")]
+    [InlineData("WBLOCK\nmyblock\n*")]
+    [InlineData("SAVE")]
+    [InlineData("NETLOAD plugin.dll")]
+    [InlineData("_.APPLOAD")]
+    [InlineData("ARXLOAD helper.arx")]
+    [InlineData("(load \"helper.lsp\")")]
+    [InlineData("SCRIPT other.scr")]
+    [InlineData("SHELL")]
+    [InlineData("_.SH")]
+    [InlineData("(command \"SH\")")]
+    public void AddedDenylistHolesAreDenied(string commandText)
+    {
+        var decision = _policy.EvaluateText("forge_exec_command", commandText);
+
+        Assert.False(decision.Allowed);
+        Assert.StartsWith("deny_", decision.Code);
+    }
+
+    [Theory]
+    [InlineData("ZOOM *\n-LAYER\nS\n0\n")]
+    [InlineData("SHAPE")]
+    [InlineData("FINISH")]
+    [InlineData("OPEN\nC:\\SH\\file.dwg")]
+    [InlineData("OPEN\nC:\\Save\\a.dwg")]
+    [InlineData("OPEN\nC:\\Shell\\a.dwg")]
+    [InlineData("(strcat \"A\" \"B\")")]
+    [InlineData("(ssget \"_X\")")]
+    public void HarmlessExecutorTextStaysAllowed(string commandText)
+    {
+        var decision = _policy.EvaluateText("forge_exec_command", commandText);
+
+        Assert.True(decision.Allowed);
+    }
+
+    [Fact]
+    public void BatchToolDoesNotScanPathsAsCommands()
+    {
+        var command = new ForgeCommand
+        {
+            Tool = "forge_batch_run",
+            Args = ForgeJson.ToElement(new
+            {
+                jobs = new[]
+                {
+                    new { dwgPath = @"C:\NETLOAD\a.dwg", scriptPath = @"C:\SH\a.scr" }
+                }
+            })
+        };
+
+        var decision = _policy.Evaluate(command);
+
+        Assert.True(decision.Allowed);
+        Assert.False(ForgeToolRegistry.Get("forge_batch_run").OpenWorld);
+    }
+
     [Fact]
     public void DotnetExecutorRequiresUnsafeAcknowledgement()
     {

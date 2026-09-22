@@ -15,7 +15,7 @@ public sealed class ForgeMcpPrompts
            2. forge_registry_load + forge_pack_load when project files exist.
            3. forge_doc_list_layouts / forge_xref_list / forge_system_capabilities.
            4. Dry-run forge_xref_normalize_relative and forge_block_campaign (values ONLY from registry).
-           5. forge_qa_preflight — refuse publish if passed=false unless human force.
+           5. forge_qa_preflight — passed=false is Ok=false. Fix findings. force only if a human asks, and the result stays Ok=false (preflight_forced).
            6. forge_plot_publish or forge_recipe_issue_set with overwriteAcknowledged when needed.
            7. Verify PDF exists; never invent drawing numbers; never ERASE ALL via executors.
            """;
@@ -27,7 +27,9 @@ public sealed class ForgeMcpPrompts
            Safety first:
            - Prefer typed tools over forge_exec_*.
            - dryRun before writes; read-back after writes.
-           - If exec returns queued=true or completed=false, do not chain writes.
+           - If exec returns Ok=false with queued=true or completed=false, do not chain writes.
+           - dryRun=true is a plan. Call again with dryRun=false.
+           - passed=false means Ok=false. Do not omit handle on forge_block_set_attr.
            - forge_exec_dotnet requires FORGE_ENABLE_UNSAFE_OPS and unsafeAcknowledged.
            - On timeout, assume write may have committed — QA before retry.
            """;

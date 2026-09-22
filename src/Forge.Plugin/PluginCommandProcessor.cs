@@ -65,6 +65,15 @@ public sealed partial class PluginCommandProcessor
         if (!metadata.ReadOnly && metadata.RequiresBackup && !command.DryRun)
         {
             backupPath = _backupPlanner.TryBackup(ActiveDocumentPath());
+            if (backupPath is null)
+            {
+                return ForgeResult.Failure(
+                    command.Id,
+                    "backup_unavailable",
+                    "Refusing to modify the drawing because a backup file could not be created.",
+                    "Save the drawing to a real DWG path and ensure FORGE_BACKUP_DIR is writable.",
+                    auditId);
+            }
         }
 
         ForgeResult Dispatch() => command.Tool.ToLowerInvariant() switch
@@ -128,9 +137,7 @@ public sealed partial class PluginCommandProcessor
         return result with
         {
             AuditId = auditId,
-            Data = result.Ok && backupPath is not null
-                ? new { result.Data, backupPath }
-                : result.Data
+            Data = backupPath is null ? result.Data : ForgeResultPayload.MergeBackup(result.Data, backupPath)
         };
     }
 
@@ -183,6 +190,17 @@ public sealed partial class PluginCommandProcessor
     private static ForgeResult DryRun(ForgeCommand command, object data)
     {
         return ForgeResult.Success(command.Id, new { dryRun = true, data });
+    }
+
+    private static ForgeResult NotFinished(ForgeCommand command, string code, string message, object data)
+    {
+        return ForgeResult.Failure(
+            command.Id,
+            code,
+            message,
+            "Do not chain writes. Read back after the command finishes.",
+            data: data,
+            verification: new ForgeVerification { Attempted = true, Passed = false, Message = message, ReadBack = data });
     }
 
     private ForgeResult Health(ForgeCommand command)
@@ -620,6 +638,15 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, "missing_attr_tag", "Attribute tag is required.");
         }
 
+        if (string.IsNullOrWhiteSpace(args.Handle) && string.IsNullOrWhiteSpace(args.BlockName))
+        {
+            return ForgeResult.Failure(
+                command.Id,
+                "ambiguous_block_target",
+                "Refusing to write a block attribute without a handle or block name.",
+                "Pass handle from forge_block_list_attributes. Do not omit handle.");
+        }
+
         if (AuthorizeAttributeWrite(command, args.Tag!, args.Value) is { } denied)
         {
             return denied;
@@ -633,6 +660,8 @@ public sealed partial class PluginCommandProcessor
         using var tr = ActiveDb.TransactionManager.StartTransaction();
         var matches = FindBlockReferences(tr, args.BlockName, args.Handle).ToArray();
         var updated = 0;
+        var verified = 0;
+        var requested = args.Value ?? "";
         var readBack = new List<object>();
         foreach (var br in matches)
         {
@@ -644,17 +673,44 @@ public sealed partial class PluginCommandProcessor
                     continue;
                 }
 
-                attr.TextString = args.Value ?? "";
+                attr.TextString = requested;
                 updated++;
+                if (string.Equals(attr.TextString, requested, StringComparison.Ordinal))
+                {
+                    verified++;
+                }
+
                 readBack.Add(new { blockHandle = br.Handle.Value.ToString("X"), blockName = br.Name, tag = attr.Tag, value = attr.TextString });
             }
+        }
+
+        if (updated == 0)
+        {
+            return ForgeResult.Failure(
+                command.Id,
+                "attr_not_found",
+                $"Attribute not found: {args.Tag}",
+                "Confirm the tag, handle, and block name, then read attributes before writing.",
+                data: new { updated, readBack },
+                verification: new ForgeVerification { Attempted = true, Passed = false, ReadBack = readBack });
+        }
+
+        if (verified != updated)
+        {
+            return ForgeResult.Failure(
+                command.Id,
+                "attr_readback_mismatch",
+                $"Attribute '{args.Tag}' was written but the read-back did not match.",
+                "Read the attribute back before another write.",
+                data: new { updated, verified, readBack },
+                verification: new ForgeVerification { Attempted = true, Passed = false, ReadBack = readBack });
         }
 
         tr.Commit();
         return ForgeResult.Success(
             command.Id,
             new { updated, readBack },
-            verification: new ForgeVerification { Attempted = true, Passed = updated > 0, ReadBack = readBack });
+            verification: new ForgeVerification { Attempted = true, Passed = true, ReadBack = readBack });
     }
 
     private static ForgeResult? AuthorizeAttributeWrite(ForgeCommand command, string tag, string? value)
@@ -819,7 +875,7 @@ public sealed partial class PluginCommandProcessor
         {
             // Fall back to classic command queue — honesty flags required.
             ActiveDoc.SendStringToExecute($"_.-PSETUPIN \"{EscapeCommand(args.TemplatePath)}\" \"{EscapeCommand(args.SetupName)}\" ", true, false, false);
-            return ForgeResult.Success(command.Id, new
+            return NotFinished(command, "queued_not_completed", "Page setup import was queued and has not finished.", new
             {
                 queued = true,
                 completed = false,
@@ -1083,22 +1139,22 @@ public sealed partial class PluginCommandProcessor
                 "Pass overwriteAcknowledged=true after confirming the previous issue set is archived.");
         }
 
+        var preflightBypassed = false;
+        QaReport? preflightReport = null;
         if (args.RequirePreflight)
         {
-            var preflight = BuildPreflightReport(args.RequiredTitleblockTags, args.TitleblockBlockName);
-            if (!preflight.Passed && !args.Force)
+            preflightReport = BuildPreflightReport(args.RequiredTitleblockTags, args.TitleblockBlockName);
+            if (!preflightReport.Passed && !args.Force)
             {
-                return new ForgeResult
-                {
-                    Id = command.Id,
-                    Ok = false,
-                    Error = new ForgeError(
-                        "publish_preflight_failed",
-                        "Publish readiness gate failed.",
-                        "Fix findings from forge_qa_preflight or pass force=true to override."),
-                    Data = preflight
-                };
+                return ForgeResult.Failure(
+                    command.Id,
+                    "publish_preflight_failed",
+                    "Publish readiness gate failed.",
+                    "Fix the preflight findings before publish.",
+                    data: preflightReport);
             }
+
+            preflightBypassed = !preflightReport.Passed && args.Force;
         }
 
         var dsdPath = Path.Combine(Path.GetTempPath(), $"forge-publish-{command.Id}.dsd");
@@ -1161,24 +1217,49 @@ public sealed partial class PluginCommandProcessor
         };
         receipt.ArtifactPath = PublishReceipt.TryWriteArtifact(receipt);
 
-        return ForgeResult.Success(
-            command.Id,
-            new
-            {
-                outputPath,
-                layouts = args.Layouts,
-                singlePdf = args.SinglePdf,
-                bytes = receipt.OutputBytes,
-                dsd = true,
-                receipt
-            },
-            verification: new ForgeVerification
-            {
-                Attempted = true,
-                Passed = probe.Passed,
-                Message = receipt.Message,
-                ReadBack = receipt
-            });
+        var payload = new
+        {
+            outputPath,
+            layouts = args.Layouts,
+            singlePdf = args.SinglePdf,
+            bytes = receipt.OutputBytes,
+            dsd = true,
+            receipt,
+            preflightBypassed,
+            preflight = preflightReport
+        };
+        var verification = new ForgeVerification
+        {
+            Attempted = true,
+            Passed = probe.Passed && !preflightBypassed,
+            Message = receipt.Message,
+            ReadBack = receipt
+        };
+        if (!probe.Passed)
+        {
+            return ForgeResult.Gate(
+                command.Id,
+                false,
+                "publish_probe_failed",
+                "Publish wrote a file but the PDF probe failed.",
+                "Inspect the PDF probe in data. Do not treat this output as published.",
+                payload,
+                verification);
+        }
+
+        if (preflightBypassed)
+        {
+            return ForgeResult.Gate(
+                command.Id,
+                false,
+                "preflight_forced",
+                "The file was written, but preflight did not pass.",
+                "Fix the preflight findings. This result is not a passed publish.",
+                payload,
+                verification);
+        }
+
+        return ForgeResult.Success(command.Id, payload, verification: verification);
     }
 
     private static ForgeResult VerifyTitleblock(ForgeCommand command)
@@ -1195,7 +1276,14 @@ public sealed partial class PluginCommandProcessor
             }
         }
 
-        return ForgeResult.Success(command.Id, new { passed = diffs.Count == 0, diffs, readBack = attrs });
+        var titleblockPassed = diffs.Count == 0;
+        return ForgeResult.Gate(
+            command.Id,
+            titleblockPassed,
+            "qa_failed",
+            titleblockPassed ? "Titleblock matches expected tags." : "Titleblock verification failed.",
+            titleblockPassed ? null : "Fix the differing titleblock tags. Do not invent values.",
+            new { passed = titleblockPassed, diffs, readBack = attrs });
     }
 
     private static ForgeResult CheckXrefs(ForgeCommand command)
@@ -1207,7 +1295,14 @@ public sealed partial class PluginCommandProcessor
             return Equals(type.GetProperty("isUnloaded")?.GetValue(x), true) ||
                    Equals(type.GetProperty("pathExists")?.GetValue(x), false);
         }).ToArray();
-        return ForgeResult.Success(command.Id, new { passed = bad.Length == 0, issues = bad, xrefs });
+        var xrefsPassed = bad.Length == 0;
+        return ForgeResult.Gate(
+            command.Id,
+            xrefsPassed,
+            "qa_failed",
+            xrefsPassed ? "Xrefs are loaded and found." : "Xref check failed.",
+            xrefsPassed ? null : "Fix unloaded or missing xrefs before publish.",
+            new { passed = xrefsPassed, issues = bad, xrefs });
     }
 
     private static ForgeResult AuditLayers(ForgeCommand command)
@@ -1217,7 +1312,14 @@ public sealed partial class PluginCommandProcessor
         var layerJson = ForgeJson.ToElement(layersResult.Data);
         var names = layerJson.GetProperty("layers").EnumerateArray().Select(x => x.GetProperty("name").GetString()).Where(x => x is not null).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var missing = args.ExpectedLayers.Where(x => !names.Contains(x)).ToArray();
-        return ForgeResult.Success(command.Id, new { passed = missing.Length == 0, missing });
+        var layersPassed = missing.Length == 0;
+        return ForgeResult.Gate(
+            command.Id,
+            layersPassed,
+            "qa_failed",
+            layersPassed ? "Expected layers are present." : "Layer audit failed.",
+            layersPassed ? null : "Create or restore the missing layers.",
+            new { passed = layersPassed, missing });
     }
 
     private static ForgeResult Readback(ForgeCommand command)
@@ -1227,24 +1329,48 @@ public sealed partial class PluginCommandProcessor
         {
             "forge_xref_repath" or "forge_xref_reload" => ListXrefs(command),
             "forge_block_set_attr" => ListBlockAttributes(command),
-            "forge_system_setvar" => ForgeResult.Success(command.Id, new { message = "Call forge_system_getvar with the variable name for precise read-back." }),
-            _ => ForgeResult.Success(command.Id, new { message = $"No specialized read-back registered for {args.TargetTool}." })
+            _ => ForgeResult.Failure(
+                command.Id,
+                "readback_unsupported",
+                $"No comparator is registered for '{args.TargetTool}'.",
+                "Call the typed read tool for that field. Do not treat this as verification.",
+                data: new { targetTool = args.TargetTool, comparator = false },
+                verification: new ForgeVerification { Attempted = true, Passed = false, Message = "No comparator registered." })
         };
     }
 
     private static ForgeResult ReadbackAfterTimeout(ForgeCommand command)
     {
         var inner = Readback(command);
-        return ForgeResult.Success(command.Id, new
+        var recovery = new
         {
             protocol = "timeout_recovery",
             guidance = "Do not retry the timed-out write. Inspect read-back; only re-issue if the mutation did not apply.",
             readBack = inner.Data,
             innerOk = inner.Ok
-        }, verification: new ForgeVerification
+        };
+        if (!inner.Ok)
+        {
+            return new ForgeResult
+            {
+                Id = command.Id,
+                Ok = false,
+                Error = inner.Error ?? new ForgeError("readback_unsupported", "Read-back did not verify the previous write."),
+                Data = recovery,
+                Verification = new ForgeVerification
+                {
+                    Attempted = true,
+                    Passed = false,
+                    Message = inner.Error?.Message,
+                    ReadBack = inner.Data
+                }
+            };
+        }
+
+        return ForgeResult.Success(command.Id, recovery, verification: new ForgeVerification
         {
             Attempted = true,
-            Passed = inner.Ok,
+            Passed = true,
             Message = "Timeout recovery read-back completed.",
             ReadBack = inner.Data
         });
@@ -1281,7 +1407,7 @@ public sealed partial class PluginCommandProcessor
             catch (System.Exception ex)
             {
                 ActiveDoc.SendStringToExecute(args.Command.TrimEnd() + " ", true, false, false);
-                return ForgeResult.Success(command.Id, new
+                return NotFinished(command, "queued_not_completed", "Command was queued and has not finished.", new
                 {
                     queued = true,
                     completed = false,
@@ -1293,7 +1419,13 @@ public sealed partial class PluginCommandProcessor
         }
 
         ActiveDoc.SendStringToExecute(args.Command.TrimEnd() + " ", true, false, false);
-        return ForgeResult.Success(command.Id, new { queued = true, completed = false, mode = "queued", args.Command });
+        return NotFinished(command, "command_not_tokenized", "Command could not be tokenized for synchronous execution and was only queued.", new
+        {
+            queued = true,
+            completed = false,
+            mode = "queued",
+            args.Command
+        });
     }
 
     private static ForgeResult ExecLisp(ForgeCommand command)
@@ -1324,7 +1456,7 @@ public sealed partial class PluginCommandProcessor
         catch (System.Exception ex)
         {
             ActiveDoc.SendStringToExecute(lisp + " ", true, false, false);
-            return ForgeResult.Success(command.Id, new
+            return NotFinished(command, "queued_not_completed", "AutoLISP was queued and has not finished.", new
             {
                 queued = true,
                 completed = false,

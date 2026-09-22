@@ -213,7 +213,7 @@ public sealed class ForgeToolRunner
                 contractId = contract.ContractId,
                 outputContractPath = written,
                 sheets = contract.Sheets,
-                note = "Read-only import — does not write AutoCAD Sheet Set (DST) files."
+                note = "Does not write AutoCAD Sheet Set (DST) files. Writes outputContractPath when that path is set. contractId is a timestamp when omitted."
             });
         }
         catch (Exception ex)

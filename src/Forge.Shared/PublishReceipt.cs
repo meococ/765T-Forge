@@ -109,6 +109,19 @@ public sealed class PdfProbeResult
             };
         }
 
+        if (!HasPdfHeader(path))
+        {
+            return new PdfProbeResult
+            {
+                Exists = true,
+                Bytes = bytes,
+                NonEmpty = true,
+                ExpectedPages = expectedPages,
+                Passed = false,
+                Message = "PDF header %PDF- is missing."
+            };
+        }
+
         int? pageCount = null;
         try
         {
@@ -127,8 +140,12 @@ public sealed class PdfProbeResult
             warnings.Add($"PDF text probe failed: {ex.Message}");
         }
 
-        var pageOk = expectedPages is null || pageCount is null || pageCount == expectedPages;
-        if (expectedPages is not null && pageCount is not null && pageCount != expectedPages)
+        var pageOk = expectedPages is null || (pageCount is not null && pageCount == expectedPages);
+        if (expectedPages is not null && pageCount is null)
+        {
+            warnings.Add($"Page count is unknown but {expectedPages} pages were expected.");
+        }
+        else if (expectedPages is not null && pageCount != expectedPages)
         {
             warnings.Add($"Page count {pageCount} != expected {expectedPages}.");
         }
@@ -146,5 +163,18 @@ public sealed class PdfProbeResult
             Message = passed ? "PDF probe passed." : "PDF probe failed.",
             Warnings = warnings.ToArray()
         };
+    }
+
+    private static bool HasPdfHeader(string path)
+    {
+        Span<byte> header = stackalloc byte[5];
+        using var stream = File.OpenRead(path);
+        var read = stream.Read(header);
+        return read >= 5
+            && header[0] == (byte)'%'
+            && header[1] == (byte)'P'
+            && header[2] == (byte)'D'
+            && header[3] == (byte)'F'
+            && header[4] == (byte)'-';
     }
 }

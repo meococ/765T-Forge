@@ -44,10 +44,10 @@ Honest status of MCP tools. AutoCAD target: **2026**. Civil 3D, full SSM **write
 | `forge_plot_publish` | implemented | DSD + `Publisher.PublishDsd`; **PublishReceipt** + PDF probe; preflight gate |
 | `forge_qa_*` (verify/check/audit/readback) | implemented | |
 | `forge_qa_readback_after_timeout` | implemented | Timeout recovery protocol — never retry write blind |
-| `forge_qa_preflight` | implemented | QaReport + pack v2 + foreground plot + issue-set contract findings |
+| `forge_qa_preflight` | implemented | Writes a QaReport file (not read-only). `passed=false` is `Ok=false` |
 | `forge_audit_summarize` | implemented | Server-side last-N audit summary (no raw args) |
 | `forge_issue_set_validate` | implemented | IssueSetContract layouts↔drawingNos↔rev |
-| `forge_sheet_inventory_import` | implemented | Read-only CSV → contract (no DST/SSM write) |
+| `forge_sheet_inventory_import` | implemented | CSV → contract JSON. Writes `outputContractPath` when set (no DST/SSM). Not idempotent when `contractId` is omitted |
 | `forge_issue_set_diff` | implemented | Diff two PublishReceipt artifacts |
 | `forge_recipe_issue_set` | implemented | Normalize → fill → gate → publish |
 | `forge_pack_and_go` | implemented | Host+xrefs+styles + `manifest.json` |
@@ -82,7 +82,7 @@ Layer filtering on all `forge_linework_*`: `layerFilter` patterns match the full
 
 | Tool | Status | Notes |
 |------|--------|-------|
-| `forge_exec_command` / `_lisp` | implemented | Prefer sync `Editor.Command`; else `queued=true, completed=false` |
+| `forge_exec_command` / `_lisp` | implemented | Prefer sync `Editor.Command`; else `Ok=false`, `queued=true`, `completed=false` |
 | `forge_run_script` | implemented | AccoreConsole; **server-only** SafetyPolicy (ADR 0002) |
 | `forge_exec_dotnet` | implemented | Dual-gated; sync snippets only |
 

@@ -79,6 +79,23 @@ public sealed class HeadlessAccoreConsoleRunner
 
         if (command.DryRun)
         {
+            foreach (var job in state.Jobs)
+            {
+                if (string.IsNullOrWhiteSpace(job.ScriptPath) || !File.Exists(job.ScriptPath))
+                {
+                    return ForgeResult.Failure(command.Id, "script_not_found", $"Script file not found: {job.ScriptPath}");
+                }
+
+                var scriptText = await File.ReadAllTextAsync(job.ScriptPath, cancellationToken).ConfigureAwait(false);
+                // Scan the script body with the open-world script tool. forge_batch_run stays
+                // OpenWorld=false so job paths are not treated as commands.
+                var scriptDecision = _safetyPolicy.EvaluateText("forge_run_script", scriptText);
+                if (!scriptDecision.Allowed)
+                {
+                    return ForgeResult.Failure(command.Id, scriptDecision.Code, scriptDecision.Message, scriptDecision.Suggestion);
+                }
+            }
+
             return ForgeResult.Success(command.Id, new
             {
                 dryRun = true,
@@ -220,6 +237,15 @@ public sealed class HeadlessAccoreConsoleRunner
         }
 
         var backupPath = _backupPlanner.TryBackup(dwgPath);
+        if (backupPath is null)
+        {
+            return ForgeResult.Failure(
+                commandId,
+                "backup_unavailable",
+                "Refusing to run the script because a drawing backup could not be created.",
+                "Ensure the DWG exists and FORGE_BACKUP_DIR is writable.");
+        }
+
         var psi = new ProcessStartInfo
         {
             FileName = accoreconsole,

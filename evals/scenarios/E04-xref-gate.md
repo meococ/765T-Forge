@@ -9,3 +9,4 @@
 ## Expect
 - Preflight or xref check reports unhealthy xref
 - `passed=false` when severity error
+- `Ok=false` (`qa_failed` for xref check, `preflight_failed` for preflight). The report stays in `data`

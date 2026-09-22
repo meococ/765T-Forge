@@ -12,7 +12,10 @@ Use this skill when an agent drives AutoCAD through **765T-Forge** for metro/AEC
 - If a tool returns a safety denial, do **not** retry via another executor; switch to a typed scoped tool or ask for a narrower target.
 - Treat `forge_exec_dotnet` as disabled unless the human explicitly enabled unsafe ops for this session (`FORGE_ENABLE_UNSAFE_OPS` + `unsafeAcknowledged`).
 - Never use executors for broad selections such as `ERASE ALL` or `ERASE *` (harmless `ZOOM *` / layer filters are OK).
-- If `forge_exec_command` / `forge_exec_lisp` returns `queued=true` or `completed=false`, **do not** chain writes — read back first.
+- If `forge_exec_command` / `forge_exec_lisp` returns `Ok=false` with `queued=true` or `completed=false`, **do not** chain writes — read back first.
+- `dryRun=true` with `Ok=true` and `data.dryRun=true` is only a plan. Call again with `dryRun=false` to perform the work.
+- `passed=false` is `Ok=false`. The report stays in `data`. Do not treat that call as success.
+- `forge_block_set_attr` needs `handle` or `blockName`. Omitting both is rejected.
 - On plugin timeout, call **`forge_qa_readback_after_timeout`** — never retry the write blind.
 - Prefer `forge_issue_set_validate` when an IssueSetContract / sheet inventory exists; do not invent the sheet set.
 
@@ -26,7 +29,7 @@ Call `forge_system_tool_profile` (`core` | `plot` | `qa`) to shrink the tool sur
 2. `forge_xref_list` or `forge_qa_check_xrefs`
 3. `forge_layer_list` / `forge_layer_state_list`
 4. `forge_block_list_attributes`
-5. **`forge_qa_preflight`** before any real publish; do not force past a failed gate unless the human explicitly requests `force`.
+5. **`forge_qa_preflight`** before any real publish. A failed gate is `Ok=false`. Use `force` only when a human asks in this session; a bypass still returns `Ok=false` with `preflight_forced`.
 
 Prefer **`forge_recipe_issue_set`** for full issue-set runs.
 

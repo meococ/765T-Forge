@@ -28,6 +28,15 @@ public sealed class SafetyPolicy
     private static readonly Regex SaveOverwrite = new(@"\b_?-?(?:SAVEAS|QSAVE|WBLOCK)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex LayerDelete = new(@"\b_?-?(?:LAYDEL|DELLAYER)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex SsgGetAllErase = new(@"\bSSGET\b(?:[\s\r\n;'""]|\(|\))*""X""[\s\S]*\b_?-?ERASE\b|\b_?-?ERASE\b[\s\S]*\bSSGET\b(?:[\s\r\n;'""]|\(|\))*""X""", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    // Alias E / _.E is not the word ERASE. Kept separate so the ERASE pattern is unchanged.
+    private static readonly Regex EraseAliasAll = new(@"\b_?-?\.?E\b(?:[\s\r\n;'""]|\(|\))*_?(?:ALL\b|\*)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    // Command-anchored. A bare \bSH\b would match directory names such as \SH\.
+    private static readonly Regex AnchoredExternalCommand = new(
+        @"(?im)(?:^|[;\r\n])\s*(?:\._|\.|_|-)*(?:NETLOAD|APPLOAD|ARXLOAD|SCRIPT|SHELL|SH)\b|\(\s*command\s+""(?:\._|\.|_|-)*(?:NETLOAD|APPLOAD|ARXLOAD|SCRIPT|SHELL|SH)\b|\(\s*load(?:\s|""|\))",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex AnchoredExecutorSave = new(
+        @"(?im)(?:^|[;\r\n])\s*(?:\._|\.|_|-)*(?:SAVEAS|QSAVE|WBLOCK|SAVE)\b|\(\s*command\s+""(?:\._|\.|_|-)*(?:SAVEAS|QSAVE|WBLOCK|SAVE)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public SafetyDecision Evaluate(ForgeCommand command)
     {
@@ -62,7 +71,7 @@ public sealed class SafetyPolicy
 
     public SafetyDecision EvaluateText(string tool, string text)
     {
-        if (EraseAll.IsMatch(text))
+        if (EraseAll.IsMatch(text) || EraseAliasAll.IsMatch(text))
         {
             return SafetyDecision.Deny("deny_erase_all", "Blocked destructive ERASE ALL command.", "Use a scoped selection set or entity handles.");
         }
@@ -97,12 +106,32 @@ public sealed class SafetyPolicy
             return SafetyDecision.Deny("deny_ssget_all_erase", "Blocked AutoLISP all-selection erase pattern.", "Use scoped handles or a typed query/delete workflow.");
         }
 
+        if (IsSsgetDestructive(text))
+        {
+            return SafetyDecision.Deny("deny_ssget_destructive", "Blocked ssget all-selection combined with erase, delete, or command.", "Use scoped handles or a typed query/delete workflow.");
+        }
+
+        if (IsObfuscatedSelection(text))
+        {
+            return SafetyDecision.Deny("deny_obfuscated_selection", "Blocked strcat/eval combined with ALL or ssget.", "Do not build selection text at runtime. Pass explicit handles to a typed tool.");
+        }
+
+        if (AnchoredExternalCommand.IsMatch(text))
+        {
+            return SafetyDecision.Deny("deny_external_command", "Blocked NETLOAD, APPLOAD, ARXLOAD, load, SCRIPT, or SHELL/SH command.", "Do not load foreign code or start a shell from an executor.");
+        }
+
         if (SaveOverwrite.IsMatch(text) && (BroadSelectionAll.IsMatch(text) || BroadSelectionStarAsArg.IsMatch(text)))
         {
             return SafetyDecision.Deny("deny_save_wblock_overwrite", "Blocked SAVEAS/QSAVE/WBLOCK pattern with broad selection.", "Use a typed save/export tool with a backup path.");
         }
 
         var metadata = ForgeToolRegistry.Get(tool);
+        if (metadata.OpenWorld && AnchoredExecutorSave.IsMatch(text))
+        {
+            return SafetyDecision.Deny("deny_executor_save", "Blocked SAVE, QSAVE, SAVEAS, or WBLOCK on an executor.", "Use forge_doc_save or another typed save/export tool.");
+        }
+
         if (metadata.OpenWorld && HasBroadOpenWorldSelection(text))
         {
             return SafetyDecision.Deny(
@@ -142,6 +171,30 @@ public sealed class SafetyPolicy
         }
 
         return false;
+    }
+
+    private static bool IsSsgetDestructive(string text)
+    {
+        var hasMode = Regex.IsMatch(
+            text,
+            @"\bssget\b[\s\S]*""_?(?:X|A)""|""_?(?:X|A)""[\s\S]*\bssget\b",
+            RegexOptions.IgnoreCase);
+        if (!hasMode)
+        {
+            return false;
+        }
+
+        return Regex.IsMatch(text, @"\b(?:entdel|vla-erase|vla-delete|command)\b", RegexOptions.IgnoreCase);
+    }
+
+    private static bool IsObfuscatedSelection(string text)
+    {
+        if (!Regex.IsMatch(text, @"\b(?:strcat|eval)\b", RegexOptions.IgnoreCase))
+        {
+            return false;
+        }
+
+        return Regex.IsMatch(text, @"\bALL\b|\bssget\b", RegexOptions.IgnoreCase);
     }
 
     private static string ExtractText(JsonElement args)
