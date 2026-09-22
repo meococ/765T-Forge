@@ -69,8 +69,8 @@
     <AutoCadRoot Condition="'$(AutoCadRoot)' == ''">C:\Program Files\Autodesk\AutoCAD $(AutoCadYear)</AutoCadRoot>
   </PropertyGroup>
 
-  <!-- ForgeRestorePluginFrameworks=true is restore-only so packages.lock.json contains every TFM.
-       A normal build uses the single AutoCadYear TFM. -->
+  <!-- Normal builds target one AutoCadYear. Pass ForgeRestorePluginFrameworks=true only to
+       restore every TFM into packages.lock.json; do not commit that rewrite unless every TFM is still present. -->
   <PropertyGroup Condition="'$(ForgeRestorePluginFrameworks)' == 'true'">
     <TargetFrameworks>net8.0-windows;net48;net47;net462</TargetFrameworks>
   </PropertyGroup>
@@ -113,6 +113,16 @@
       <Private>false</Private>
     </Reference>
   </ItemGroup>
+
+  <!-- A non-2026 restore rewrites packages.lock.json to that year's TFM. Put the 2026 lock file back
+       so the committed net8.0-windows graph (and its RIDs) is not dropped. -->
+  <Target Name="SnapshotPluginLockFile" BeforeTargets="Restore" Condition="'$(AutoCadYear)' != '2026' and '$(ForgeRestorePluginFrameworks)' != 'true' and Exists('$(MSBuildProjectDirectory)\packages.lock.json')">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\packages.lock.json" DestinationFiles="$(MSBuildProjectDirectory)\obj\packages.lock.json.keep" />
+  </Target>
+  <Target Name="RestorePluginLockFile" AfterTargets="Restore" Condition="'$(AutoCadYear)' != '2026' and '$(ForgeRestorePluginFrameworks)' != 'true' and Exists('$(MSBuildProjectDirectory)\obj\packages.lock.json.keep')">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\obj\packages.lock.json.keep" DestinationFiles="$(MSBuildProjectDirectory)\packages.lock.json" />
+    <Delete Files="$(MSBuildProjectDirectory)\obj\packages.lock.json.keep" />
+  </Target>
 
   <Target Name="RequireMatchingAutoCadReferences" BeforeTargets="ResolveAssemblyReferences" Condition="'$(ForgeRestorePluginFrameworks)' != 'true'">
     <Error Condition="'$(AutoCadTargetFramework)' == '' and '$(ForgeRestorePluginFrameworks)' != 'true'"

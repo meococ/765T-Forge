@@ -1162,15 +1162,6 @@
         "resolved": "10.0.6",
         "contentHash": "o7zWD39jHesxpHyMSWAf+CjM+NaEIV49IJ8tasAsnaVkRcLP33+5aobgxeKLJRLQQfeciO7BbW5vXCUMzPoU6w=="
       },
-      "System.Text.Json": {
-        "type": "Transitive",
-        "resolved": "10.0.6",
-        "contentHash": "eU/JSsGWpQPE+rkBJjFjsmtaPsu1kCLqFYeW3NS715+z/dP2/BsCl6R7BFGcjhg+rm5WHblllC3p7QS+sS3HtA==",
-        "dependencies": {
-          "System.IO.Pipelines": "10.0.6",
-          "System.Text.Encodings.Web": "10.0.6"
-        }
-      },
       "System.Text.RegularExpressions": {
         "type": "Transitive",
         "resolved": "4.3.0",
@@ -1307,7 +1298,7 @@
       "forge.server": {
         "type": "Project",
         "dependencies": {
-          "Forge.Shared": "[1.0.0, )",
+          "Forge.Shared": "[0.2.0, )",
           "Microsoft.Extensions.Hosting": "[8.0.1, )",
           "Microsoft.Extensions.Logging.Console": "[8.0.1, )",
           "ModelContextProtocol": "[1.3.0, )"
@@ -1368,6 +1359,16 @@
           "Microsoft.Extensions.Caching.Abstractions": "10.0.7",
           "Microsoft.Extensions.Hosting.Abstractions": "10.0.7",
           "ModelContextProtocol.Core": "1.3.0"
+        }
+      },
+      "System.Text.Json": {
+        "type": "CentralTransitive",
+        "requested": "[8.0.5, )",
+        "resolved": "10.0.6",
+        "contentHash": "eU/JSsGWpQPE+rkBJjFjsmtaPsu1kCLqFYeW3NS715+z/dP2/BsCl6R7BFGcjhg+rm5WHblllC3p7QS+sS3HtA==",
+        "dependencies": {
+          "System.IO.Pipelines": "10.0.6",
+          "System.Text.Encodings.Web": "10.0.6"
         }
       }
     }
