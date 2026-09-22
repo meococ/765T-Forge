@@ -235,6 +235,68 @@ public sealed class AutoCadHostCatalogTests
         }
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("nope")]
+    [InlineData("25")]
+    [InlineData("25.")]
+    public void DecideHostMismatch_UnparseableAcadVerFailsClosed(string? acadVer)
+    {
+        var result = AutoCadHostCatalog.DecideHostMismatch("cmd", "forge_system_health", 2026, acadVer);
+        Assert.NotNull(result);
+        Assert.False(result!.Ok);
+        Assert.Equal(AutoCadHostCatalog.VersionUnsupportedCode, result.Error!.Code);
+    }
+
+    [Fact]
+    public void DecideHostMismatch_MatchingReleaseReturnsNull()
+    {
+        var result = AutoCadHostCatalog.DecideHostMismatch("cmd", "forge_system_health", 2026, "25.1s (LMS Tech)");
+        Assert.Null(result);
+    }
+
+    [Theory]
+    [InlineData(2026, "24.3")]
+    [InlineData(2024, "25.1")]
+    [InlineData(2025, "25.1s (LMS Tech)")]
+    public void DecideHostMismatch_DifferentReleaseFails(int builtForYear, string acadVer)
+    {
+        var result = AutoCadHostCatalog.DecideHostMismatch("cmd", "forge_doc_open", builtForYear, acadVer);
+        Assert.NotNull(result);
+        Assert.False(result!.Ok);
+        Assert.Equal("autocad_version_unsupported", result.Error!.Code);
+    }
+
+    [Fact]
+    public void RejectIfHostMismatchSourceFailsClosed()
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepoRoot(), "src", "Forge.Plugin", "PluginCommandProcessor.cs"));
+        var start = source.IndexOf("private static ForgeResult? RejectIfHostMismatch", StringComparison.Ordinal);
+        var end = source.IndexOf("private static ForgeResult ExecDotNet", StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start);
+        var body = source[start..end];
+        Assert.Contains("DecideHostMismatch", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("return null", body, StringComparison.Ordinal);
+    }
+
+    private static string FindRepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "765T-Forge.ServerOnly.slnf")))
+            {
+                return dir.FullName;
+            }
+
+            dir = dir.Parent;
+        }
+
+        throw new InvalidOperationException("Repository root was not found.");
+    }
+
     private static int SeriesKey(string series)
     {
         Assert.True(AutoCadHostCatalog.TryParseAcadVer(series.Substring(1), out var major, out var minor));

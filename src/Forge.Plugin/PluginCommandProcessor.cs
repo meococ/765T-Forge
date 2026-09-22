@@ -1512,30 +1512,21 @@ public sealed partial class PluginCommandProcessor
 
     private static ForgeResult? RejectIfHostMismatch(ForgeCommand command)
     {
-        // ACADVER is the release id ("25.1s (LMS Tech)" on AutoCAD 2026). A matching host
-        // returns null and leaves the 2026 path unchanged. A readable mismatch fails closed.
-        string? acadVer;
+        string? acadVer = null;
         try
         {
             acadVer = Convert.ToString(Application.GetSystemVariable("ACADVER"), CultureInfo.InvariantCulture);
         }
         catch (System.Exception)
         {
-            return null;
+            acadVer = null;
         }
 
-        var built = CompiledAutoCadHost.Current;
-        if (!AutoCadHostCatalog.TryParseAcadVer(acadVer, out var major, out var minor))
-        {
-            return null;
-        }
-
-        if (built.MatchesProduct(major, minor))
-        {
-            return null;
-        }
-
-        return AutoCadHostCatalog.HostMismatch(command.Id, command.Tool, built, acadVer);
+        return AutoCadHostCatalog.DecideHostMismatch(
+            command.Id,
+            command.Tool,
+            CompiledAutoCadHost.Year,
+            acadVer);
     }
 
     private static ForgeResult ExecDotNet(ForgeCommand command)

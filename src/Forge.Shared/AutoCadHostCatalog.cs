@@ -127,6 +127,21 @@ public static class AutoCadHostCatalog
             "NETLOAD the Forge.Plugin.dll built for this AutoCAD year. Plugin binaries are not interchangeable across years.");
     }
 
+    /// <summary>
+    /// Null only when <paramref name="acadVer"/> parses and matches <paramref name="builtForYear"/>.
+    /// Missing or unparseable ACADVER is a failure. Callers must not treat null acadVer as a pass.
+    /// </summary>
+    public static ForgeResult? DecideHostMismatch(string commandId, string tool, int builtForYear, string? acadVer)
+    {
+        var built = ByYear(builtForYear);
+        if (TryParseAcadVer(acadVer, out var major, out var minor) && built.MatchesProduct(major, minor))
+        {
+            return null;
+        }
+
+        return HostMismatch(commandId, tool, built, acadVer);
+    }
+
     public static ForgeResult UnsupportedFeature(string commandId, int year, string feature, int minimumYear)
     {
         return ForgeResult.Failure(
