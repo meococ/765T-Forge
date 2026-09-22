@@ -201,7 +201,7 @@ public sealed class SafetyPolicy
     {
         var values = new List<string>();
         Extract(args, values);
-        return string.Join('\n', values);
+        return string.Join("\n", values);
     }
 
     private static void Extract(JsonElement element, List<string> values)

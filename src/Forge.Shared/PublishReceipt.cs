@@ -40,8 +40,14 @@ public sealed class PublishReceipt
             report.Passed,
             findings = report.Findings.Select(f => new { f.Code, f.Severity, f.Message })
         }, ForgeJson.Options);
+#if NET5_0_OR_GREATER
         var bytes = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(payload));
         return Convert.ToHexString(bytes)[..16];
+#else
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        var legacyBytes = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(payload));
+        return BitConverter.ToString(legacyBytes).Replace("-", "").Substring(0, 16);
+#endif
     }
 
     public static string? TryWriteArtifact(PublishReceipt receipt, string? auditDir = null)
@@ -167,9 +173,15 @@ public sealed class PdfProbeResult
 
     private static bool HasPdfHeader(string path)
     {
+#if NET
         Span<byte> header = stackalloc byte[5];
         using var stream = File.OpenRead(path);
         var read = stream.Read(header);
+#else
+        var header = new byte[5];
+        using var stream = File.OpenRead(path);
+        var read = stream.Read(header, 0, header.Length);
+#endif
         return read >= 5
             && header[0] == (byte)'%'
             && header[1] == (byte)'P'

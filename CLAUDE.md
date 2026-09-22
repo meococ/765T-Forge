@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-765T-Forge is an **all-C# MCP (Model Context Protocol) stdio server that drives AutoCAD 2026** for **metro/AEC issue-set drawing production** (inspect → fix → fill → preflight gate → publish → verify). An AI agent calls MCP tools; the server forwards them to an in-process AutoCAD plugin, which executes the Autodesk `.NET`/ObjectARX API.
+765T-Forge is an **all-C# MCP (Model Context Protocol) stdio server that drives AutoCAD** for **metro/AEC issue-set drawing production** (inspect → fix → fill → preflight gate → publish → verify). An AI agent calls MCP tools; the server forwards them to an in-process AutoCAD plugin, which executes the Autodesk `.NET`/ObjectARX API. The **default verified host is AutoCAD 2026**. 2017–2025 are per-year plugin build targets when `AUTOCAD_<year>_ROOT` points at that install; they are not smoke-tested, and plugin binaries are not interchangeable across years.
 
 **Product SemVer:** `0.2.0` (see `CHANGELOG.md`). Honest shipped surface: [`docs/capability-matrix.md`](docs/capability-matrix.md). Roadmap map: [`docs/roadmap.md`](docs/roadmap.md).
 
@@ -22,7 +22,7 @@ dotnet build   .\765T-Forge.ServerOnly.slnf --no-restore
 dotnet test    .\765T-Forge.ServerOnly.slnf --no-build
 ```
 
-Full solution (needs AutoCAD 2026 at `AUTOCAD_2026_ROOT`):
+Full solution (default verified host AutoCAD 2026 at `AUTOCAD_2026_ROOT`; other years use `AUTOCAD_<year>_ROOT` and `-p:AutoCadYear=`):
 
 ```powershell
 dotnet restore .\765T-Forge.sln --locked-mode
@@ -36,14 +36,14 @@ dotnet test .\765T-Forge.ServerOnly.slnf --filter "FullyQualifiedName~SafetyPoli
 dotnet test .\765T-Forge.ServerOnly.slnf --filter "DisplayName~DotnetExecutorRequiresUnsafeAcknowledgement"
 ```
 
-**AutoCAD dependency gotcha:** `src/Forge.Plugin/Forge.Plugin.csproj` references AutoCAD managed DLLs via `$(AutoCadRoot)` from `AUTOCAD_2026_ROOT` (default `C:\Program Files\Autodesk\AutoCAD 2026`). The **test project references only `Forge.Shared` and `Forge.Server`, never `Forge.Plugin`**, so all logic under test builds and runs without AutoCAD.
+**AutoCAD dependency gotcha:** `src/Forge.Plugin/Forge.Plugin.csproj` references that year's `AcCoreMgd` / `AcDbMgd` / `AcMgd` via `$(AutoCadRoot)` from `AUTOCAD_<year>_ROOT` (2026 default `C:\Program Files\Autodesk\AutoCAD 2026`). A missing or wrong-year DLL fails the build. The **test project references only `Forge.Shared` and `Forge.Server`, never `Forge.Plugin`**, so all logic under test builds and runs without AutoCAD.
 
 ## Architecture — the two-process split
 
 Three projects; the split is the thing to understand:
 
 - **`Forge.Server`** (`net8.0`, console exe) — the MCP server. Registered via the `ModelContextProtocol` SDK with `WithStdioServerTransport().WithTools<ForgeMcpTools>()` in `Program.cs`. Runs wherever the agent runs.
-- **`Forge.Plugin`** (`net8.0-windows`) — loaded *inside* AutoCAD via `NETLOAD` (`IExtensionApplication`). Has the only references to the AutoCAD API. Exposes the `MCP_STATUS` command.
+- **`Forge.Plugin`** — loaded *inside* AutoCAD via `NETLOAD` (`IExtensionApplication`). One output per year (`AutoCadYear`, default 2026 → `net8.0-windows`; 2021–2024 `net48`; 2019–2020 `net47`; 2017–2018 `net462` because `System.Text.Json` 8 cannot target historical `net46`). Has the only references to the AutoCAD API. Exposes the `MCP_STATUS` command. 2017–2018 builds are not claimed to NETLOAD and are not `net48` binaries.
 - **`Forge.Shared`** (`net8.0`) — referenced by **both** sides: the command/result envelope (`ForgeCommand`/`ForgeResult`), `SafetyPolicy`, `ForgeToolRegistry`/`ToolMetadata`, `FileAuditSink`, `BackupPlanner`, `ForgeEnvironment`, `ForgeJson`, drawing registry, standards packs. Anything both processes must agree on lives here.
 
 They communicate over a **named pipe** (`765T.Forge.AutoCAD`), one JSON line each way. The plugin side (`NamedPipePluginServer`) creates the pipe with an ACL for the current Windows user + LocalSystem, `maxNumberOfServerInstances: 1` (calls are serialized). Token auth is checked as defense-in-depth on top of the ACL.
@@ -82,7 +82,7 @@ Both processes call `ForgeEnvironment.FromProcess()` independently; they must re
 - `FORGE_PIPE_NAME` (default `765T.Forge.AutoCAD`)
 - `FORGE_AUTOCAD_TOKEN` (required) → falls back to `MCP_AUTOCAD_TOKEN`. No production default secret. For local/tests only: `FORGE_DEV_ALLOW_DEFAULT_TOKEN=true` uses `dev-only-insecure-token` and prints a warning.
 - `FORGE_BACKUP_DIR`, `FORGE_AUDIT_DIR` (default under `%LOCALAPPDATA%\765T-Forge\`)
-- `AUTOCAD_2026_ROOT` (default `C:\Program Files\Autodesk\AutoCAD 2026`) — used for plugin HintPath + `accoreconsole.exe`
+- `AUTOCAD_<year>_ROOT` (2026 default `C:\Program Files\Autodesk\AutoCAD 2026`) — plugin HintPath for that year. Headless `accoreconsole.exe` still uses the 2026 root (`ForgeEnvironment.AutoCadRoot`)
 - `FORGE_ENABLE_UNSAFE_OPS` (default `false`)
 - `FORGE_PLUGIN_RESPONSE_TIMEOUT_SECONDS` (default `120`)
 
@@ -93,4 +93,4 @@ Both processes call `ForgeEnvironment.FromProcess()` independently; they must re
 .\scripts\install-plugin.ps1   # copies DLL + prints TRUSTEDPATHS / NETLOAD checklist
 ```
 
-In AutoCAD 2026: `NETLOAD` → installed `Forge.Plugin.dll`, then `MCP_STATUS`. Put the DLL in a `TRUSTEDPATHS` location or AutoCAD will block the load. Agent-facing usage: `skills/765t-forge/SKILL.md` (health-check first, preflight before publish, dry-run before writes, never invent drawing numbers, never broad-select via executors).
+`NETLOAD` the `Forge.Plugin.dll` built for that AutoCAD year (`bin\$(Configuration)\autocad-<year>\`), then `MCP_STATUS`. Put the DLL in a `TRUSTEDPATHS` location or AutoCAD will block the load. Agent-facing usage: `skills/765t-forge/SKILL.md` (health-check first, preflight before publish, dry-run before writes, never invent drawing numbers, never broad-select via executors).

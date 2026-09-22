@@ -28,9 +28,11 @@ Phase labels are **documentation milestones**, not NuGet or Git tag versions.
 
 ## 4. AutoCAD target
 
-- Current supported host: **AutoCAD 2026** (`net8.0-windows`, `AUTOCAD_2026_ROOT`).
-- A future AutoCAD year is a **platform target**, documented explicitly (and may require a minor product bump plus matrix updates).
-- Plugin binaries are not interchangeable across AutoCAD major years without rebuild.
+- **Default verified host: AutoCAD 2026** (`net8.0-windows`, `AUTOCAD_2026_ROOT`, series R25.1). Smoke tests and CI plugin builds use this year. `ForgeConstants.AutoCadVersion` stays `2026`.
+- **Build targets: AutoCAD 2017–2026.** Each year is a separate `Forge.Plugin` output (`-p:AutoCadYear=`, or `scripts/build-plugin.ps1 -Year` / `-AllYears`) referenced from `AUTOCAD_<year>_ROOT` (default `C:\Program Files\Autodesk\AutoCAD <year>`). The year table lives in `AutoCadHostCatalog`.
+- TFM follows the host CLR where the SDK can compile our code: 2019–2020 `net47`, 2021–2024 `net48`, 2025–2026 `net8.0-windows`. 2017–2018 would be `net46`, but `System.Text.Json` 8.0.5 cannot restore for `net46` (NU1202; its lowest framework TFM is `net462`), so those years compile as **`net462`**. That is not a `net48` binary, and it is **not claimed to NETLOAD** on AutoCAD 2017–2018. `forge_exec_dotnet` on those years returns `autocad_version_unsupported`.
+- 2017–2025 are **not smoke-tested** in this change. Plugin binaries are **not interchangeable** across major years. Autoloader `SeriesMin` = `SeriesMax` for that R-series only.
+- Adding another AutoCAD year is a platform target (catalog + csproj + `PackageContents.xml` + matrix). It does not by itself bump product SemVer.
 
 ## Assembly / file versions
 
@@ -47,4 +49,4 @@ If the named-pipe JSON command/result shape breaks, document it as a breaking ch
 | What did we ship to GitHub? | Product SemVer + CHANGELOG |
 | How mature is the codebase vs brief? | Phase / Wave docs |
 | Which MCP SDK? | `Directory.Packages.props` |
-| Which CAD year? | README + this file (AutoCAD 2026) |
+| Which CAD year? | README + this file. Default verified host is AutoCAD 2026; 2017–2025 are per-year build targets |

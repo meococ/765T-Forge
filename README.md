@@ -2,7 +2,7 @@
 
 All-C# MCP server and AutoCAD 2026 plugin for **metro/AEC issue-set drawing production** — inspect → fix → fill → gate → publish → verify.
 
-Not affiliated with Autodesk. Requires a licensed AutoCAD 2026 seat. See [NOTICE.md](NOTICE.md).
+Not affiliated with Autodesk. The default verified host is a licensed AutoCAD 2026 seat. Plugin projects also build for AutoCAD 2017–2025 when that year's install is present; those builds are not smoke-tested, and binaries are not interchangeable across years. See [NOTICE.md](NOTICE.md).
 
 ## Positioning
 
@@ -32,7 +32,7 @@ The Vietnamese [docs/history/build-brief.md](docs/history/build-brief.md) is an 
 ## Requirements
 
 - Windows + .NET 8 SDK
-- AutoCAD 2026 (for plugin / live tools)
+- AutoCAD 2026 for the verified plugin / live tools. Other years: set `AUTOCAD_<year>_ROOT` and build with `-p:AutoCadYear=<year>` (2017–2025 are not smoke-tested)
 - `FORGE_AUTOCAD_TOKEN` (or `MCP_AUTOCAD_TOKEN`) **required** — no production default secret
 
 ## Quick install (Cursor)
@@ -70,7 +70,7 @@ If AutoCAD has `NETLOAD`ed the plugin, use `765T-Forge.ServerOnly.slnf` or `-p:O
 | `FORGE_DEV_ALLOW_DEFAULT_TOKEN` | Dev-only escape hatch (`true` → insecure token) |
 | `FORGE_PIPE_NAME` | Default `765T.Forge.AutoCAD` |
 | `FORGE_BACKUP_DIR` / `FORGE_AUDIT_DIR` | Under `%LOCALAPPDATA%\765T-Forge\` by default |
-| `AUTOCAD_2026_ROOT` | AutoCAD install root (HintPath + accoreconsole) |
+| `AUTOCAD_<year>_ROOT` | That year's AutoCAD install (plugin HintPath). `AUTOCAD_2026_ROOT` is the default verified host and the accoreconsole path |
 | `FORGE_ENABLE_UNSAFE_OPS` | Enables `forge_exec_dotnet` when also acknowledged |
 | `FORGE_PLUGIN_RESPONSE_TIMEOUT_SECONDS` | Default `120` |
 

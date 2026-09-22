@@ -1,10 +1,81 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    One output per AutoCAD year. The year table must match Forge.Shared/AutoCadHostCatalog
+    and plugin-bundle/765T-Forge.bundle/PackageContents.xml.
+    Default year is 2026 so existing 2026 builds and CI stay valid.
+    Historical CLR: 2017–2018 net46, 2019–2020 net47, 2021–2024 net48, 2025–2026 net8.0-windows.
+    2017–2018 compile as net462 because System.Text.Json 8.0.5 rejects net46 (NU1202). That is not a net48 binary and is not claimed to NETLOAD on AutoCAD 2017.
+  -->
   <PropertyGroup>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <AutoCadYear Condition="'$(AutoCadYear)' == ''">2026</AutoCadYear>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AutoCadRoot Condition="'$(AUTOCAD_2026_ROOT)' != ''">$(AUTOCAD_2026_ROOT)</AutoCadRoot>
-    <AutoCadRoot Condition="'$(AutoCadRoot)' == ''">C:\Program Files\Autodesk\AutoCAD 2026</AutoCadRoot>
+    <LangVersion>latest</LangVersion>
+    <CheckEolTargetFramework>false</CheckEolTargetFramework>
+    <DefineConstants>$(DefineConstants);ACAD_YEAR_$(AutoCadYear)</DefineConstants>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <OutputPath>bin\$(Configuration)\autocad-$(AutoCadYear)\</OutputPath>
+    <IntermediateOutputPath>obj\autocad-$(AutoCadYear)\</IntermediateOutputPath>
+    <AutoCadTargetFramework Condition="'$(AutoCadYear)' == '2017'">net462</AutoCadTargetFramework>
+    <AutoCadTargetFramework Condition="'$(AutoCadYear)' == '2018'">net462</AutoCadTargetFramework>
+    <AutoCadTargetFramework Condition="'$(AutoCadYear)' == '2019'">net47</AutoCadTargetFramework>
+    <AutoCadTargetFramework Condition="'$(AutoCadYear)' == '2020'">net47</AutoCadTargetFramework>
+    <AutoCadTargetFramework Condition="'$(AutoCadYear)' == '2021'">net48</AutoCadTargetFramework>
+    <AutoCadTargetFramework Condition="'$(AutoCadYear)' == '2022'">net48</AutoCadTargetFramework>
+    <AutoCadTargetFramework Condition="'$(AutoCadYear)' == '2023'">net48</AutoCadTargetFramework>
+    <AutoCadTargetFramework Condition="'$(AutoCadYear)' == '2024'">net48</AutoCadTargetFramework>
+    <AutoCadTargetFramework Condition="'$(AutoCadYear)' == '2025'">net8.0-windows</AutoCadTargetFramework>
+    <AutoCadTargetFramework Condition="'$(AutoCadYear)' == '2026'">net8.0-windows</AutoCadTargetFramework>
+    <ExpectedSeries Condition="'$(AutoCadYear)' == '2017'">R21.0</ExpectedSeries>
+    <ExpectedSeries Condition="'$(AutoCadYear)' == '2018'">R22.0</ExpectedSeries>
+    <ExpectedSeries Condition="'$(AutoCadYear)' == '2019'">R23.0</ExpectedSeries>
+    <ExpectedSeries Condition="'$(AutoCadYear)' == '2020'">R23.1</ExpectedSeries>
+    <ExpectedSeries Condition="'$(AutoCadYear)' == '2021'">R24.0</ExpectedSeries>
+    <ExpectedSeries Condition="'$(AutoCadYear)' == '2022'">R24.1</ExpectedSeries>
+    <ExpectedSeries Condition="'$(AutoCadYear)' == '2023'">R24.2</ExpectedSeries>
+    <ExpectedSeries Condition="'$(AutoCadYear)' == '2024'">R24.3</ExpectedSeries>
+    <ExpectedSeries Condition="'$(AutoCadYear)' == '2025'">R25.0</ExpectedSeries>
+    <ExpectedSeries Condition="'$(AutoCadYear)' == '2026'">R25.1</ExpectedSeries>
+    <ExpectedAcadMajor Condition="'$(AutoCadYear)' == '2017'">21</ExpectedAcadMajor>
+    <ExpectedAcadMinor Condition="'$(AutoCadYear)' == '2017'">0</ExpectedAcadMinor>
+    <ExpectedAcadMajor Condition="'$(AutoCadYear)' == '2018'">22</ExpectedAcadMajor>
+    <ExpectedAcadMinor Condition="'$(AutoCadYear)' == '2018'">0</ExpectedAcadMinor>
+    <ExpectedAcadMajor Condition="'$(AutoCadYear)' == '2019'">23</ExpectedAcadMajor>
+    <ExpectedAcadMinor Condition="'$(AutoCadYear)' == '2019'">0</ExpectedAcadMinor>
+    <ExpectedAcadMajor Condition="'$(AutoCadYear)' == '2020'">23</ExpectedAcadMajor>
+    <ExpectedAcadMinor Condition="'$(AutoCadYear)' == '2020'">1</ExpectedAcadMinor>
+    <ExpectedAcadMajor Condition="'$(AutoCadYear)' == '2021'">24</ExpectedAcadMajor>
+    <ExpectedAcadMinor Condition="'$(AutoCadYear)' == '2021'">0</ExpectedAcadMinor>
+    <ExpectedAcadMajor Condition="'$(AutoCadYear)' == '2022'">24</ExpectedAcadMajor>
+    <ExpectedAcadMinor Condition="'$(AutoCadYear)' == '2022'">1</ExpectedAcadMinor>
+    <ExpectedAcadMajor Condition="'$(AutoCadYear)' == '2023'">24</ExpectedAcadMajor>
+    <ExpectedAcadMinor Condition="'$(AutoCadYear)' == '2023'">2</ExpectedAcadMinor>
+    <ExpectedAcadMajor Condition="'$(AutoCadYear)' == '2024'">24</ExpectedAcadMajor>
+    <ExpectedAcadMinor Condition="'$(AutoCadYear)' == '2024'">3</ExpectedAcadMinor>
+    <ExpectedAcadMajor Condition="'$(AutoCadYear)' == '2025'">25</ExpectedAcadMajor>
+    <ExpectedAcadMinor Condition="'$(AutoCadYear)' == '2025'">0</ExpectedAcadMinor>
+    <ExpectedAcadMajor Condition="'$(AutoCadYear)' == '2026'">25</ExpectedAcadMajor>
+    <ExpectedAcadMinor Condition="'$(AutoCadYear)' == '2026'">1</ExpectedAcadMinor>
+    <AutoCadRoot Condition="'$(AutoCadRoot)' == '' and '$(AutoCadYear)' == '2017' and '$(AUTOCAD_2017_ROOT)' != ''">$(AUTOCAD_2017_ROOT)</AutoCadRoot>
+    <AutoCadRoot Condition="'$(AutoCadRoot)' == '' and '$(AutoCadYear)' == '2018' and '$(AUTOCAD_2018_ROOT)' != ''">$(AUTOCAD_2018_ROOT)</AutoCadRoot>
+    <AutoCadRoot Condition="'$(AutoCadRoot)' == '' and '$(AutoCadYear)' == '2019' and '$(AUTOCAD_2019_ROOT)' != ''">$(AUTOCAD_2019_ROOT)</AutoCadRoot>
+    <AutoCadRoot Condition="'$(AutoCadRoot)' == '' and '$(AutoCadYear)' == '2020' and '$(AUTOCAD_2020_ROOT)' != ''">$(AUTOCAD_2020_ROOT)</AutoCadRoot>
+    <AutoCadRoot Condition="'$(AutoCadRoot)' == '' and '$(AutoCadYear)' == '2021' and '$(AUTOCAD_2021_ROOT)' != ''">$(AUTOCAD_2021_ROOT)</AutoCadRoot>
+    <AutoCadRoot Condition="'$(AutoCadRoot)' == '' and '$(AutoCadYear)' == '2022' and '$(AUTOCAD_2022_ROOT)' != ''">$(AUTOCAD_2022_ROOT)</AutoCadRoot>
+    <AutoCadRoot Condition="'$(AutoCadRoot)' == '' and '$(AutoCadYear)' == '2023' and '$(AUTOCAD_2023_ROOT)' != ''">$(AUTOCAD_2023_ROOT)</AutoCadRoot>
+    <AutoCadRoot Condition="'$(AutoCadRoot)' == '' and '$(AutoCadYear)' == '2024' and '$(AUTOCAD_2024_ROOT)' != ''">$(AUTOCAD_2024_ROOT)</AutoCadRoot>
+    <AutoCadRoot Condition="'$(AutoCadRoot)' == '' and '$(AutoCadYear)' == '2025' and '$(AUTOCAD_2025_ROOT)' != ''">$(AUTOCAD_2025_ROOT)</AutoCadRoot>
+    <AutoCadRoot Condition="'$(AutoCadRoot)' == '' and '$(AutoCadYear)' == '2026' and '$(AUTOCAD_2026_ROOT)' != ''">$(AUTOCAD_2026_ROOT)</AutoCadRoot>
+    <AutoCadRoot Condition="'$(AutoCadRoot)' == ''">C:\Program Files\Autodesk\AutoCAD $(AutoCadYear)</AutoCadRoot>
+  </PropertyGroup>
+
+  <!-- ForgeRestorePluginFrameworks=true is restore-only so packages.lock.json contains every TFM.
+       A normal build uses the single AutoCadYear TFM. -->
+  <PropertyGroup Condition="'$(ForgeRestorePluginFrameworks)' == 'true'">
+    <TargetFrameworks>net8.0-windows;net48;net47;net462</TargetFrameworks>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(ForgeRestorePluginFrameworks)' != 'true'">
+    <TargetFramework>$(AutoCadTargetFramework)</TargetFramework>
   </PropertyGroup>
 
   <ItemGroup>
@@ -13,7 +84,19 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" />
-    <PackageReference Include="System.IO.Pipes.AccessControl" />
+    <PackageReference Include="System.IO.Pipes.AccessControl" Condition="'$(TargetFrameworkIdentifier)' != '.NETFramework'" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFrameworkIdentifier)' == '.NETFramework'">
+    <PackageReference Include="System.Text.Json" />
+    <PackageReference Include="PolySharp">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
   </ItemGroup>
 
   <ItemGroup>
@@ -30,4 +113,23 @@
       <Private>false</Private>
     </Reference>
   </ItemGroup>
+
+  <Target Name="RequireMatchingAutoCadReferences" BeforeTargets="ResolveAssemblyReferences" Condition="'$(ForgeRestorePluginFrameworks)' != 'true'">
+    <Error Condition="'$(AutoCadTargetFramework)' == '' and '$(ForgeRestorePluginFrameworks)' != 'true'"
+           Text="AutoCadYear=$(AutoCadYear) is not a Forge host. Use a year from 2017 through 2026." />
+    <Error Condition="!Exists('$(AutoCadRoot)\AcCoreMgd.dll')"
+           Text="AutoCAD $(AutoCadYear) reference assembly AcCoreMgd.dll was not found at '$(AutoCadRoot)\AcCoreMgd.dll'. Set AUTOCAD_$(AutoCadYear)_ROOT to the AutoCAD $(AutoCadYear) install folder (the directory that contains AcCoreMgd.dll, AcDbMgd.dll, and AcMgd.dll). Forge will not compile this year against a different year's assemblies." />
+    <Error Condition="!Exists('$(AutoCadRoot)\AcDbMgd.dll')"
+           Text="AutoCAD $(AutoCadYear) reference assembly AcDbMgd.dll was not found at '$(AutoCadRoot)\AcDbMgd.dll'. Set AUTOCAD_$(AutoCadYear)_ROOT to the AutoCAD $(AutoCadYear) install folder. Forge will not compile this year against a different year's assemblies." />
+    <Error Condition="!Exists('$(AutoCadRoot)\AcMgd.dll')"
+           Text="AutoCAD $(AutoCadYear) reference assembly AcMgd.dll was not found at '$(AutoCadRoot)\AcMgd.dll'. Set AUTOCAD_$(AutoCadYear)_ROOT to the AutoCAD $(AutoCadYear) install folder. Forge will not compile this year against a different year's assemblies." />
+    <PropertyGroup Condition="Exists('$(AutoCadRoot)\AcCoreMgd.dll')">
+      <_AcadFileMajor>$([System.Diagnostics.FileVersionInfo]::GetVersionInfo('$(AutoCadRoot)\AcCoreMgd.dll').FileMajorPart)</_AcadFileMajor>
+      <_AcadFileMinor>$([System.Diagnostics.FileVersionInfo]::GetVersionInfo('$(AutoCadRoot)\AcCoreMgd.dll').FileMinorPart)</_AcadFileMinor>
+      <_AcadProductMajor>$([System.Diagnostics.FileVersionInfo]::GetVersionInfo('$(AutoCadRoot)\AcCoreMgd.dll').ProductMajorPart)</_AcadProductMajor>
+      <_AcadProductMinor>$([System.Diagnostics.FileVersionInfo]::GetVersionInfo('$(AutoCadRoot)\AcCoreMgd.dll').ProductMinorPart)</_AcadProductMinor>
+    </PropertyGroup>
+    <Error Condition="Exists('$(AutoCadRoot)\AcCoreMgd.dll') and ('$(_AcadFileMajor)' != '$(ExpectedAcadMajor)' or '$(_AcadFileMinor)' != '$(ExpectedAcadMinor)') and ('$(_AcadProductMajor)' != '$(ExpectedAcadMajor)' or '$(_AcadProductMinor)' != '$(ExpectedAcadMinor)')"
+           Text="AutoCAD reference at '$(AutoCadRoot)' reports file version $(_AcadFileMajor).$(_AcadFileMinor) and product version $(_AcadProductMajor).$(_AcadProductMinor), but AutoCadYear=$(AutoCadYear) requires $(ExpectedAcadMajor).$(ExpectedAcadMinor) ($(ExpectedSeries)). Refusing to compile against a different year." />
+  </Target>
 </Project>

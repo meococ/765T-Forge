@@ -17,7 +17,6 @@ Set-Location $root
 
 $releaseRoot = Join-Path $root "artifacts\release"
 $serverOut = Join-Path $releaseRoot "server"
-$pluginOut = Join-Path $releaseRoot "plugin"
 New-Item -ItemType Directory -Force -Path $serverOut | Out-Null
 
 $serverProj = Join-Path $root "src\Forge.Server\Forge.Server.csproj"
@@ -46,37 +45,44 @@ Compress-Archive -Path (Join-Path $serverOut "*") -DestinationPath $serverZip
 Write-Host "Wrote $serverZip"
 
 $pluginPacked = $false
+$pluginYearsPacked = @()
 if (-not $SkipPlugin) {
-    if (-not $env:AUTOCAD_2026_ROOT) {
-        $env:AUTOCAD_2026_ROOT = "C:\Program Files\Autodesk\AutoCAD 2026"
+    & (Join-Path $PSScriptRoot "build-plugin.ps1") -Configuration $Configuration -AllYears
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    $pluginBin = Join-Path $root "src\Forge.Plugin\bin\$Configuration"
+    $yearDirs = @()
+    if (Test-Path $pluginBin) {
+        $yearDirs = @(Get-ChildItem -Path $pluginBin -Directory -Filter "autocad-*" -ErrorAction SilentlyContinue |
+            Where-Object { Test-Path (Join-Path $_.FullName "Forge.Plugin.dll") })
     }
 
-    $acadDll = Join-Path $env:AUTOCAD_2026_ROOT "AcCoreMgd.dll"
-    if (-not (Test-Path $acadDll)) {
-        Write-Warning "AutoCAD not found at AUTOCAD_2026_ROOT. Skipping plugin pack."
+    if ($yearDirs.Count -eq 0) {
+        Write-Warning "No per-year Forge.Plugin.dll was produced. Skipping plugin pack."
     }
     else {
-        New-Item -ItemType Directory -Force -Path $pluginOut | Out-Null
-        $pluginProj = Join-Path $root "src\Forge.Plugin\Forge.Plugin.csproj"
-        Write-Host "Building Forge.Plugin..."
-        dotnet build $pluginProj --configuration $Configuration -p:OutDir="$pluginOut\"
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $stageRoot = Join-Path $releaseRoot "plugin-stage"
+        $bundleStage = Join-Path $stageRoot "765T-Forge.bundle"
+        if (Test-Path $stageRoot) { Remove-Item $stageRoot -Recurse -Force }
+        New-Item -ItemType Directory -Force -Path (Join-Path $bundleStage "Contents\Windows") | Out-Null
+        Copy-Item (Join-Path $root "plugin-bundle\765T-Forge.bundle\PackageContents.xml") $bundleStage -Force
+        Copy-Item (Join-Path $root "plugin-bundle\765T-Forge.bundle\README.md") $bundleStage -Force
+
+        foreach ($dir in $yearDirs) {
+            $yearName = $dir.Name.Substring("autocad-".Length)
+            $moduleDir = Join-Path $bundleStage "Contents\Windows\$yearName"
+            New-Item -ItemType Directory -Force -Path $moduleDir | Out-Null
+            Get-ChildItem -Path $dir.FullName -File |
+                Where-Object { $_.Name -notmatch '^(AcCoreMgd|AcDbMgd|AcMgd)\.dll$' } |
+                ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $moduleDir $_.Name) -Force }
+            $pluginYearsPacked += $yearName
+        }
 
         $pluginZip = Join-Path $releaseRoot "765T-Forge.Plugin.zip"
         if (Test-Path $pluginZip) { Remove-Item $pluginZip -Force }
-        Compress-Archive -Path (Join-Path $pluginOut "*") -DestinationPath $pluginZip
-
-        $tmp = Join-Path $releaseRoot "plugin-filtered"
-        if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
-        New-Item -ItemType Directory -Force -Path $tmp | Out-Null
-        Expand-Archive -Path $pluginZip -DestinationPath $tmp -Force
-        Get-ChildItem -Path $tmp -Recurse -File |
-            Where-Object { $_.Name -match '^(AcCoreMgd|AcDbMgd|AcMgd)\.dll$' } |
-            ForEach-Object { Remove-Item $_.FullName -Force }
-        Remove-Item $pluginZip -Force
-        Compress-Archive -Path (Join-Path $tmp "*") -DestinationPath $pluginZip
-        Remove-Item $tmp -Recurse -Force
-        Write-Host "Wrote $pluginZip (Autodesk Ac*.dll excluded)"
+        Compress-Archive -Path $bundleStage -DestinationPath $pluginZip
+        Remove-Item $stageRoot -Recurse -Force
+        Write-Host "Wrote $pluginZip for AutoCAD years $($pluginYearsPacked -join ', ') (Autodesk Ac*.dll excluded)"
         $pluginPacked = $true
     }
 }
@@ -93,6 +99,7 @@ $statusFile = Join-Path $releaseRoot "RELEASE_STATUS.txt"
     "765T-Forge release pack status"
     "ServerZip=yes"
     "PluginZip=$pluginPackedText"
+    "PluginYears=$(if ($pluginYearsPacked.Count) { $pluginYearsPacked -join ',' } else { 'none' })"
     "Complete=$completeText"
     "Note=A GitHub Release without 765T-Forge.Plugin.zip is INCOMPLETE."
 ) | Set-Content -LiteralPath $statusFile -Encoding utf8

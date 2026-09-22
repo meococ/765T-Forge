@@ -18,7 +18,7 @@ public static class LineworkGeometry
             return Math.Sqrt((px - x1) * (px - x1) + (py - y1) * (py - y1));
         }
 
-        t = Math.Clamp(((px - x1) * dx + (py - y1) * dy) / l2, 0, 1);
+        t = BclCompat.Clamp(((px - x1) * dx + (py - y1) * dy) / l2, 0, 1);
         var cx = x1 + t * dx;
         var cy = y1 + t * dy;
         return Math.Sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
@@ -274,7 +274,7 @@ public static class LineworkQuery
     {
         var set = new HashSet<LineworkKind>();
         var text = string.IsNullOrWhiteSpace(entityTypes) ? "line,polyline,arc" : entityTypes!;
-        foreach (var token in text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (var token in BclCompat.SplitTrimmed(text, ','))
         {
             if (Enum.TryParse<LineworkKind>(token, ignoreCase: true, out var kind))
             {
@@ -365,7 +365,7 @@ public static class LineworkQuery
     public static string[] SplitPatterns(string? filter)
         => string.IsNullOrWhiteSpace(filter)
             ? []
-            : filter!.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            : BclCompat.SplitTrimmed(filter!, ',');
 
     private static void Bump(Dictionary<string, int> map, string key)
     {

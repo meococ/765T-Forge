@@ -239,7 +239,7 @@ public sealed class LayerMatcher
     public LayerMatcher(string? filter, string? mode = null)
     {
         var text = string.IsNullOrWhiteSpace(filter) ? DefaultPipeLayerFilter : filter!;
-        _patterns = text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        _patterns = BclCompat.SplitTrimmed(text, ',')
             .Select(p => (p, p.Contains('*') || p.Contains('?') ? WildcardToRegex(p) : null))
             .ToArray();
         _mode = ParseMode(mode);

@@ -38,6 +38,11 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, "unauthorized", "Invalid Forge named pipe token.");
         }
 
+        if (RejectIfHostMismatch(command) is { } hostMismatch)
+        {
+            return hostMismatch;
+        }
+
         var decision = _safetyPolicy.Evaluate(command);
         var auditId = _auditSink.WriteBestEffort(new AuditRecord
         {
@@ -143,8 +148,9 @@ public sealed partial class PluginCommandProcessor
 
     private static ForgeResult WithUndoMark(Func<ForgeResult> action)
     {
-        // AutoCAD 2026 Document no longer exposes StartUndoMark/EndUndoMark on the managed Document type.
-        // Use a synchronous UNDO group so typed writes remain one Ctrl+Z unit when possible.
+        // UNDO Mark/End via the command line on every year. AutoCAD 2026 Document no longer exposes
+        // StartUndoMark/EndUndoMark, so the net8 build must not call them. Older years still have those
+        // methods; this path does not, so 2017–2026 share one undo group.
         try
         {
             ActiveEditor.Command("_.UNDO", "_M");
@@ -220,7 +226,7 @@ public sealed partial class PluginCommandProcessor
         {
             forge = ForgeConstants.ProductVersion,
             envelope = ForgeConstants.EnvelopeVersion,
-            autocadTarget = ForgeConstants.AutoCadVersion,
+            autocadTarget = CompiledAutoCadHost.Current.Year.ToString(CultureInfo.InvariantCulture),
             autocadApplication = Application.Version.ToString(),
             dotnet = Environment.Version.ToString()
         });
@@ -1501,8 +1507,40 @@ public sealed partial class PluginCommandProcessor
         return tokens.ToArray();
     }
 
+    private static ForgeResult? RejectIfHostMismatch(ForgeCommand command)
+    {
+        // ACADVER is the release id ("25.1s (LMS Tech)" on AutoCAD 2026). A matching host
+        // returns null and leaves the 2026 path unchanged. A readable mismatch fails closed.
+        string? acadVer;
+        try
+        {
+            acadVer = Convert.ToString(Application.GetSystemVariable("ACADVER"), CultureInfo.InvariantCulture);
+        }
+        catch (System.Exception)
+        {
+            return null;
+        }
+
+        var built = CompiledAutoCadHost.Current;
+        if (!AutoCadHostCatalog.TryParseAcadVer(acadVer, out var major, out var minor))
+        {
+            return null;
+        }
+
+        if (built.MatchesProduct(major, minor))
+        {
+            return null;
+        }
+
+        return AutoCadHostCatalog.HostMismatch(command.Id, command.Tool, built, acadVer);
+    }
+
     private static ForgeResult ExecDotNet(ForgeCommand command)
     {
+#if ACAD_YEAR_2017 || ACAD_YEAR_2018
+        // Roslyn is netstandard2.0. These years are compiled as net462 and are not claimed to NETLOAD on the AutoCAD 2017–2018 CLR.
+        return AutoCadHostCatalog.UnsupportedFeature(command.Id, CompiledAutoCadHost.Year, "forge_exec_dotnet", 2019);
+#endif
         var args = Args<ExecDotNetArgs>(command);
         if (string.IsNullOrWhiteSpace(args.Code))
         {

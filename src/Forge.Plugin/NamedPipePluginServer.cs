@@ -78,6 +78,18 @@ public sealed class NamedPipePluginServer : IDisposable
             PipeAccessRights.FullControl,
             AccessControlType.Allow));
 
+#if NETFRAMEWORK
+        // .NET Framework still has the PipeSecurity constructor. NamedPipeServerStreamAcl is the net8 shape.
+        return new NamedPipeServerStream(
+            _environment.PipeName,
+            PipeDirection.InOut,
+            1,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous,
+            0,
+            0,
+            pipeSecurity);
+#else
         return NamedPipeServerStreamAcl.Create(
             _environment.PipeName,
             PipeDirection.InOut,
@@ -87,17 +99,32 @@ public sealed class NamedPipePluginServer : IDisposable
             inBufferSize: 0,
             outBufferSize: 0,
             pipeSecurity);
+#endif
     }
 
     private async Task HandleRequestAsync(Stream pipe, CancellationToken cancellationToken)
     {
-        using var reader = new StreamReader(pipe, Encoding.UTF8, leaveOpen: true);
-        await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), leaveOpen: true)
+        // The 5-arg / 4-arg leaveOpen constructors exist on net48 and net8.
+        // await using / ReadLineAsync(CancellationToken) / WriteLineAsync(Memory) are net8-only.
+        using var reader = new StreamReader(pipe, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: true);
+#if NET
+        await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), bufferSize: 1024, leaveOpen: true)
         {
             AutoFlush = true
         };
+#else
+        using var writer = new StreamWriter(pipe, new UTF8Encoding(false), bufferSize: 1024, leaveOpen: true)
+        {
+            AutoFlush = true
+        };
+#endif
 
+#if NET7_0_OR_GREATER
         var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+#else
+        cancellationToken.ThrowIfCancellationRequested();
+        var line = await reader.ReadLineAsync().ConfigureAwait(false);
+#endif
         ForgeResult result;
         if (string.IsNullOrWhiteSpace(line))
         {
@@ -119,13 +146,20 @@ public sealed class NamedPipePluginServer : IDisposable
         }
 
         var json = JsonSerializer.Serialize(result, ForgeJson.Options);
+#if NET
         await writer.WriteLineAsync(json.AsMemory(), cancellationToken).ConfigureAwait(false);
+#else
+        cancellationToken.ThrowIfCancellationRequested();
+        await writer.WriteLineAsync(json).ConfigureAwait(false);
+#endif
     }
 
     private Task<ForgeResult> ExecuteOnMainThreadAsync(ForgeCommand command)
     {
         var tcs = new TaskCompletionSource<ForgeResult>(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        // ExecuteInCommandContextAsync has shipped since AutoCAD 2016, so 2017–2026 all call it.
+        // Do not replace this with a net8-only API.
         Application.DocumentManager.ExecuteInCommandContextAsync(_ =>
         {
             try

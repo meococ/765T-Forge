@@ -7,7 +7,7 @@
     <Authors>765T</Authors>
     <Company>765T</Company>
     <Product>765T-Forge</Product>
-    <Description>AutoCAD 2026 MCP server for metro/AEC drawing production workflows.</Description>
+    <Description>MCP server for metro/AEC drawing production. Default verified AutoCAD host is 2026; plugin build targets are 2017-2026.</Description>
     <Copyright>Copyright (c) 2026 765T</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/765T/765T-Forge</RepositoryUrl>

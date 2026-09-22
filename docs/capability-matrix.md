@@ -1,6 +1,6 @@
 # Capability matrix
 
-Honest status of MCP tools. AutoCAD target: **2026**. Civil 3D, full SSM **write**, and geometry megakits are out of scope.
+Honest status of MCP tools. **Default verified AutoCAD host: 2026.** 2017–2025 are plugin build targets when `AUTOCAD_<year>_ROOT` points at that install; they are not smoke-tested, and plugin binaries are not interchangeable across years. Civil 3D, full SSM **write**, and geometry megakits are out of scope.
 
 | Status | Meaning |
 |--------|---------|
@@ -84,7 +84,7 @@ Layer filtering on all `forge_linework_*`: `layerFilter` patterns match the full
 |------|--------|-------|
 | `forge_exec_command` / `_lisp` | implemented | Prefer sync `Editor.Command`; else `Ok=false`, `queued=true`, `completed=false` |
 | `forge_run_script` | implemented | AccoreConsole; **server-only** SafetyPolicy (ADR 0002) |
-| `forge_exec_dotnet` | implemented | Dual-gated; sync snippets only |
+| `forge_exec_dotnet` | implemented | Dual-gated; sync snippets only. AutoCAD 2017–2018 returns `autocad_version_unsupported` |
 
 ## Still planned / deferred
 

@@ -34,7 +34,10 @@ public sealed class ProjectConfigurationTests
         var target = pluginProject.Descendants("TargetFramework").Single().Value;
         var text = File.ReadAllText(pluginProjectPath);
 
-        Assert.Equal("net8.0-windows", target);
+        Assert.Equal("$(AutoCadTargetFramework)", target);
+        Assert.Contains("<AutoCadYear Condition=\"'$(AutoCadYear)' == ''\">2026</AutoCadYear>", text);
+        Assert.Contains("<AutoCadTargetFramework Condition=\"'$(AutoCadYear)' == '2026'\">net8.0-windows</AutoCadTargetFramework>", text);
+        Assert.Contains("bin\\$(Configuration)\\autocad-$(AutoCadYear)\\", text);
         Assert.Contains("$(AutoCadRoot)\\AcCoreMgd.dll", text);
         Assert.Contains("AUTOCAD_2026_ROOT", text);
         Assert.Contains("<Private>false</Private>", text);

@@ -426,25 +426,25 @@ public static class LineworkSvg
         var h = maxY - minY;
 
         var sb = new StringBuilder(cadItems.Count * 120 + 4096);
-        sb.Append(CultureInfo.InvariantCulture,
+        BclCompat.AppendInvariant(sb,
             $"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="{minX:0.###} {minY:0.###} {w:0.###} {h:0.###}" width="1400">""");
         sb.Append('\n');
-        sb.Append(CultureInfo.InvariantCulture, $"<title>{Esc(title)}</title>\n");
+        BclCompat.AppendInvariant(sb, $"<title>{Esc(title)}</title>\n");
         // CAD y-up -> SVG y-down: flip inside a group so coordinates stay in model units.
-        sb.Append(CultureInfo.InvariantCulture,
+        BclCompat.AppendInvariant(sb,
             $"""<g transform="translate(0,{minY + maxY:0.###}) scale(1,-1)" fill="none" stroke-linecap="round">""");
         sb.Append('\n');
 
         foreach (var m in modelItems)
         {
-            sb.Append(CultureInfo.InvariantCulture,
+            BclCompat.AppendInvariant(sb,
                 $"""<path d="M{m.S[0]:0.###},{m.S[1]:0.###} L{m.E[0]:0.###},{m.E[1]:0.###}" stroke="{ClassificationColor(m.Classification)}" stroke-width="1.6" vector-effect="non-scaling-stroke"><title>revit {Esc(m.Id ?? "?")} [{m.Classification}] d={Fmt(m.DistanceM)}m</title></path>""");
             sb.Append('\n');
         }
 
         foreach (var c in cadItems)
         {
-            sb.Append(CultureInfo.InvariantCulture,
+            BclCompat.AppendInvariant(sb,
                 $"""<path d="M{c.S[0]:0.###},{c.S[1]:0.###} L{c.E[0]:0.###},{c.E[1]:0.###}" stroke="{ClassificationColor(c.Classification)}" stroke-width="2.2" vector-effect="non-scaling-stroke"><title>cad seg {c.Seg} {Esc(c.Layer)} [{c.Classification}] d={Fmt(c.DistanceM)}m revit={Esc(c.RevitId ?? "-")}</title></path>""");
             sb.Append('\n');
         }
@@ -454,9 +454,9 @@ public static class LineworkSvg
         var lx = minX + w * 0.01;
         var ly = minY + h * 0.02;
         var fs = h * 0.016;
-        sb.Append(CultureInfo.InvariantCulture, $"""<g font-family="monospace" font-size="{fs:0.###}">""");
+        BclCompat.AppendInvariant(sb, $"""<g font-family="monospace" font-size="{fs:0.###}">""");
         sb.Append('\n');
-        sb.Append(CultureInfo.InvariantCulture,
+        BclCompat.AppendInvariant(sb,
             $"""<text x="{lx:0.###}" y="{ly - fs * 0.6:0.###}" fill="#222" font-weight="bold">{Esc(title)}</text>""");
         sb.Append('\n');
         var entries = new[]
@@ -468,9 +468,9 @@ public static class LineworkSvg
         };
         for (var i = 0; i < entries.Length; i++)
         {
-            sb.Append(CultureInfo.InvariantCulture,
+            BclCompat.AppendInvariant(sb,
                 $"""<rect x="{lx:0.###}" y="{ly + i * fs * 1.5 - fs * 0.8:0.###}" width="{fs:0.###}" height="{fs * 0.8:0.###}" fill="{entries[i].Item1}"/>""");
-            sb.Append(CultureInfo.InvariantCulture,
+            BclCompat.AppendInvariant(sb,
                 $"""<text x="{lx + fs * 1.3:0.###}" y="{ly + i * fs * 1.5:0.###}" fill="#222">{entries[i].Item2}</text>""");
             sb.Append('\n');
         }
