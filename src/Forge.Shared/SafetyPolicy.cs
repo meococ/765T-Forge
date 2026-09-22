@@ -30,6 +30,9 @@ public sealed class SafetyPolicy
     private static readonly Regex SsgGetAllErase = new(@"\bSSGET\b(?:[\s\r\n;'""]|\(|\))*""X""[\s\S]*\b_?-?ERASE\b|\b_?-?ERASE\b[\s\S]*\bSSGET\b(?:[\s\r\n;'""]|\(|\))*""X""", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     // Alias E / _.E is not the word ERASE. Kept separate so the ERASE pattern is unchanged.
     private static readonly Regex EraseAliasAll = new(@"\b_?-?\.?E\b(?:[\s\r\n;'""]|\(|\))*_?(?:ALL\b|\*)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex DeleteAll = new(
+        @"(?im)(?:^|[;\r\n])\s*(?:\._|\.|_|-)*DELETE\b(?:[\s\r\n;'""]|\(|\))*_?(?:ALL\b|\*)|\(\s*command\s+""(?:\._|\.|_|-)*DELETE\b[^""]*""\s+""?(?:ALL|\*)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
     // Command-anchored. A bare \bSH\b would match directory names such as \SH\.
     private static readonly Regex AnchoredExternalCommand = new(
         @"(?im)(?:^|[;\r\n])\s*(?:\._|\.|_|-)*(?:NETLOAD|APPLOAD|ARXLOAD|SCRIPT|SHELL|SH)\b|\(\s*command\s+""(?:\._|\.|_|-)*(?:NETLOAD|APPLOAD|ARXLOAD|SCRIPT|SHELL|SH)\b|\(\s*load(?:\s|""|\))",
@@ -74,6 +77,14 @@ public sealed class SafetyPolicy
         if (EraseAll.IsMatch(text) || EraseAliasAll.IsMatch(text))
         {
             return SafetyDecision.Deny("deny_erase_all", "Blocked destructive ERASE ALL command.", "Use a scoped selection set or entity handles.");
+        }
+
+        if (DeleteAll.IsMatch(text))
+        {
+            return SafetyDecision.Deny(
+                "deny_delete_all",
+                "Blocked destructive DELETE ALL command.",
+                "Use a scoped selection set or entity handles.");
         }
 
         if (Purge.IsMatch(text))

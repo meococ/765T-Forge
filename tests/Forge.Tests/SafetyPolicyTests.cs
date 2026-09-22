@@ -116,6 +116,20 @@ public sealed class SafetyPolicyTests
     }
 
     [Theory]
+    [InlineData("DELETE ALL")]
+    [InlineData("_.DELETE\nALL")]
+    [InlineData("DELETE\n*")]
+    [InlineData("-DELETE\nALL")]
+    [InlineData("(command \"DELETE\" \"ALL\")")]
+    [InlineData("(command \"_.DELETE\" \"*\")")]
+    public void DeleteAllIsDenied(string commandText)
+    {
+        var decision = _policy.EvaluateText("forge_exec_command", commandText);
+        Assert.False(decision.Allowed);
+        Assert.Equal("deny_delete_all", decision.Code);
+    }
+
+    [Theory]
     [InlineData("ZOOM *\n-LAYER\nS\n0\n")]
     [InlineData("SHAPE")]
     [InlineData("FINISH")]
@@ -124,6 +138,7 @@ public sealed class SafetyPolicyTests
     [InlineData("OPEN\nC:\\Shell\\a.dwg")]
     [InlineData("(strcat \"A\" \"B\")")]
     [InlineData("(ssget \"_X\")")]
+    [InlineData("OPEN\nC:\\Delete\\a.dwg")]
     public void HarmlessExecutorTextStaysAllowed(string commandText)
     {
         var decision = _policy.EvaluateText("forge_exec_command", commandText);
