@@ -68,6 +68,12 @@ public sealed class ForgeToolRunner
             "forge_audit_summarize" => ResolveAuditSummarize(command),
             "forge_sheet_inventory_import" => ResolveSheetInventoryImport(command),
             "forge_issue_set_diff" => ResolveIssueSetDiff(command),
+            // Pure coordinate math — always resolves server-side (no AutoCAD needed).
+            "forge_linework_transform" => CoordTransformTool.Execute(command),
+            // Linework tools resolve locally (no AutoCAD) when the caller targets a dump file;
+            // live-drawing queries still route to the plugin over the pipe.
+            _ when LineworkLocal.IsLineworkTool(tool) && LineworkLocal.IsDumpFileSource(command.Args)
+                => LineworkLocal.Execute(command),
             _ => await _pipeClient.SendAsync(command, cancellationToken).ConfigureAwait(false)
         };
 

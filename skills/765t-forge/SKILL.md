@@ -52,6 +52,13 @@ Prefer **`forge_recipe_issue_set`** for full issue-set runs.
 
 Every write should produce an audit record and, when a DWG path is available, a backup. On plugin timeout, call `forge_qa_readback_after_timeout` before any retry. Use `forge_audit_summarize` for a redacted session overview.
 
+## Linework (CAD ↔ Revit model QA)
+
+- `forge_linework_dump` / `_segments` extract linework from the live drawing (`source=drawing`, model space + xref contents transformed to host space) or a `pl_dump.txt` file (`source=dumpFile` — runs server-side, no AutoCAD needed).
+- Layer names may be xref-prefixed (`XREF$0$Layer`). `layerFilter` is prefix-aware, but prefer **`layerSuffix`** (EndsWith on the bare layer name) when targeting a specific layer; never assume `prefix` matching is safe — it silently drops xref content.
+- `forge_linework_transform` calibrates/persists/applies the CAD→Revit transform (anchor `pairs` → similarity or affine fit → `transformPath` file). Re-check `maxResidualM`; > 0.5 m means the anchors do not describe one transform.
+- `forge_linework_compare` marks every CAD segment and every Revit pipe segment (`modelSegments`/`modelSegmentsPath`) as `matched` / `partial` / `missing_in_revit` / `extra_off_cad` with distance; `overlayPath` writes a color-coded SVG for human review.
+
 ## Capability awareness
 
 Trust [docs/capability-matrix.md](../../docs/capability-matrix.md). Prompts: `issue_set_runbook`, `safety_first`.

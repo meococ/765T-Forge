@@ -17,6 +17,7 @@ public sealed class PluginDispatchSyncTests
         "forge_audit_summarize",
         "forge_sheet_inventory_import",
         "forge_issue_set_diff",
+        "forge_linework_transform", // pure server-side coordinate math — never reaches the plugin
     };
 
     [Fact]

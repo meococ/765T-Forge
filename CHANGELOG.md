@@ -17,6 +17,7 @@ See [docs/versioning.md](docs/versioning.md).
 - IssueSetContract lite, standards pack v2 plot bindings, field/rev gates, timeout read-back protocol
 - Differential issue-set receipts, read-only sheet inventory, batch resume metadata
 - Plugin-dispatch CI sync; Dependabot; scoped open-world `*` denylist; ADR honesty for headless AccoreConsole path
+- Linework QA wave: `forge_linework_segments` (flat segment feed, meters/transformed endpoints), `forge_linework_compare` (per-item CAD↔Revit marking `matched`/`partial`/`missing_in_revit`/`extra_off_cad` + matched pairs + Z filter + SVG overlay), `forge_linework_transform` (server-side similarity/affine calibration from anchor pairs with persisted calibration file and >0.5 m residual warning); explicit `layerSuffix`/`layerMatch` xref-safe layer filtering on all `forge_linework_*` tools
 
 ### Changed
 

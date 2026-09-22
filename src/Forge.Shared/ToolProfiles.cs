@@ -44,6 +44,19 @@ public static class ToolProfiles
             "forge_xref_list",
             "forge_layer_list",
             "forge_block_list_attributes"
+        ],
+        ["linework"] =
+        [
+            "forge_system_health",
+            "forge_linework_dump",
+            "forge_linework_trace",
+            "forge_linework_topology",
+            "forge_linework_coverage",
+            "forge_linework_segments",
+            "forge_linework_compare",
+            "forge_linework_transform",
+            "forge_doc_list_open",
+            "forge_layer_list"
         ]
     };
 
