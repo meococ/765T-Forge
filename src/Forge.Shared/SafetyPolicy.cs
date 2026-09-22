@@ -37,6 +37,9 @@ public sealed class SafetyPolicy
     private static readonly Regex AnchoredExternalCommand = new(
         @"(?im)(?:^|[;\r\n])\s*(?:\._|\.|_|-)*(?:NETLOAD|APPLOAD|ARXLOAD|SCRIPT|SHELL|SH)\b|\(\s*command\s+""(?:\._|\.|_|-)*(?:NETLOAD|APPLOAD|ARXLOAD|SCRIPT|SHELL|SH)\b|\(\s*load(?:\s|""|\))",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex ArxCommandLoad = new(
+        @"(?im)(?:^|[;\r\n])\s*(?:\._|\.|_|-)*ARX\b(?:[\s\r\n;'""]|\(|\))*_?(?:LOAD|L)\b|\(\s*arxload(?:\s|""|\))",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex AnchoredExecutorSave = new(
         @"(?im)(?:^|[;\r\n])\s*(?:\._|\.|_|-)*(?:SAVEAS|QSAVE|WBLOCK|SAVE)\b|\(\s*command\s+""(?:\._|\.|_|-)*(?:SAVEAS|QSAVE|WBLOCK|SAVE)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -130,6 +133,14 @@ public sealed class SafetyPolicy
         if (AnchoredExternalCommand.IsMatch(text))
         {
             return SafetyDecision.Deny("deny_external_command", "Blocked NETLOAD, APPLOAD, ARXLOAD, load, SCRIPT, or SHELL/SH command.", "Do not load foreign code or start a shell from an executor.");
+        }
+
+        if (ArxCommandLoad.IsMatch(text))
+        {
+            return SafetyDecision.Deny(
+                "deny_arx_load",
+                "Blocked ARX Load or arxload.",
+                "Do not load ARX modules from an executor.");
         }
 
         if (SaveOverwrite.IsMatch(text) && (BroadSelectionAll.IsMatch(text) || BroadSelectionStarAsArg.IsMatch(text)))

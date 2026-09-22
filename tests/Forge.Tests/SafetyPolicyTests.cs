@@ -116,6 +116,18 @@ public sealed class SafetyPolicyTests
     }
 
     [Theory]
+    [InlineData("ARX\nLoad\nhelper.arx")]
+    [InlineData("ARX\nL\nhelper.arx")]
+    [InlineData("_.ARX\nLOAD")]
+    [InlineData("(arxload \"x.arx\")")]
+    public void ArxLoadIsDenied(string commandText)
+    {
+        var decision = _policy.EvaluateText("forge_exec_command", commandText);
+        Assert.False(decision.Allowed);
+        Assert.Equal("deny_arx_load", decision.Code);
+    }
+
+    [Theory]
     [InlineData("DELETE ALL")]
     [InlineData("_.DELETE\nALL")]
     [InlineData("DELETE\n*")]
@@ -139,6 +151,8 @@ public sealed class SafetyPolicyTests
     [InlineData("(strcat \"A\" \"B\")")]
     [InlineData("(ssget \"_X\")")]
     [InlineData("OPEN\nC:\\Delete\\a.dwg")]
+    [InlineData("ARX")]
+    [InlineData("OPEN\nC:\\ARX\\a.dwg")]
     public void HarmlessExecutorTextStaysAllowed(string commandText)
     {
         var decision = _policy.EvaluateText("forge_exec_command", commandText);
