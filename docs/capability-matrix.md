@@ -1,6 +1,6 @@
 # Capability matrix
 
-Honest status of MCP tools. **Default verified AutoCAD host: 2026.** 2017–2025 are plugin build targets when `AUTOCAD_<year>_ROOT` points at that install; they are not smoke-tested, and plugin binaries are not interchangeable across years. 2017–2018 build as `net46` (documented CLR 4.6; JSON via Newtonsoft.Json because System.Text.Json 8 cannot target `net46`). Smoke lab runs on AutoCAD 2026 only. Civil 3D, full SSM **write**, and geometry megakits are out of scope.
+Honest status of MCP tools. **Default verified AutoCAD host: 2026.** 2017–2025 are plugin build targets when `AUTOCAD_<year>_ROOT` points at that install; they are not smoke-tested, and plugin binaries are not interchangeable across years. A DLL year that does not match the host, or an `ACADVER` value that cannot be read, returns `autocad_version_unsupported` before the tool runs. 2017–2018 build as `net46` (documented CLR 4.6; JSON via Newtonsoft.Json because System.Text.Json 8 cannot target `net46`). Smoke lab runs on AutoCAD 2026 only. Civil 3D, full SSM **write**, and geometry megakits are out of scope.
 
 | Status | Meaning |
 |--------|---------|
@@ -40,7 +40,7 @@ Honest status of MCP tools. **Default verified AutoCAD host: 2026.** 2017–2025
 
 | Tool | Status | Notes |
 |------|--------|-------|
-| `forge_plot_to_pdf` | implemented | Configurable device/paper/CTB·STB/area; overwrite ack |
+| `forge_plot_to_pdf` | implemented | Configurable device/paper/CTB·STB/area; overwrite ack. Probes `%PDF-` and page count; probe failure is `Ok=false` / `plot_probe_failed` |
 | `forge_plot_publish` | implemented | DSD + `Publisher.PublishDsd` on 2017–2026; **PublishReceipt** + PDF probe; preflight gate |
 | `forge_qa_*` (verify/check/audit/readback) | implemented | |
 | `forge_qa_readback_after_timeout` | implemented | Timeout recovery protocol — never retry write blind |

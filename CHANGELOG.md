@@ -22,6 +22,7 @@ See [docs/versioning.md](docs/versioning.md).
 
 ### Changed
 
+- `forge_plot_to_pdf` uses `PdfProbeResult` (`plot_probe_failed` when the probe fails). Missing or unparseable `ACADVER` fails closed. Headless `accoreconsole.exe` is chosen by `autoCadYear` or `FORGE_ACCORECONSOLE_YEAR` (default 2026, `AUTOCAD_<year>_ROOT`) and does not fall back to the 2026 console.
 - MCP contract: `Ok=false` is `tools/call` `isError`, read from structured content or the JSON text (output schema stays off). Failed gates, probes, missing read-back, `updated=0`, and queued commands are not success. Backup path sits beside the payload. `forge_qa_preflight` and `forge_sheet_inventory_import` are not read-only. Server name `765T-Forge` with instructions. Task support is forbidden. Linework tools stay on the surface.
 - Roadmap SemVer reconciled with capability matrix (registry/packs/resources are 0.2.0 shipped, not 0.3.0 targets)
 - Removed `companion-skill/` stub; added `docs/README.md` + `AGENTS.md`
@@ -29,6 +30,7 @@ See [docs/versioning.md](docs/versioning.md).
 
 ### Security
 
+- Denylist additions (old patterns kept): `DELETE ALL`, `ARX` Load / `(arxload`, `-LAYER` mass delete of `*`/`ALL`, `ERASE` fence/window/crossing, `ssget` `C`/`W`/`F`/`WP`/`CP` with erase/delete/`command`, and `(eval (read`. `ZOOM *` stays allowed. Assembling a command across separate executor calls is out of band for the denylist.
 - Denylist additions (old patterns kept): `E`/`_.E` + `ALL`, destructive `ssget "_X"`/`"_A"`, `strcat`/`eval` with `ALL` or `ssget`, executor `SAVE`/`QSAVE`/`SAVEAS`/`WBLOCK`, and command-anchored `NETLOAD`/`APPLOAD`/`ARXLOAD`/`(load`/`SCRIPT`/`SHELL`/`SH`. `ZOOM *` stays allowed. Batch dry-run scans script bodies. A missing backup blocks the write.
 - Open-world denylist no longer blocks every `*` (scoped to selection idioms); headless script path documented as server-side SafetyPolicy only
 
