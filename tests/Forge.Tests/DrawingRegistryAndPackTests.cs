@@ -67,6 +67,20 @@ public sealed class DrawingRegistryAndPackTests
         Assert.Contains("core", ToolProfiles.Names);
     }
 
+    [Fact]
+    public void ToolProfiles_PlotHotPathAndLineworkProfile()
+    {
+        Assert.True(ToolProfiles.TryGet("plot", out var plot));
+        Assert.Contains("forge_doc_list_layouts", plot);
+        Assert.Contains("forge_registry_load", plot);
+        Assert.Contains("forge_registry_lookup", plot);
+        Assert.Contains("forge_block_campaign", plot);
+        Assert.Contains("forge_xref_list", plot);
+        Assert.Contains("linework", ToolProfiles.Names);
+        Assert.True(ToolProfiles.TryGet("linework", out var linework));
+        Assert.Contains("forge_linework_compare", linework);
+    }
+
     private static string WriteTempJson(string json)
     {
         var path = Path.Combine(Path.GetTempPath(), $"forge-fix-{Guid.NewGuid():N}.json");

@@ -23,7 +23,7 @@ Use this skill when an agent drives AutoCAD through **765T-Forge** for metro/AEC
 
 ## Profiles
 
-Call `forge_system_tool_profile` (`core` | `plot` | `qa`) to shrink the tool surface for the current task. MCP resources: `forge://profiles/{name}`.
+Call `forge_system_tool_profile` (`core` | `plot` | `qa` | `linework`) for a suggested tool list. The list is a hint; the runner does not disable tools outside it. MCP resources: `forge://profiles/{name}`.
 
 ## Inspect before write / publish
 

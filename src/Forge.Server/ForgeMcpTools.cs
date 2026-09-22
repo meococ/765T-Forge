@@ -281,7 +281,7 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_pack_status", new { }, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_system_tool_profile", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, TaskSupport = ToolTaskSupport.Forbidden)]
-    [Description("List tool profiles (core|plot|qa) or return the tool allowlist for one profile to reduce agent tool noise.")]
+    [Description("List tool profiles (core|plot|qa|linework) or return the suggested tool list for one profile. The list is a hint; the runner does not disable tools outside it.")]
     public static Task<ForgeResult> SystemToolProfile(ForgeToolRunner runner, string? name = null, CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_system_tool_profile", new { name }, cancellationToken: cancellationToken);
 

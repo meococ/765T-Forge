@@ -22,7 +22,7 @@ See [docs/versioning.md](docs/versioning.md).
 
 ### Changed
 
-- `forge_plot_to_pdf` uses `PdfProbeResult` (`plot_probe_failed` when the probe fails). Missing or unparseable `ACADVER` fails closed. Headless `accoreconsole.exe` is chosen by `autoCadYear` or `FORGE_ACCORECONSOLE_YEAR` (default 2026, `AUTOCAD_<year>_ROOT`) and does not fall back to the 2026 console.
+- `forge_plot_to_pdf` uses `PdfProbeResult` (`plot_probe_failed` when the probe fails). Missing or unparseable `ACADVER` fails closed. Headless `accoreconsole.exe` is chosen by `autoCadYear` or `FORGE_ACCORECONSOLE_YEAR` (default 2026, `AUTOCAD_<year>_ROOT`) and does not fall back to the 2026 console. Batch jobs use their own `timeoutSeconds` (default 300). Exit code 0 with `*Cancel*`, `Unknown command`, or `*Invalid*` in console output is `accoreconsole_script_error` (real AutoCAD exit-code behavior is unverified here). `forge_linework_*` is not read-only when an optional path writes a file. Profile `linework` sits beside `core`/`plot`/`qa`; `plot` includes layouts, registry, campaign, and xref list. The profile list is a hint.
 - MCP contract: `Ok=false` is `tools/call` `isError`, read from structured content or the JSON text (output schema stays off). Failed gates, probes, missing read-back, `updated=0`, and queued commands are not success. Backup path sits beside the payload. `forge_qa_preflight` and `forge_sheet_inventory_import` are not read-only. Server name `765T-Forge` with instructions. Task support is forbidden. Linework tools stay on the surface.
 - Roadmap SemVer reconciled with capability matrix (registry/packs/resources are 0.2.0 shipped, not 0.3.0 targets)
 - Removed `companion-skill/` stub; added `docs/README.md` + `AGENTS.md`

@@ -47,7 +47,7 @@ Honest status of MCP tools. **Default verified AutoCAD host: 2026.** 2017–2025
 | `forge_qa_preflight` | implemented | Writes a QaReport file (not read-only). `passed=false` is `Ok=false` |
 | `forge_audit_summarize` | implemented | Server-side last-N audit summary (no raw args) |
 | `forge_issue_set_validate` | implemented | IssueSetContract layouts↔drawingNos↔rev |
-| `forge_sheet_inventory_import` | implemented | CSV → contract JSON. Writes `outputContractPath` when set (no DST/SSM). Not idempotent when `contractId` is omitted |
+| `forge_sheet_inventory_import` | implemented | CSV → contract JSON. Writes `outputContractPath` when set (no DST/SSM). Layout list is `forge_doc_list_layouts`; there is no separate sheet-list tool and no DST writer. Not idempotent when `contractId` is omitted |
 | `forge_issue_set_diff` | implemented | Diff two PublishReceipt artifacts |
 | `forge_recipe_issue_set` | implemented | Normalize → fill → gate → publish |
 | `forge_pack_and_go` | implemented | Host+xrefs+styles + `manifest.json` |
@@ -60,11 +60,13 @@ Honest status of MCP tools. **Default verified AutoCAD host: 2026.** 2017–2025
 |------|--------|-------|
 | `forge_registry_load` / `_lookup` | implemented | Fail-closed drawing numbers for titleblock tags |
 | `forge_pack_load` / `_status` | implemented | Declarative project standards pack (v2 plot bindings) |
-| `forge_system_tool_profile` | implemented | Profiles `core` / `plot` / `qa` (server-side) |
+| `forge_system_tool_profile` | implemented | Profiles `core` / `plot` / `qa` / `linework` (server-side). The list is a hint; the runner does not disable tools outside it. `plot` includes layouts, registry, campaign, and xref list |
 | `forge_viewport_list` | implemented | Paper-space viewports |
 | `forge_viewport_set_layer_freeze` | implemented | VP freeze/thaw by handle |
 
 ## Linework (CAD ↔ model QA)
+
+These tools are not read-only: an optional `outputPath` (compare also `overlayPath`, transform also `transformPath`) writes that file. They do not modify the DWG.
 
 | Tool | Status | Notes |
 |------|--------|-------|
@@ -86,6 +88,8 @@ Layer filtering on all `forge_linework_*`: `layerFilter` patterns match the full
 | `forge_run_script` | implemented | AccoreConsole; **server-only** SafetyPolicy (ADR 0002). Console year is selectable; default 2026; missing exe is `accoreconsole_not_found` before spawn |
 | `forge_exec_dotnet` | implemented | Dual-gated; sync snippets only. AutoCAD 2017–2018 (`net46`) returns `autocad_version_unsupported` because Roslyn targets netstandard2.0 |
 
+MCP resources and prompts are shipped (`forge://…`, issue_set_runbook).
+
 ## Still planned / deferred
 
 | Item | Notes |
@@ -95,4 +99,3 @@ Layer filtering on all `forge_linework_*`: `layerFilter` patterns match the full
 | Civil 3D / geometry megakit / remote multi-tenant MCP | Explicitly out of scope |
 | netDxf offline path | Optional later — not SoT for plot truth |
 | NuGet `McpServer` / registry | After Releases packaging — see docs/packaging-nuget.md |
-| MCP Resources / Prompts | implemented (`forge://…`, issue_set_runbook) |

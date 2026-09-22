@@ -3,7 +3,7 @@
 | Goal | Tools |
 |------|-------|
 | Health | `forge_system_health`, `forge_system_version` |
-| Profiles | `forge_system_tool_profile` (`core`/`plot`/`qa`) |
+| Profiles | `forge_system_tool_profile` (`core`/`plot`/`qa`/`linework`; hint only) |
 | Registry | `forge_registry_load`, `forge_registry_lookup` |
 | Standards | `forge_pack_load`, `forge_pack_status` |
 | Issue set | `forge_sheet_inventory_import`, `forge_issue_set_validate`, `forge_issue_set_diff` |

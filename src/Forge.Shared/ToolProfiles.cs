@@ -21,6 +21,9 @@ public static class ToolProfiles
         [
             "forge_system_health",
             "forge_system_capabilities",
+            "forge_doc_list_layouts",
+            "forge_registry_load",
+            "forge_registry_lookup",
             "forge_qa_preflight",
             "forge_issue_set_validate",
             "forge_plot_to_pdf",
@@ -28,6 +31,8 @@ public static class ToolProfiles
             "forge_recipe_issue_set",
             "forge_layout_page_setup_apply",
             "forge_layer_state_restore",
+            "forge_block_campaign",
+            "forge_xref_list",
             "forge_xref_normalize_relative"
         ],
         ["qa"] =

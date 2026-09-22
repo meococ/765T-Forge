@@ -21,7 +21,7 @@ flowchart LR
 | **AI Agent** | Calls MCP tools (Cursor, Claude Desktop, or other MCP hosts) |
 | **Forge.Server** | Stdio MCP server (`ModelContextProtocol`); evaluates safety, writes audit start/completion, routes tools |
 | **Named pipe** | JSON line protocol to the in-process plugin (`FORGE_PIPE_NAME`, default `765T.Forge.AutoCAD`) |
-| **AccoreConsole** | Headless path for `forge_run_script` (and future multi-DWG job queue) via `AUTOCAD_2026_ROOT` |
+| **AccoreConsole** | Headless path for `forge_run_script` and `forge_batch_run`. Console year follows `autoCadYear` or `FORGE_ACCORECONSOLE_YEAR` (default 2026, `AUTOCAD_<year>_ROOT`) |
 | **Forge.Plugin** | `NETLOAD`ed into AutoCAD; re-checks token + safety; backups; dispatches to ObjectARX/.NET API |
 | **AutoCAD 2026** | Source of truth for drawings, plotters, xrefs, and layouts |
 
@@ -30,7 +30,7 @@ flowchart LR
 1. Agent invokes a tool on `ForgeMcpTools`
 2. `ForgeToolRunner` applies server-side `SafetyPolicy`, audit, and dry-run short-circuit
 3. Most tools: `ForgePipeClient` → plugin `NamedPipePluginServer` → main-thread document lock → `PluginCommandProcessor`
-4. `forge_run_script`: server spawns `accoreconsole.exe` instead of the live pipe
+4. `forge_run_script` and `forge_batch_run`: server spawns `accoreconsole.exe` for the requested AutoCAD year (default 2026) instead of the live pipe
 5. Plugin re-evaluates safety, may backup the DWG, executes, returns `ForgeResult` (+ optional verification)
 
 ## Safety and audit
