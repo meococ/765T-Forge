@@ -316,9 +316,21 @@ public sealed class HeadlessAccoreConsoleRunner
             var stdout = await stdoutTask.ConfigureAwait(false);
             var stderr = await stderrTask.ConfigureAwait(false);
 
-            return process.ExitCode == 0
-                ? ForgeResult.Success(commandId, new { exitCode = process.ExitCode, stdout, stderr, backupPath })
-                : ForgeResult.Failure(commandId, "accoreconsole_failed", $"accoreconsole exited with code {process.ExitCode}.", stderr);
+            if (process.ExitCode != 0)
+            {
+                return ForgeResult.Failure(commandId, "accoreconsole_failed", $"accoreconsole exited with code {process.ExitCode}.", stderr);
+            }
+
+            if (AccoreConsoleScriptCheck.HasScriptError(stdout, stderr))
+            {
+                return ForgeResult.Failure(
+                    commandId,
+                    AccoreConsoleScriptCheck.ErrorCode,
+                    "accoreconsole exited 0 but stdout reports *Cancel*, Unknown command, or *Invalid*.",
+                    "Fix the script. Exit code 0 alone is not a successful run. AutoCAD's real exit-code behavior for these messages is unverified without accoreconsole.");
+            }
+
+            return ForgeResult.Success(commandId, new { exitCode = process.ExitCode, stdout, stderr, backupPath });
         }
         catch (OperationCanceledException)
         {

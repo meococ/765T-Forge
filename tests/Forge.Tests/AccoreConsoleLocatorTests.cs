@@ -8,6 +8,34 @@ public sealed class AccoreConsoleLocatorTests
     public static IEnumerable<object[]> CatalogYears()
         => AutoCadHostCatalog.All.Select(host => new object[] { host.Year });
 
+    [Theory]
+    [InlineData("*Cancel*", null)]
+    [InlineData(null, "Unknown command \"FOO\"")]
+    [InlineData("ok\n*Invalid*", "")]
+    public void ScriptErrorMarkersFailClosed(string? stdout, string? stderr)
+    {
+        Assert.True(AccoreConsoleScriptCheck.HasScriptError(stdout, stderr));
+    }
+
+    [Fact]
+    public void CleanConsoleOutputIsNotAScriptError()
+    {
+        Assert.False(AccoreConsoleScriptCheck.HasScriptError("Command: ZOOM\n", ""));
+    }
+
+    [Fact]
+    public void RunOneAsyncSourceTreatsScriptMarkersAsFailure()
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepoRoot(), "src", "Forge.Server", "HeadlessAccoreConsoleRunner.cs"));
+        var start = source.IndexOf("private async Task<ForgeResult> RunOneAsync", StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        var body = source[start..];
+        var marker = body.IndexOf("AccoreConsoleScriptCheck.HasScriptError", StringComparison.Ordinal);
+        var success = body.IndexOf("exitCode = process.ExitCode", StringComparison.Ordinal);
+        Assert.True(marker >= 0 && success > marker);
+        Assert.Contains("accoreconsole_script_error", body, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ClampJobTimeout_UsesJobValueOrDefault300()
     {
