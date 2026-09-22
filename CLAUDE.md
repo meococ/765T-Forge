@@ -82,7 +82,7 @@ Both processes call `ForgeEnvironment.FromProcess()` independently; they must re
 - `FORGE_PIPE_NAME` (default `765T.Forge.AutoCAD`)
 - `FORGE_AUTOCAD_TOKEN` (required) → falls back to `MCP_AUTOCAD_TOKEN`. No production default secret. For local/tests only: `FORGE_DEV_ALLOW_DEFAULT_TOKEN=true` uses `dev-only-insecure-token` and prints a warning.
 - `FORGE_BACKUP_DIR`, `FORGE_AUDIT_DIR` (default under `%LOCALAPPDATA%\765T-Forge\`)
-- `AUTOCAD_<year>_ROOT` (2026 default `C:\Program Files\Autodesk\AutoCAD 2026`) — plugin HintPath for that year. Headless `accoreconsole.exe` still uses the 2026 root (`ForgeEnvironment.AutoCadRoot`)
+- `AUTOCAD_<year>_ROOT` (2026 default `C:\Program Files\Autodesk\AutoCAD 2026`) — plugin HintPath for that year. `forge_run_script` / `forge_batch_run` choose `accoreconsole.exe` by `autoCadYear` or `FORGE_ACCORECONSOLE_YEAR`, default 2026, from `AUTOCAD_<year>_ROOT`. A different year does not use the 2026 console.
 - `FORGE_ENABLE_UNSAFE_OPS` (default `false`)
 - `FORGE_PLUGIN_RESPONSE_TIMEOUT_SECONDS` (default `120`)
 

@@ -463,15 +463,16 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_linework_transform", new { pairs, affine, transformPath, transform, points, polylines, direction, name, notes, cadUnitsPerMeter }, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_batch_run", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false, TaskSupport = ToolTaskSupport.Forbidden)]
-    [Description("Run an AccoreConsole job queue over multiple DWG/script pairs with partial-success reporting and optional resume batchId.")]
+    [Description("Run an AccoreConsole job queue over multiple DWG/script pairs with partial-success reporting and optional resume batchId. Default AutoCAD year is 2026; a requested year uses AUTOCAD_<year>_ROOT and does not use the 2026 console.")]
     public static Task<ForgeResult> BatchRun(
         ForgeToolRunner runner,
         BatchJobDto[]? jobs = null,
         bool continueOnError = true,
         string? resumeBatchId = null,
+        int? autoCadYear = null,
         [Description(ForgeArgDescriptions.DryRun)] bool dryRun = false,
         CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_batch_run", new { jobs = jobs ?? [], continueOnError, resumeBatchId }, dryRun, cancellationToken: cancellationToken);
+        => runner.InvokeAsync("forge_batch_run", new { jobs = jobs ?? [], continueOnError, resumeBatchId, autoCadYear }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_batch_status", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, TaskSupport = ToolTaskSupport.Forbidden)]
     [Description("Load a saved AccoreConsole batch resume state by batchId or artifact path.")]
@@ -489,9 +490,9 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_exec_lisp", new { lisp }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_run_script", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true, TaskSupport = ToolTaskSupport.Forbidden)]
-    [Description("Run a .scr or .lsp script against a DWG through accoreconsole.exe with pre-run backup.")]
-    public static Task<ForgeResult> RunScript(ForgeToolRunner runner, string dwgPath, string scriptPath, int? timeoutSeconds = null, [Description(ForgeArgDescriptions.DryRun)] bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_run_script", new { dwgPath, scriptPath, timeoutSeconds }, dryRun, cancellationToken: cancellationToken);
+    [Description("Run a .scr or .lsp script against a DWG through accoreconsole.exe with pre-run backup. Default AutoCAD year is 2026; a requested year uses AUTOCAD_<year>_ROOT and does not use the 2026 console.")]
+    public static Task<ForgeResult> RunScript(ForgeToolRunner runner, string dwgPath, string scriptPath, int? timeoutSeconds = null, int? autoCadYear = null, [Description(ForgeArgDescriptions.DryRun)] bool dryRun = false, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_run_script", new { dwgPath, scriptPath, timeoutSeconds, autoCadYear }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_exec_dotnet", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true, TaskSupport = ToolTaskSupport.Forbidden)]
     [Description("Execute a C# script inside the AutoCAD plugin context. Disabled unless unsafe ops are enabled and acknowledged.")]
@@ -512,4 +513,5 @@ public sealed record BatchJobDto
     public string DwgPath { get; init; } = "";
     public string ScriptPath { get; init; } = "";
     public int? TimeoutSeconds { get; init; }
+    public int? AutoCadYear { get; init; }
 }

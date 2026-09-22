@@ -6,21 +6,35 @@ namespace Forge.Server;
 
 public sealed class HeadlessAccoreConsoleRunner
 {
-    private readonly ForgeEnvironment _environment;
     private readonly BackupPlanner _backupPlanner;
     private readonly SafetyPolicy _safetyPolicy;
+    private readonly Func<string, string?> _readEnv;
 
-    public HeadlessAccoreConsoleRunner(ForgeEnvironment environment, BackupPlanner backupPlanner, SafetyPolicy safetyPolicy)
+    public HeadlessAccoreConsoleRunner(
+        ForgeEnvironment environment,
+        BackupPlanner backupPlanner,
+        SafetyPolicy safetyPolicy,
+        Func<string, string?>? readEnv = null)
     {
-        _environment = environment;
+        // Console selection uses AccoreConsoleLocator, not ForgeEnvironment.AutoCadRoot.
+        _ = environment;
         _backupPlanner = backupPlanner;
         _safetyPolicy = safetyPolicy;
+        _readEnv = readEnv ?? Environment.GetEnvironmentVariable;
     }
 
     public async Task<ForgeResult> RunScriptAsync(ForgeCommand command, CancellationToken cancellationToken = default)
     {
         var args = ForgeJson.FromElement<RunScriptArgs>(command.Args) ?? new RunScriptArgs();
-        return await RunOneAsync(command.Id, args.DwgPath, args.ScriptPath, args.TimeoutSeconds, command.DryRun, cancellationToken)
+        return await RunOneAsync(
+                command.Id,
+                args.DwgPath,
+                args.ScriptPath,
+                args.TimeoutSeconds,
+                command.DryRun,
+                jobYear: null,
+                callYear: args.AutoCadYear,
+                cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -79,8 +93,9 @@ public sealed class HeadlessAccoreConsoleRunner
 
         if (command.DryRun)
         {
-            foreach (var job in state.Jobs)
+            for (var index = 0; index < state.Jobs.Count; index++)
             {
+                var job = state.Jobs[index];
                 if (string.IsNullOrWhiteSpace(job.ScriptPath) || !File.Exists(job.ScriptPath))
                 {
                     return ForgeResult.Failure(command.Id, "script_not_found", $"Script file not found: {job.ScriptPath}");
@@ -93,6 +108,15 @@ public sealed class HeadlessAccoreConsoleRunner
                 if (!scriptDecision.Allowed)
                 {
                     return ForgeResult.Failure(command.Id, scriptDecision.Code, scriptDecision.Message, scriptDecision.Suggestion);
+                }
+
+                if (BatchDryRunShouldLocate(args))
+                {
+                    var missing = MissingConsole(command.Id, JobYear(args, index), args.AutoCadYear);
+                    if (missing is not null)
+                    {
+                        return missing;
+                    }
                 }
             }
 
@@ -118,8 +142,9 @@ public sealed class HeadlessAccoreConsoleRunner
 
         var results = new List<object>();
         var failures = 0;
-        foreach (var job in state.Jobs)
+        for (var index = 0; index < state.Jobs.Count; index++)
         {
+            var job = state.Jobs[index];
             if (job.Status == "ok")
             {
                 results.Add(new { job.DwgPath, job.ScriptPath, Ok = true, skipped = true, status = job.Status });
@@ -129,7 +154,15 @@ public sealed class HeadlessAccoreConsoleRunner
             cancellationToken.ThrowIfCancellationRequested();
             job.Status = "running";
             state.Save();
-            var one = await RunOneAsync(command.Id, job.DwgPath, job.ScriptPath, null, dryRun: false, cancellationToken)
+            var one = await RunOneAsync(
+                    command.Id,
+                    job.DwgPath,
+                    job.ScriptPath,
+                    timeoutSeconds: null,
+                    dryRun: false,
+                    JobYear(args, index),
+                    args.AutoCadYear,
+                    cancellationToken)
                 .ConfigureAwait(false);
             if (one.Ok)
             {
@@ -195,6 +228,8 @@ public sealed class HeadlessAccoreConsoleRunner
         string? scriptPath,
         int? timeoutSeconds,
         bool dryRun,
+        int? jobYear,
+        int? callYear,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(dwgPath) || string.IsNullOrWhiteSpace(scriptPath))
@@ -219,17 +254,24 @@ public sealed class HeadlessAccoreConsoleRunner
             return ForgeResult.Failure(commandId, scriptDecision.Code, scriptDecision.Message, scriptDecision.Suggestion);
         }
 
-        var accoreconsole = Path.Combine(_environment.AutoCadRoot, "accoreconsole.exe");
-        if (!File.Exists(accoreconsole))
+        var year = AccoreConsoleLocator.ResolveYear(jobYear, callYear, _readEnv(AccoreConsoleLocator.YearEnvironmentVariable));
+        var choice = AccoreConsoleLocator.Locate(year, _readEnv, File.Exists);
+        if (!choice.Found)
         {
-            return ForgeResult.Failure(commandId, "accoreconsole_not_found", $"accoreconsole.exe not found at {accoreconsole}.");
+            return ForgeResult.Failure(
+                commandId,
+                choice.ErrorCode ?? AccoreConsoleLocator.NotFoundCode,
+                choice.Message ?? "accoreconsole.exe was not found.");
         }
+
+        var accoreconsole = choice.ExePath ?? "";
 
         if (dryRun)
         {
             return ForgeResult.Success(commandId, new
             {
                 wouldRun = accoreconsole,
+                autoCadYear = choice.Year,
                 dwgPath,
                 scriptPath,
                 backup = _backupPlanner.PlanBackupPath(dwgPath)
@@ -296,11 +338,47 @@ public sealed class HeadlessAccoreConsoleRunner
         }
     }
 
+    private bool BatchDryRunShouldLocate(BatchArgs args)
+    {
+        if (args.AutoCadYear is not null || args.Jobs.Any(job => job.AutoCadYear is not null))
+        {
+            return true;
+        }
+
+        return !string.IsNullOrWhiteSpace(_readEnv(AccoreConsoleLocator.YearEnvironmentVariable));
+    }
+
+    private int? JobYear(BatchArgs args, int index)
+    {
+        if (!string.IsNullOrWhiteSpace(args.ResumeBatchId) || index < 0 || index >= args.Jobs.Length)
+        {
+            return null;
+        }
+
+        return args.Jobs[index].AutoCadYear;
+    }
+
+    private ForgeResult? MissingConsole(string commandId, int? jobYear, int? callYear)
+    {
+        var year = AccoreConsoleLocator.ResolveYear(jobYear, callYear, _readEnv(AccoreConsoleLocator.YearEnvironmentVariable));
+        var choice = AccoreConsoleLocator.Locate(year, _readEnv, File.Exists);
+        if (choice.Found)
+        {
+            return null;
+        }
+
+        return ForgeResult.Failure(
+            commandId,
+            choice.ErrorCode ?? AccoreConsoleLocator.NotFoundCode,
+            choice.Message ?? "accoreconsole.exe was not found.");
+    }
+
     private sealed record RunScriptArgs
     {
         public string? DwgPath { get; init; }
         public string? ScriptPath { get; init; }
         public int? TimeoutSeconds { get; init; }
+        public int? AutoCadYear { get; init; }
     }
 
     private sealed record BatchJobArgs
@@ -308,6 +386,7 @@ public sealed class HeadlessAccoreConsoleRunner
         public string? DwgPath { get; init; }
         public string? ScriptPath { get; init; }
         public int? TimeoutSeconds { get; init; }
+        public int? AutoCadYear { get; init; }
     }
 
     private sealed record BatchArgs
@@ -315,5 +394,6 @@ public sealed class HeadlessAccoreConsoleRunner
         public BatchJobArgs[] Jobs { get; init; } = [];
         public bool ContinueOnError { get; init; } = true;
         public string? ResumeBatchId { get; init; }
+        public int? AutoCadYear { get; init; }
     }
 }

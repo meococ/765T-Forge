@@ -51,7 +51,7 @@ Honest status of MCP tools. **Default verified AutoCAD host: 2026.** 2017–2025
 | `forge_issue_set_diff` | implemented | Diff two PublishReceipt artifacts |
 | `forge_recipe_issue_set` | implemented | Normalize → fill → gate → publish |
 | `forge_pack_and_go` | implemented | Host+xrefs+styles + `manifest.json` |
-| `forge_batch_run` | implemented | AccoreConsole queue + **resume** via `resumeBatchId` |
+| `forge_batch_run` | implemented | AccoreConsole queue + **resume** via `resumeBatchId`. Console year is selectable; default 2026; missing exe is `accoreconsole_not_found` before spawn |
 | `forge_batch_status` | implemented | Load saved batch resume state |
 
 ## Registry / standards / viewport / profiles
@@ -83,7 +83,7 @@ Layer filtering on all `forge_linework_*`: `layerFilter` patterns match the full
 | Tool | Status | Notes |
 |------|--------|-------|
 | `forge_exec_command` / `_lisp` | implemented | Prefer sync `Editor.Command`; else `Ok=false`, `queued=true`, `completed=false` |
-| `forge_run_script` | implemented | AccoreConsole; **server-only** SafetyPolicy (ADR 0002) |
+| `forge_run_script` | implemented | AccoreConsole; **server-only** SafetyPolicy (ADR 0002). Console year is selectable; default 2026; missing exe is `accoreconsole_not_found` before spawn |
 | `forge_exec_dotnet` | implemented | Dual-gated; sync snippets only. AutoCAD 2017–2018 (`net46`) returns `autocad_version_unsupported` because Roslyn targets netstandard2.0 |
 
 ## Still planned / deferred
