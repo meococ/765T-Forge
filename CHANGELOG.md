@@ -30,7 +30,7 @@ See [docs/versioning.md](docs/versioning.md).
 
 ### Security
 
-- Denylist additions (old patterns kept): `DELETE ALL`, `ARX` Load / `(arxload`, `-LAYER` mass delete of `*`/`ALL`, `ERASE` fence/window/crossing, `ssget` `C`/`W`/`F`/`WP`/`CP` with erase/delete/`command`, and `(eval (read`. `ZOOM *` stays allowed. Assembling a command across separate executor calls is out of band for the denylist.
+- Denylist additions (old patterns kept): `DELETE ALL`, `ARX` Load / `(arxload`, `-LAYER` mass delete of `*`/`ALL`, `ERASE` fence/window/crossing, `ssget` `C`/`W`/`F`/`WP`/`CP` with erase/delete/`command`, a `vlax-for` model-space `vla-erase` loop, and `(eval (read`. `ZOOM *` stays allowed. Assembling a command across separate executor calls is out of band for the denylist. `forge_system_setvar` refuses trust and startup variables (`deny_sysvar`).
 - Denylist additions (old patterns kept): `E`/`_.E` + `ALL`, destructive `ssget "_X"`/`"_A"`, `strcat`/`eval` with `ALL` or `ssget`, executor `SAVE`/`QSAVE`/`SAVEAS`/`WBLOCK`, and command-anchored `NETLOAD`/`APPLOAD`/`ARXLOAD`/`(load`/`SCRIPT`/`SHELL`/`SH`. `ZOOM *` stays allowed. Batch dry-run scans script bodies. A missing backup blocks the write.
 - Open-world denylist no longer blocks every `*` (scoped to selection idioms); headless script path documented as server-side SafetyPolicy only
 

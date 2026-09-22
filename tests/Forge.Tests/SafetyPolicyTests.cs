@@ -116,6 +116,15 @@ public sealed class SafetyPolicyTests
     }
 
     [Theory]
+    [InlineData("(vlax-for e (vla-get-ModelSpace doc) (vla-erase e))")]
+    public void VlaEraseModelSpaceLoopIsDenied(string commandText)
+    {
+        var decision = _policy.EvaluateText("forge_exec_lisp", commandText);
+        Assert.False(decision.Allowed);
+        Assert.Equal("deny_vla_erase", decision.Code);
+    }
+
+    [Theory]
     [InlineData("(eval (read))")]
     [InlineData("(eval (read s))")]
     [InlineData("(eval(read))")]
@@ -220,6 +229,7 @@ public sealed class SafetyPolicyTests
     [InlineData("(setq n (read))")]
     [InlineData("(eval payload)")]
     [InlineData("(eval (read-line))")]
+    [InlineData("(vla-erase e)")]
     public void HarmlessExecutorTextStaysAllowed(string commandText)
     {
         var decision = _policy.EvaluateText("forge_exec_command", commandText);

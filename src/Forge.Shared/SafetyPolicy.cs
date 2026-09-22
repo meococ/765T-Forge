@@ -159,6 +159,14 @@ public sealed class SafetyPolicy
                 "Use scoped handles or a typed query/delete workflow.");
         }
 
+        if (VlaEraseModelSpaceLoop.IsMatch(text))
+        {
+            return SafetyDecision.Deny(
+                "deny_vla_erase",
+                "Blocked vlax-for erase of model space.",
+                "Pass explicit entity handles to a typed tool.");
+        }
+
         if (IsObfuscatedSelection(text))
         {
             return SafetyDecision.Deny("deny_obfuscated_selection", "Blocked strcat/eval combined with ALL or ssget.", "Do not build selection text at runtime. Pass explicit handles to a typed tool.");
@@ -250,6 +258,10 @@ public sealed class SafetyPolicy
 
         return Regex.IsMatch(text, @"\b(?:entdel|vla-erase|vla-delete|command)\b", RegexOptions.IgnoreCase);
     }
+
+    private static readonly Regex VlaEraseModelSpaceLoop = new(
+        @"\bvlax-for\b[\s\S]*\bvla-get-ModelSpace\b[\s\S]*\bvla-erase\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex SsgetRegionMode = new(
         @"\bssget\b[\s\S]*""_?(?:WP|CP|F|W|C)""|""_?(?:WP|CP|F|W|C)""[\s\S]*\bssget\b",
