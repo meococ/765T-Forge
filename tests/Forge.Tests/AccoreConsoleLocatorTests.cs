@@ -33,7 +33,7 @@ public sealed class AccoreConsoleLocatorTests
         var marker = body.IndexOf("AccoreConsoleScriptCheck.HasScriptError", StringComparison.Ordinal);
         var success = body.IndexOf("exitCode = process.ExitCode", StringComparison.Ordinal);
         Assert.True(marker >= 0 && success > marker);
-        Assert.Contains("accoreconsole_script_error", body, StringComparison.Ordinal);
+        Assert.Contains("AccoreConsoleScriptCheck.ErrorCode", body, StringComparison.Ordinal);
     }
 
     [Fact]

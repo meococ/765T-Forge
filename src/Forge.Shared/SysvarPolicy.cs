@@ -21,7 +21,13 @@ public static class SysvarPolicy
 
     public static ForgeResult? Reject(string commandId, string? name)
     {
-        if (string.IsNullOrWhiteSpace(name) || !Denied.Contains(name.Trim()))
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return null;
+        }
+
+        var trimmed = name!.Trim();
+        if (!Denied.Contains(trimmed))
         {
             return null;
         }
@@ -29,7 +35,7 @@ public static class SysvarPolicy
         return ForgeResult.Failure(
             commandId,
             DenyCode,
-            $"System variable {name.Trim()} cannot be set through forge_system_setvar.",
+            $"System variable {trimmed} cannot be set through forge_system_setvar.",
             "Leave trust and startup variables unchanged. Use a typed tool for drawing state.");
     }
 }
