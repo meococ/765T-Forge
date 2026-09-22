@@ -58,13 +58,13 @@ public static class ForgeToolRegistry
         ["forge_system_tool_profile"] = Read("forge_system_tool_profile", "system", requiresAutoCad: false),
         ["forge_viewport_list"] = Read("forge_viewport_list", "viewport"),
         ["forge_viewport_set_layer_freeze"] = Write("forge_viewport_set_layer_freeze", "viewport", idempotent: true),
-        ["forge_linework_dump"] = Read("forge_linework_dump", "linework", requiresAutoCad: false),
-        ["forge_linework_trace"] = Read("forge_linework_trace", "linework", requiresAutoCad: false),
-        ["forge_linework_topology"] = Read("forge_linework_topology", "linework", requiresAutoCad: false),
-        ["forge_linework_coverage"] = Read("forge_linework_coverage", "linework", requiresAutoCad: false),
-        ["forge_linework_segments"] = Read("forge_linework_segments", "linework", requiresAutoCad: false),
-        ["forge_linework_compare"] = Read("forge_linework_compare", "linework", requiresAutoCad: false),
-        ["forge_linework_transform"] = Read("forge_linework_transform", "linework", requiresAutoCad: false),
+        ["forge_linework_dump"] = Linework("forge_linework_dump"),
+        ["forge_linework_trace"] = Linework("forge_linework_trace"),
+        ["forge_linework_topology"] = Linework("forge_linework_topology"),
+        ["forge_linework_coverage"] = Linework("forge_linework_coverage"),
+        ["forge_linework_segments"] = Linework("forge_linework_segments"),
+        ["forge_linework_compare"] = Linework("forge_linework_compare"),
+        ["forge_linework_transform"] = Linework("forge_linework_transform"),
         ["forge_batch_run"] = new ToolMetadata("forge_batch_run", "batch", false, true, false, false, true, RequiresAutoCad: false),
         ["forge_batch_status"] = Read("forge_batch_status", "batch", requiresAutoCad: false),
         ["forge_exec_command"] = Destructive("forge_exec_command", "exec"),
@@ -80,6 +80,11 @@ public static class ForgeToolRegistry
         return Tools.TryGetValue(name, out var metadata)
             ? metadata
             : Destructive(name, "unknown");
+    }
+
+    private static ToolMetadata Linework(string name)
+    {
+        return new ToolMetadata(name, "linework", false, false, true, false, false, RequiresAutoCad: false);
     }
 
     private static ToolMetadata Read(string name, string group, bool requiresAutoCad = true)

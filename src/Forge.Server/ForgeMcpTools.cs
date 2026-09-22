@@ -295,8 +295,8 @@ public sealed class ForgeMcpTools
     public static Task<ForgeResult> ViewportSetLayerFreeze(ForgeToolRunner runner, string handle, string layer, bool freeze = true, [Description(ForgeArgDescriptions.DryRun)] bool dryRun = false, CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_viewport_set_layer_freeze", new { handle, layer, freeze }, dryRun, cancellationToken: cancellationToken);
 
-    [McpServerTool(Name = "forge_linework_dump", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, TaskSupport = ToolTaskSupport.Forbidden)]
-    [Description("Extract CAD linework entities (line/polyline/arc[/circle]) as ordered vertices with handles. Source: live drawing (model space + xref contents) or a pl_dump.txt file via source=dumpFile. Layer matching is xref-prefix aware; use layerSuffix/layerMatch for explicit modes.")]
+    [McpServerTool(Name = "forge_linework_dump", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, TaskSupport = ToolTaskSupport.Forbidden)]
+    [Description("Extract CAD linework entities (line/polyline/arc[/circle]) as ordered vertices with handles. Source: live drawing (model space + xref contents) or a pl_dump.txt file via source=dumpFile. Layer matching is xref-prefix aware; use layerSuffix/layerMatch for explicit modes. Optional outputPath writes that file.")]
     public static Task<ForgeResult> LineworkDump(
         ForgeToolRunner runner,
         string? source = null,
@@ -315,8 +315,8 @@ public sealed class ForgeMcpTools
         CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_linework_dump", new { source, dumpPath, layerFilter, layerSuffix, layerMatch, excludeLayerFilter, entityTypes, bbox, includeXrefContents, unitsPerMeter, maxEntities, outputPath }, document: document, cancellationToken: cancellationToken);
 
-    [McpServerTool(Name = "forge_linework_trace", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, TaskSupport = ToolTaskSupport.Forbidden)]
-    [Description("Trace a point (or handle) to the exact CAD line/polyline it belongs to: ordered vertices, nearest segment index, layer, and both end coordinates for junction/branch queries.")]
+    [McpServerTool(Name = "forge_linework_trace", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, TaskSupport = ToolTaskSupport.Forbidden)]
+    [Description("Trace a point (or handle) to the exact CAD line/polyline it belongs to: ordered vertices, nearest segment index, layer, and both end coordinates for junction/branch queries. Optional outputPath writes that file.")]
     public static Task<ForgeResult> LineworkTrace(
         ForgeToolRunner runner,
         double x = 0,
@@ -341,8 +341,8 @@ public sealed class ForgeMcpTools
         CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_linework_trace", new { x, y, units, tolerance, contextRadius, handle, source, dumpPath, layerFilter, layerSuffix, layerMatch, excludeLayerFilter, entityTypes, bbox, includeXrefContents, unitsPerMeter, maxEntities, outputPath }, document: document, cancellationToken: cancellationToken);
 
-    [McpServerTool(Name = "forge_linework_topology", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, TaskSupport = ToolTaskSupport.Forbidden)]
-    [Description("Build the connectivity graph of CAD linework: shared-vertex nodes, edges, T-junctions, X-crossings, continuous runs, and dead-end vs junction endpoint classification.")]
+    [McpServerTool(Name = "forge_linework_topology", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, TaskSupport = ToolTaskSupport.Forbidden)]
+    [Description("Build the connectivity graph of CAD linework: shared-vertex nodes, edges, T-junctions, X-crossings, continuous runs, and dead-end vs junction endpoint classification. Optional outputPath writes that file.")]
     public static Task<ForgeResult> LineworkTopology(
         ForgeToolRunner runner,
         double vertexTolerance = 10,
@@ -364,8 +364,8 @@ public sealed class ForgeMcpTools
         CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_linework_topology", new { vertexTolerance, junctionTolerance, includeCrossings, source, dumpPath, layerFilter, layerSuffix, layerMatch, excludeLayerFilter, entityTypes, bbox, includeXrefContents, unitsPerMeter, maxEntities, outputPath }, document: document, cancellationToken: cancellationToken);
 
-    [McpServerTool(Name = "forge_linework_coverage", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, TaskSupport = ToolTaskSupport.Forbidden)]
-    [Description("Compare CAD linework against modeled pipe centerlines (meters): report CAD segments with no modeled pipe (missing), modeled pipes with no CAD segment (extra), and partial-coverage sub-ranges.")]
+    [McpServerTool(Name = "forge_linework_coverage", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, TaskSupport = ToolTaskSupport.Forbidden)]
+    [Description("Compare CAD linework against modeled pipe centerlines (meters): report CAD segments with no modeled pipe (missing), modeled pipes with no CAD segment (extra), and partial-coverage sub-ranges. Optional outputPath writes that file.")]
     public static Task<ForgeResult> LineworkCoverage(
         ForgeToolRunner runner,
         PipeSegmentDto[]? modelSegments = null,
@@ -390,8 +390,8 @@ public sealed class ForgeMcpTools
         CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_linework_coverage", new { modelSegments, modelSegmentsPath, toleranceMeters, stepMeters, minCoverageFraction, modelUnitsPerMeter, source, dumpPath, layerFilter, layerSuffix, layerMatch, excludeLayerFilter, entityTypes, bbox, includeXrefContents, unitsPerMeter, maxEntities, outputPath }, document: document, cancellationToken: cancellationToken);
 
-    [McpServerTool(Name = "forge_linework_segments", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, TaskSupport = ToolTaskSupport.Forbidden)]
-    [Description("Flatten CAD linework to individual segments: stable seg index, precise endpoints, layer, and length — the canonical feed for route/QA scripts. units=meters scales to meters; transform/transformPath also emits transformed sT/eT endpoints.")]
+    [McpServerTool(Name = "forge_linework_segments", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, TaskSupport = ToolTaskSupport.Forbidden)]
+    [Description("Flatten CAD linework to individual segments: stable seg index, precise endpoints, layer, and length — the canonical feed for route/QA scripts. units=meters scales to meters; transform/transformPath also emits transformed sT/eT endpoints. Optional outputPath writes that file.")]
     public static Task<ForgeResult> LineworkSegments(
         ForgeToolRunner runner,
         string? units = null,
@@ -413,8 +413,8 @@ public sealed class ForgeMcpTools
         CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_linework_segments", new { units, transformPath, transform, source, dumpPath, layerFilter, layerSuffix, layerMatch, excludeLayerFilter, entityTypes, bbox, includeXrefContents, unitsPerMeter, maxEntities, outputPath }, document: document, cancellationToken: cancellationToken);
 
-    [McpServerTool(Name = "forge_linework_compare", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, TaskSupport = ToolTaskSupport.Forbidden)]
-    [Description("Mark CAD linework vs Revit pipe segments: per-item classification (cad: matched/partial/missing_in_revit; model: matched/partial/extra_off_cad) with nearest counterpart + distanceM, plus matched pairs and optional SVG overlay at overlayPath (green=matched, red=missing, orange=extra, purple=partial).")]
+    [McpServerTool(Name = "forge_linework_compare", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, TaskSupport = ToolTaskSupport.Forbidden)]
+    [Description("Mark CAD linework vs Revit pipe segments: per-item classification (cad: matched/partial/missing_in_revit; model: matched/partial/extra_off_cad) with nearest counterpart + distanceM, plus matched pairs and optional SVG overlay at overlayPath (green=matched, red=missing, orange=extra, purple=partial). Optional outputPath and overlayPath write those files.")]
     public static Task<ForgeResult> LineworkCompare(
         ForgeToolRunner runner,
         PipeSegmentDto[]? modelSegments = null,
@@ -445,8 +445,8 @@ public sealed class ForgeMcpTools
         CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_linework_compare", new { modelSegments, modelSegmentsPath, toleranceMeters, stepMeters, minCoverageFraction, modelUnitsPerMeter, minZ, maxZ, searchRadiusMeters, transformPath, transform, overlayPath, source, dumpPath, layerFilter, layerSuffix, layerMatch, excludeLayerFilter, entityTypes, bbox, includeXrefContents, unitsPerMeter, maxEntities, outputPath }, document: document, cancellationToken: cancellationToken);
 
-    [McpServerTool(Name = "forge_linework_transform", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, TaskSupport = ToolTaskSupport.Forbidden)]
-    [Description("Calibrate or apply a 2D CAD<->Revit transform (similarity or affine). pairs[{cad:[x,y],revit:[x,y],label?}] fits (>=2 similarity, >=3 affine); transformPath persists/loads the calibration; points/polylines convert coordinates. Project convention: mm->m scale 0.001 origin-to-origin; warning when max residual > 0.5 m.")]
+    [McpServerTool(Name = "forge_linework_transform", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, TaskSupport = ToolTaskSupport.Forbidden)]
+    [Description("Calibrate or apply a 2D CAD<->Revit transform (similarity or affine). pairs[{cad:[x,y],revit:[x,y],label?}] fits (>=2 similarity, >=3 affine); transformPath persists/loads the calibration; points/polylines convert coordinates. Project convention: mm->m scale 0.001 origin-to-origin; warning when max residual > 0.5 m. Optional transformPath writes that file.")]
     public static Task<ForgeResult> LineworkTransform(
         ForgeToolRunner runner,
         TransformPairDto[]? pairs = null,

@@ -91,5 +91,22 @@ public sealed class ToolMetadataTests
         Assert.False(import.RequiresBackup);
         Assert.False(import.Idempotent);
         Assert.False(import.RequiresAutoCad);
+
+        foreach (var name in new[]
+        {
+            "forge_linework_dump",
+            "forge_linework_trace",
+            "forge_linework_topology",
+            "forge_linework_coverage",
+            "forge_linework_segments",
+            "forge_linework_compare",
+            "forge_linework_transform"
+        })
+        {
+            var tool = ForgeToolRegistry.Get(name);
+            Assert.False(tool.ReadOnly);
+            Assert.False(tool.Destructive);
+            Assert.False(tool.RequiresBackup);
+        }
     }
 }
