@@ -9,6 +9,25 @@ public sealed class AccoreConsoleLocatorTests
         => AutoCadHostCatalog.All.Select(host => new object[] { host.Year });
 
     [Fact]
+    public void ClampJobTimeout_UsesJobValueOrDefault300()
+    {
+        Assert.Equal(30, HeadlessAccoreConsoleRunner.ClampJobTimeout(30));
+        Assert.Equal(300, HeadlessAccoreConsoleRunner.ClampJobTimeout(null));
+    }
+
+    [Fact]
+    public void BatchRunSourcePassesJobTimeout()
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepoRoot(), "src", "Forge.Server", "HeadlessAccoreConsoleRunner.cs"));
+        var start = source.IndexOf("public async Task<ForgeResult> RunBatchAsync", StringComparison.Ordinal);
+        var end = source.IndexOf("private async Task<ForgeResult> RunOneAsync", StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start);
+        var body = source[start..end];
+        Assert.Contains("JobTimeout(args, index)", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("timeoutSeconds: null", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ResolveYear_ArgumentBeatsEnvAndDefaultIs2026()
     {
         Assert.Equal(2024, AccoreConsoleLocator.ResolveYear(2024, 2025, "2026"));
@@ -182,5 +201,21 @@ public sealed class AccoreConsoleLocatorTests
             Directory.Delete(root2026, recursive: true);
             Directory.Delete(work, recursive: true);
         }
+    }
+
+    private static string FindRepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "765T-Forge.ServerOnly.slnf")))
+            {
+                return dir.FullName;
+            }
+
+            dir = dir.Parent;
+        }
+
+        throw new InvalidOperationException("Repository root was not found.");
     }
 }

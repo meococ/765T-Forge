@@ -158,7 +158,7 @@ public sealed class HeadlessAccoreConsoleRunner
                     command.Id,
                     job.DwgPath,
                     job.ScriptPath,
-                    timeoutSeconds: null,
+                    JobTimeout(args, index),
                     dryRun: false,
                     JobYear(args, index),
                     args.AutoCadYear,
@@ -304,7 +304,7 @@ public sealed class HeadlessAccoreConsoleRunner
             return ForgeResult.Failure(commandId, "accoreconsole_start_failed", "Failed to start accoreconsole.exe.");
         }
 
-        var timeout = TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds ?? 300, 5, 3600));
+        var timeout = TimeSpan.FromSeconds(ClampJobTimeout(timeoutSeconds));
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(timeout);
 
@@ -346,6 +346,19 @@ public sealed class HeadlessAccoreConsoleRunner
         }
 
         return !string.IsNullOrWhiteSpace(_readEnv(AccoreConsoleLocator.YearEnvironmentVariable));
+    }
+
+    public static int ClampJobTimeout(int? timeoutSeconds)
+        => Math.Clamp(timeoutSeconds ?? 300, 5, 3600);
+
+    private static int? JobTimeout(BatchArgs args, int index)
+    {
+        if (!string.IsNullOrWhiteSpace(args.ResumeBatchId) || index < 0 || index >= args.Jobs.Length)
+        {
+            return null;
+        }
+
+        return args.Jobs[index].TimeoutSeconds;
     }
 
     private int? JobYear(BatchArgs args, int index)
