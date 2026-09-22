@@ -164,6 +164,14 @@ public sealed class SafetyPolicy
             return SafetyDecision.Deny("deny_obfuscated_selection", "Blocked strcat/eval combined with ALL or ssget.", "Do not build selection text at runtime. Pass explicit handles to a typed tool.");
         }
 
+        if (EvalRead.IsMatch(text))
+        {
+            return SafetyDecision.Deny(
+                "deny_eval_read",
+                "Blocked eval of a read form.",
+                "Do not evaluate forms read at runtime.");
+        }
+
         if (AnchoredExternalCommand.IsMatch(text))
         {
             return SafetyDecision.Deny("deny_external_command", "Blocked NETLOAD, APPLOAD, ARXLOAD, load, SCRIPT, or SHELL/SH command.", "Do not load foreign code or start a shell from an executor.");
@@ -257,6 +265,12 @@ public sealed class SafetyPolicy
         return Regex.IsMatch(text, @"\b(?:entdel|vla-erase|vla-delete|command)\b", RegexOptions.IgnoreCase);
     }
 
+    private static readonly Regex EvalRead = new(
+        @"\(\s*eval\s*\(\s*read(?=[\s)])",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    // Same payload only. Building ERASE across separate executor calls is out of band.
+    // Denying every strcat would block harmless concatenation.
     private static bool IsObfuscatedSelection(string text)
     {
         if (!Regex.IsMatch(text, @"\b(?:strcat|eval)\b", RegexOptions.IgnoreCase))

@@ -12,7 +12,7 @@ Use this skill when an agent drives AutoCAD through **765T-Forge** for metro/AEC
 - Load `forge_pack_load` for project standards when available; preflight merges pack rules.
 - If a tool returns a safety denial, do **not** retry via another executor; switch to a typed scoped tool or ask for a narrower target.
 - Treat `forge_exec_dotnet` as disabled unless the human explicitly enabled unsafe ops for this session (`FORGE_ENABLE_UNSAFE_OPS` + `unsafeAcknowledged`).
-- Never use executors for broad selections such as `ERASE ALL` or `ERASE *` (harmless `ZOOM *` / layer filters are OK).
+- Never use executors for broad selections such as `ERASE ALL` or `ERASE *`, `DELETE ALL`, `ERASE` by `F`/`W`/`C`/`WP`/`CP`, `-LAYER` delete of `*`/`ALL`, or `ARX` `Load` (harmless `ZOOM *` / layer filters are OK).
 - If `forge_exec_command` / `forge_exec_lisp` returns `Ok=false` with `queued=true` or `completed=false`, **do not** chain writes — read back first.
 - `dryRun=true` with `Ok=true` and `data.dryRun=true` is only a plan. Call again with `dryRun=false` to perform the work.
 - `passed=false` is `Ok=false`. The report stays in `data`. Do not treat that call as success.

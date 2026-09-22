@@ -116,6 +116,17 @@ public sealed class SafetyPolicyTests
     }
 
     [Theory]
+    [InlineData("(eval (read))")]
+    [InlineData("(eval (read s))")]
+    [InlineData("(eval(read))")]
+    public void EvalReadIsDenied(string commandText)
+    {
+        var decision = _policy.EvaluateText("forge_exec_lisp", commandText);
+        Assert.False(decision.Allowed);
+        Assert.Equal("deny_eval_read", decision.Code);
+    }
+
+    [Theory]
     [InlineData("(ssget \"C\" p1 p2) (entdel e)")]
     [InlineData("(ssget \"_W\") (vla-erase e)")]
     [InlineData("(ssget \"F\") (vla-delete e)")]
@@ -204,6 +215,11 @@ public sealed class SafetyPolicyTests
     [InlineData("END\nC")]
     [InlineData("(ssget \"C\")")]
     [InlineData("(ssget \"WP\")")]
+    [InlineData("(strcat \"ER\" \"ASE\")")]
+    [InlineData("(read \"1.5\")")]
+    [InlineData("(setq n (read))")]
+    [InlineData("(eval payload)")]
+    [InlineData("(eval (read-line))")]
     public void HarmlessExecutorTextStaysAllowed(string commandText)
     {
         var decision = _policy.EvaluateText("forge_exec_command", commandText);

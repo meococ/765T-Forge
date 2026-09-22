@@ -11,7 +11,9 @@ Forge is designed for AI agents that can mutate production DWGs. Safety is manda
 - `forge_run_script`
 - `forge_exec_dotnet`
 
-Blocked patterns include (non-exhaustive): `ERASE ALL` and the `E` / `_.E` alias with `ALL`, `PURGE`, `OVERKILL`, `RECOVER`, `AUDIT` with fix, layer delete commands, `ssget` `"_X"` / `"_A"` combined with erase/delete/`command`, `strcat`/`eval` combined with `ALL` or `ssget`, command-anchored `NETLOAD` / `APPLOAD` / `ARXLOAD` / `(load` / `SCRIPT` / `SHELL` / `SH` (not a bare `\bSH\b`), **scoped** broad `ALL`/`*` **selection** idioms (not every asterisk — e.g. `ZOOM *` and layer filters are allowed), and `SAVE` / `QSAVE` / `SAVEAS` / `WBLOCK` on executors even when `*` is not next to the command.
+Blocked patterns include (non-exhaustive): `ERASE ALL` and the `E` / `_.E` alias with `ALL`, `DELETE ALL`, `PURGE`, `OVERKILL`, `RECOVER`, `AUDIT` with fix, layer delete commands, `-LAYER` + `D`/`Delete` + `*`/`ALL`, `ERASE` by fence/window/crossing (`F`/`W`/`C`/`WP`/`CP` and the long keywords), `ssget` `"_X"` / `"_A"` combined with erase/delete/`command`, `ssget` `"C"`/`"W"`/`"F"`/`"WP"`/`"CP"` combined with erase/delete/`command`, `strcat`/`eval` combined with `ALL` or `ssget`, `(eval (read`, `ARX` + `Load`/`L` and `(arxload`, command-anchored `NETLOAD` / `APPLOAD` / `ARXLOAD` / `(load` / `SCRIPT` / `SHELL` / `SH` (not a bare `\bSH\b`), **scoped** broad `ALL`/`*` **selection** idioms (not every asterisk — e.g. `ZOOM *` and layer filters are allowed), and `SAVE` / `QSAVE` / `SAVEAS` / `WBLOCK` on executors even when `*` is not next to the command.
+
+**Out of band for the denylist:** assembling a command across separate executor calls (one call `strcat`, a later call `eval`). The same-payload `strcat`/`eval` + `ALL`/`ssget` rule stays. A regex that denies every `strcat` is rejected because it blocks harmless concatenation.
 
 **Out of denylist scope:** typed tools’ structured business values (titleblock notes, folder names, attribute text). A note containing the word `PURGE` is not scanned the same way as an executor command string.
 
