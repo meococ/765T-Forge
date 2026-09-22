@@ -116,6 +116,19 @@ public sealed class SafetyPolicyTests
     }
 
     [Theory]
+    [InlineData("-LAYER\nD\n*")]
+    [InlineData("-LAYER\nD\nALL")]
+    [InlineData("-LAYER\nDelete\n*")]
+    [InlineData("_.-LAYER\nD\n*")]
+    [InlineData("-LAYER D *")]
+    public void LayerMassDeleteIsDenied(string commandText)
+    {
+        var decision = _policy.EvaluateText("forge_exec_command", commandText);
+        Assert.False(decision.Allowed);
+        Assert.Equal("deny_layer_mass_delete", decision.Code);
+    }
+
+    [Theory]
     [InlineData("ARX\nLoad\nhelper.arx")]
     [InlineData("ARX\nL\nhelper.arx")]
     [InlineData("_.ARX\nLOAD")]
@@ -153,6 +166,7 @@ public sealed class SafetyPolicyTests
     [InlineData("OPEN\nC:\\Delete\\a.dwg")]
     [InlineData("ARX")]
     [InlineData("OPEN\nC:\\ARX\\a.dwg")]
+    [InlineData("-LAYER\nD\n0")]
     public void HarmlessExecutorTextStaysAllowed(string commandText)
     {
         var decision = _policy.EvaluateText("forge_exec_command", commandText);

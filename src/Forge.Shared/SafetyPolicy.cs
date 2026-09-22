@@ -27,6 +27,9 @@ public sealed class SafetyPolicy
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex SaveOverwrite = new(@"\b_?-?(?:SAVEAS|QSAVE|WBLOCK)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex LayerDelete = new(@"\b_?-?(?:LAYDEL|DELLAYER)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex LayerMassDelete = new(
+        @"(?im)(?:^|[;\r\n])\s*(?:\._|\.|_|-)*-?LAYER\b(?:[\s\r\n;'""]|\(|\)){0,40}_?(?:D|DELETE)\b(?:[\s\r\n;'""]|\(|\)){0,40}_?(?:\*(?=$|[\s;]|[\r\n])|ALL\b)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex SsgGetAllErase = new(@"\bSSGET\b(?:[\s\r\n;'""]|\(|\))*""X""[\s\S]*\b_?-?ERASE\b|\b_?-?ERASE\b[\s\S]*\bSSGET\b(?:[\s\r\n;'""]|\(|\))*""X""", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     // Alias E / _.E is not the word ERASE. Kept separate so the ERASE pattern is unchanged.
     private static readonly Regex EraseAliasAll = new(@"\b_?-?\.?E\b(?:[\s\r\n;'""]|\(|\))*_?(?:ALL\b|\*)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -80,6 +83,15 @@ public sealed class SafetyPolicy
         if (EraseAll.IsMatch(text) || EraseAliasAll.IsMatch(text))
         {
             return SafetyDecision.Deny("deny_erase_all", "Blocked destructive ERASE ALL command.", "Use a scoped selection set or entity handles.");
+        }
+
+        // Before DELETE ALL: "-LAYER" + "Delete" is a layer subcommand, not the DELETE command.
+        if (LayerMassDelete.IsMatch(text))
+        {
+            return SafetyDecision.Deny(
+                "deny_layer_mass_delete",
+                "Blocked -LAYER delete of all layers.",
+                "Use a typed layer tool with one explicit layer name.");
         }
 
         if (DeleteAll.IsMatch(text))
