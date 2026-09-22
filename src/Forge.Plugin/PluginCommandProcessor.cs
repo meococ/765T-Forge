@@ -6,8 +6,10 @@ using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.PlottingServices;
 using Autodesk.AutoCAD.Publishing;
+#if !FORGE_NET46
 using Microsoft.CodeAnalysis.CSharp.Scripting;
 using Microsoft.CodeAnalysis.Scripting;
+#endif
 using Forge.Shared;
 
 namespace Forge.Plugin;
@@ -148,9 +150,9 @@ public sealed partial class PluginCommandProcessor
 
     private static ForgeResult WithUndoMark(Func<ForgeResult> action)
     {
-        // UNDO Mark/End via the command line on every year. AutoCAD 2026 Document no longer exposes
-        // StartUndoMark/EndUndoMark, so the net8 build must not call them. Older years still have those
-        // methods; this path does not, so 2017–2026 share one undo group.
+        // UNDO Mark/End via the command line on every catalog year (AutoCadHostCatalog.UndoMarkFeature).
+        // Document.StartUndoMark/EndUndoMark are not called: the net8 Document surface does not expose them,
+        // and one command-line group keeps 2017–2026 on the same path. A failure here does not fail the write.
         try
         {
             ActiveEditor.Command("_.UNDO", "_M");
@@ -1169,6 +1171,11 @@ public sealed partial class PluginCommandProcessor
 
         try
         {
+            if (AutoCadHostCatalog.TryUnsupported(command.Id, CompiledAutoCadHost.Year, AutoCadHostCatalog.PublishDsdFeature) is { } unsupportedPublish)
+            {
+                return unsupportedPublish;
+            }
+
             Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
             WriteDsdFile(dsdPath, dwgPath!, outputPath, args.Layouts, args.SinglePdf);
             using var progress = new PlotProgressDialog(false, args.Layouts.Length, true);
@@ -1537,10 +1544,21 @@ public sealed partial class PluginCommandProcessor
 
     private static ForgeResult ExecDotNet(ForgeCommand command)
     {
-#if ACAD_YEAR_2017 || ACAD_YEAR_2018
-        // Roslyn is netstandard2.0. These years are compiled as net462 and are not claimed to NETLOAD on the AutoCAD 2017–2018 CLR.
-        return AutoCadHostCatalog.UnsupportedFeature(command.Id, CompiledAutoCadHost.Year, "forge_exec_dotnet", 2019);
-#endif
+#if FORGE_NET46
+        // Roslyn is netstandard2.0 and is not referenced by the net46 build. AutoCAD 2017 and 2018
+        // document CLR 4.6, which cannot load that package.
+        return AutoCadHostCatalog.TryUnsupported(command.Id, CompiledAutoCadHost.Year, AutoCadHostCatalog.ExecDotNetFeature)
+            ?? AutoCadHostCatalog.UnsupportedFeature(
+                command.Id,
+                CompiledAutoCadHost.Year,
+                AutoCadHostCatalog.ExecDotNetFeature,
+                AutoCadHostCatalog.FeatureMinimumYear(AutoCadHostCatalog.ExecDotNetFeature));
+#else
+        if (AutoCadHostCatalog.TryUnsupported(command.Id, CompiledAutoCadHost.Year, AutoCadHostCatalog.ExecDotNetFeature) is { } unsupportedDotNet)
+        {
+            return unsupportedDotNet;
+        }
+
         var args = Args<ExecDotNetArgs>(command);
         if (string.IsNullOrWhiteSpace(args.Code))
         {
@@ -1579,13 +1597,16 @@ public sealed partial class PluginCommandProcessor
         var globals = new DotNetScriptGlobals(ActiveDoc, ActiveDb, ActiveEditor);
         var result = CSharpScript.EvaluateAsync<object?>(args.Code, options, globals).GetAwaiter().GetResult();
         return ForgeResult.Success(command.Id, new { result });
+#endif
     }
 
+#if !FORGE_NET46
     private static bool ContainsAwait(string code)
     {
         return code.Contains("await ", StringComparison.Ordinal) ||
                code.Contains("async ", StringComparison.Ordinal);
     }
+#endif
 
     private static bool PathsEqual(string? left, string? right)
     {

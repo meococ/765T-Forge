@@ -12,7 +12,7 @@ See [docs/versioning.md](docs/versioning.md).
 
 ### Added
 
-- Per-year AutoCAD plugin builds for 2017–2026 (`AutoCadHostCatalog`, `AutoCadYear`, `scripts/build-plugin.ps1 -Year` / `-AllYears`, one autoloader component per R-series). Default verified host remains AutoCAD 2026. 2017–2025 are not smoke-tested; binaries are not interchangeable. 2017–2018 compile as `net462` (System.Text.Json 8 cannot target historical `net46`) and are not claimed to NETLOAD.
+- Per-year AutoCAD plugin builds for 2017–2026 (`AutoCadHostCatalog`, `AutoCadYear`, `scripts/build-plugin.ps1 -Year` / `-AllYears`, one autoloader component per R-series). Default verified host remains AutoCAD 2026. 2017–2025 are not smoke-tested; binaries are not interchangeable. 2017–2018 target `net46` (documented CLR 4.6). System.Text.Json 8 cannot restore for `net46` (NU1202), so that TFM serializes with Newtonsoft.Json. `forge_exec_dotnet` on those years returns `autocad_version_unsupported`. Pack and install write `Contents/Windows/<year>/Forge.Plugin.dll` and omit years that were not built.
 - Publish-ready Wave 0: Autoloader R25.1 + valid GUIDs; `%APPDATA%` install guidance; NOTICE upstream attribution; `docs/history/build-brief.md`; embedded matrix/safety in server publish; `RELEASE_STATUS.txt` from pack script
 - PublishReceipt + PDF probes + actionable preflight findings + foreground plot policy
 - IssueSetContract lite, standards pack v2 plot bindings, field/rev gates, timeout read-back protocol

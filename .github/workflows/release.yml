@@ -41,11 +41,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Plugin build requires Autodesk AutoCAD 2026 reference assemblies.
+  # Plugin build requires Autodesk AutoCAD reference assemblies.
   # GitHub-hosted runners do not include AutoCAD. Maintainers should build
   # the plugin locally (or on a self-hosted runner with AUTOCAD_2026_ROOT)
-  # and attach Forge.Plugin.dll to the release, or run pack-release.ps1
-  # without -SkipPlugin on a machine that has AutoCAD installed.
+  # and attach 765T-Forge.Plugin.zip. That zip is Contents/Windows/<year>/Forge.Plugin.dll
+  # for each year that actually built. It does not list years that were not built.
+  # The default verified host remains 2026. 2017-2025 are optional.
   pack-plugin-note:
     name: Plugin packaging note
     runs-on: windows-latest

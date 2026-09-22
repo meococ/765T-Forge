@@ -140,6 +140,16 @@ public static class FrameworkStringExtensions
 
         return source.Length > 0 && source[0] == value;
     }
+
+    public static bool EndsWith(this string source, char value)
+    {
+        if (source is null)
+        {
+            throw new ArgumentNullException(nameof(source));
+        }
+
+        return source.Length > 0 && source[source.Length - 1] == value;
+    }
 }
 #endif
 

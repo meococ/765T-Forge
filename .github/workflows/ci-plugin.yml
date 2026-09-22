@@ -2,6 +2,8 @@ name: CI Plugin (self-hosted)
 
 # Requires a self-hosted Windows runner with AutoCAD 2026 reference assemblies
 # and AUTOCAD_2026_ROOT set. Do not enable on GitHub-hosted runners.
+# build-plugin.ps1 defaults to 2026. pack-release -AllYears skips any year whose
+# install is missing, so this job must not require AutoCAD 2017-2025.
 
 on:
   workflow_dispatch:

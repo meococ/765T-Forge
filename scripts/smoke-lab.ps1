@@ -1,6 +1,8 @@
 <#
 .SYNOPSIS
-  Open AutoCAD 2026 with Forge plugin, create a synthetic lab DWG, run smoke-lab pipe checks.
+  Open AutoCAD 2026 with the 2026 Forge plugin, create a synthetic lab DWG, run smoke-lab pipe checks.
+.DESCRIPTION
+  This lab launches AutoCAD 2026 only. It does not build, NETLOAD, or exercise 2017-2025.
 #>
 [CmdletBinding()]
 param(
@@ -14,6 +16,7 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
+. (Join-Path $PSScriptRoot "ForgeBundleLayout.ps1")
 
 $labRoot = Join-Path $env:LOCALAPPDATA "765T-Forge\smoke-lab"
 $pluginInstall = Join-Path $env:LOCALAPPDATA "765T-Forge\plugin"
@@ -92,12 +95,14 @@ if (-not (Test-Path $dll)) {
 if (-not (Test-Path $dll)) { throw "Plugin DLL missing at $dll" }
 Write-Host "Plugin: $dll"
 
-Write-Step "2) Install Autoloader bundle to APPDATA"
+Write-Step "2) Install Autoloader bundle to APPDATA (AutoCAD 2026 only)"
+if (Test-Path $bundleRoot) { Remove-Item $bundleRoot -Recurse -Force }
 $contentsWin = Join-Path $bundleRoot "Contents\Windows\2026"
 New-Item -ItemType Directory -Force -Path $contentsWin | Out-Null
-Copy-Item (Join-Path $root "plugin-bundle\765T-Forge.bundle\PackageContents.xml") $bundleRoot -Force
+Copy-Item (Join-Path $root "plugin-bundle\765T-Forge.bundle\README.md") $bundleRoot -Force
 Copy-Item (Join-Path (Split-Path $dll -Parent) "*") $contentsWin -Recurse -Force
-Write-Host "Bundle: $bundleRoot"
+Sync-ForgePackageContents -BundleRoot $bundleRoot -TemplatePath (Join-Path $root "plugin-bundle\765T-Forge.bundle\PackageContents.xml")
+Write-Host "Bundle: $bundleRoot (PackageContents.xml lists 2026 only)"
 
 Write-Step "3) Create synthetic lab DWG via AccoreConsole"
 @"

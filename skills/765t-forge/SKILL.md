@@ -6,7 +6,7 @@ Use this skill when an agent drives AutoCAD through **765T-Forge** for metro/AEC
 
 - Prefer **typed tools** (`forge_<group>_<action>`) before generic executors.
 - Always call `forge_system_health` first (and again after AutoCAD restart / NETLOAD). Confirm `Data.pipe` matches `FORGE_PIPE_NAME`.
-- NETLOAD the `Forge.Plugin.dll` built for the running AutoCAD year (`autocad-<year>`). A 2026 DLL does not load in 2017–2025. `autocad_version_unsupported` means the DLL year does not match the host, or the feature is not available on that year (`forge_exec_dotnet` on 2017–2018).
+- NETLOAD the `Forge.Plugin.dll` built for the running AutoCAD year (`autocad-<year>` or `Contents/Windows/<year>/`). A 2026 DLL does not load in 2017–2025. 2017–2018 are `net46` and are not smoke-tested. `autocad_version_unsupported` means the DLL year does not match the host, or the feature is not available on that year (`forge_exec_dotnet` on 2017–2018). Smoke lab is AutoCAD 2026 only.
 - Use `dryRun=true` before write, publish, script, or executor calls.
 - **Never invent drawing numbers** — call `forge_registry_load` / `forge_registry_lookup` when a register exists; otherwise read from the drawing or ask the human.
 - Load `forge_pack_load` for project standards when available; preflight merges pack rules.

@@ -14,6 +14,7 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
+. (Join-Path $PSScriptRoot "ForgeBundleLayout.ps1")
 
 $releaseRoot = Join-Path $root "artifacts\release"
 $serverOut = Join-Path $releaseRoot "server"
@@ -65,7 +66,6 @@ if (-not $SkipPlugin) {
         $bundleStage = Join-Path $stageRoot "765T-Forge.bundle"
         if (Test-Path $stageRoot) { Remove-Item $stageRoot -Recurse -Force }
         New-Item -ItemType Directory -Force -Path (Join-Path $bundleStage "Contents\Windows") | Out-Null
-        Copy-Item (Join-Path $root "plugin-bundle\765T-Forge.bundle\PackageContents.xml") $bundleStage -Force
         Copy-Item (Join-Path $root "plugin-bundle\765T-Forge.bundle\README.md") $bundleStage -Force
 
         foreach ($dir in $yearDirs) {
@@ -77,6 +77,9 @@ if (-not $SkipPlugin) {
                 ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $moduleDir $_.Name) -Force }
             $pluginYearsPacked += $yearName
         }
+
+        # Template lists 2017-2026. The zip lists only years whose DLL was copied.
+        Sync-ForgePackageContents -BundleRoot $bundleStage -TemplatePath (Join-Path $root "plugin-bundle\765T-Forge.bundle\PackageContents.xml")
 
         $pluginZip = Join-Path $releaseRoot "765T-Forge.Plugin.zip"
         if (Test-Path $pluginZip) { Remove-Item $pluginZip -Force }

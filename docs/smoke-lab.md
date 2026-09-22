@@ -1,5 +1,7 @@
 # Smoke lab checklist (AutoCAD 2026)
 
+This checklist and `scripts/smoke-lab.ps1` run on **AutoCAD 2026 only**. They do not exercise 2017–2025.
+
 Maintainer-only. Do **not** commit customer DWGs. Record pass/fail in the GitHub Release notes before announcing a public `v*` tag.
 
 A release is **incomplete** without both `765T-Forge.Server-win-x64.zip` and `765T-Forge.Plugin.zip`.

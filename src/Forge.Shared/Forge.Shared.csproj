@@ -1,17 +1,21 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net8.0;net48;net47;net462</TargetFrameworks>
+    <TargetFrameworks>net8.0;net48;net47;net46</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <CheckEolTargetFramework>false</CheckEolTargetFramework>
+    <DefineConstants Condition="'$(TargetFramework)' == 'net46'">$(DefineConstants);FORGE_NET46</DefineConstants>
   </PropertyGroup>
 
-  <!-- Framework hosts need System.Text.Json, compiler polyfills, and reference assemblies.
-       net8.0 uses the shared framework and must not take an extra System.Text.Json package. -->
+  <!-- net46 is the AutoCAD 2017/2018 CLR. System.Text.Json 8.0.5 cannot restore for it.
+       That TFM uses Newtonsoft.Json through SystemTextJsonNet46.cs. Other TFMs keep System.Text.Json. -->
+  <ItemGroup Condition="'$(TargetFramework)' != 'net46'">
+    <Compile Remove="SystemTextJsonNet46.cs" />
+  </ItemGroup>
+
   <ItemGroup Condition="'$(TargetFrameworkIdentifier)' == '.NETFramework'">
-    <PackageReference Include="System.Text.Json" />
     <PackageReference Include="PolySharp">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -20,6 +24,15 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFrameworkIdentifier)' == '.NETFramework' and '$(TargetFramework)' != 'net46'">
+    <PackageReference Include="System.Text.Json" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net46'">
+    <PackageReference Include="Newtonsoft.Json" />
+    <PackageReference Include="System.ValueTuple" />
   </ItemGroup>
 
 </Project>

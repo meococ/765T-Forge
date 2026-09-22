@@ -36,13 +36,25 @@ public sealed class AutoCadHostCatalogTests
             }
         }
 
-        Assert.Equal("net462", AutoCadHostCatalog.ByYear(2017).TargetFramework);
-        Assert.Equal("net462", AutoCadHostCatalog.ByYear(2018).TargetFramework);
+        Assert.Equal("net46", AutoCadHostCatalog.ByYear(2017).TargetFramework);
+        Assert.Equal("4.6", AutoCadHostCatalog.ByYear(2017).DocumentedClr);
+        Assert.Equal("net46", AutoCadHostCatalog.ByYear(2018).TargetFramework);
+        Assert.Equal("4.6", AutoCadHostCatalog.ByYear(2018).DocumentedClr);
         Assert.Equal("net47", AutoCadHostCatalog.ByYear(2019).TargetFramework);
+        Assert.Equal("4.7", AutoCadHostCatalog.ByYear(2019).DocumentedClr);
         Assert.Equal("net47", AutoCadHostCatalog.ByYear(2020).TargetFramework);
-        Assert.All(new[] { 2021, 2022, 2023, 2024 }, year => Assert.Equal("net48", AutoCadHostCatalog.ByYear(year).TargetFramework));
-        Assert.Contains("not claimed to NETLOAD", AutoCadHostCatalog.ByYear(2017).LoadNote, StringComparison.OrdinalIgnoreCase);
+        Assert.All(new[] { 2021, 2022, 2023, 2024 }, year =>
+        {
+            Assert.Equal("net48", AutoCadHostCatalog.ByYear(year).TargetFramework);
+            Assert.Equal("4.8", AutoCadHostCatalog.ByYear(year).DocumentedClr);
+        });
+        Assert.Contains("net46", AutoCadHostCatalog.ByYear(2017).LoadNote, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Newtonsoft", AutoCadHostCatalog.ByYear(2017).LoadNote, StringComparison.Ordinal);
+        Assert.Contains("not smoke-tested", AutoCadHostCatalog.ByYear(2018).LoadNote, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("4.6", AutoCadHostCatalog.ByYear(2018).LoadNote, StringComparison.Ordinal);
+        Assert.DoesNotContain("net462", AutoCadHostCatalog.ByYear(2017).LoadNote, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("verified", AutoCadHostCatalog.ByYear(2026).LoadNote, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("net462", string.Join("\n", AutoCadHostCatalog.All.Select(host => host.TargetFramework)), StringComparison.Ordinal);
     }
 
     [Theory]
@@ -87,6 +99,91 @@ public sealed class AutoCadHostCatalogTests
         Assert.Equal("autocad_version_unsupported", feature.Error!.Code);
         Assert.Contains("2017", feature.Error.Message, StringComparison.Ordinal);
         Assert.Contains("forge_exec_dotnet", feature.Error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FeatureGatesMatchHostClrAndKeep2026PublishAndUndo()
+    {
+        Assert.Equal(
+            new[] { AutoCadHostCatalog.ExecDotNetFeature, AutoCadHostCatalog.PublishDsdFeature, AutoCadHostCatalog.UndoMarkFeature },
+            AutoCadHostCatalog.FeatureGates.Select(gate => gate.Feature).ToArray());
+
+        foreach (var year in new[] { 2017, 2018 })
+        {
+            Assert.False(AutoCadHostCatalog.SupportsFeature(year, AutoCadHostCatalog.ExecDotNetFeature));
+            var blocked = AutoCadHostCatalog.TryUnsupported("cmd", year, AutoCadHostCatalog.ExecDotNetFeature);
+            Assert.NotNull(blocked);
+            Assert.False(blocked!.Ok);
+            Assert.Equal("autocad_version_unsupported", blocked.Error!.Code);
+            Assert.Contains(year.ToString(), blocked.Error.Message, StringComparison.Ordinal);
+            Assert.Contains(AutoCadHostCatalog.ExecDotNetFeature, blocked.Error.Message, StringComparison.Ordinal);
+            Assert.Contains("2019", blocked.Error.Suggestion, StringComparison.Ordinal);
+        }
+
+        foreach (var year in Enumerable.Range(2019, 8))
+        {
+            Assert.Null(AutoCadHostCatalog.TryUnsupported("cmd", year, AutoCadHostCatalog.ExecDotNetFeature));
+        }
+
+        foreach (var host in AutoCadHostCatalog.All)
+        {
+            Assert.Null(AutoCadHostCatalog.TryUnsupported("cmd", host.Year, AutoCadHostCatalog.PublishDsdFeature));
+            Assert.Null(AutoCadHostCatalog.TryUnsupported("cmd", host.Year, AutoCadHostCatalog.UndoMarkFeature));
+            Assert.True(AutoCadHostCatalog.SupportsFeature(host.Year, AutoCadHostCatalog.PublishDsdFeature));
+            Assert.True(AutoCadHostCatalog.SupportsFeature(host.Year, AutoCadHostCatalog.UndoMarkFeature));
+        }
+
+        var ancientPublish = AutoCadHostCatalog.TryUnsupported("cmd", 2016, AutoCadHostCatalog.PublishDsdFeature);
+        Assert.NotNull(ancientPublish);
+        Assert.Equal("autocad_version_unsupported", ancientPublish!.Error!.Code);
+        Assert.Contains("2016", ancientPublish.Error.Message, StringComparison.Ordinal);
+        Assert.Contains(AutoCadHostCatalog.PublishDsdFeature, ancientPublish.Error.Message, StringComparison.Ordinal);
+        Assert.Contains("Roslyn", AutoCadHostCatalog.FeatureGates.Single(gate => gate.Feature == AutoCadHostCatalog.ExecDotNetFeature).Note, StringComparison.Ordinal);
+        Assert.Contains("UNDO", AutoCadHostCatalog.FeatureGates.Single(gate => gate.Feature == AutoCadHostCatalog.UndoMarkFeature).Note, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageContentsFilterOmitsYearsThatWereNotBuilt()
+    {
+        var template = File.ReadAllText(Path.Combine(RepoRoot(), "plugin-bundle", "765T-Forge.bundle", "PackageContents.xml"));
+        var only2026 = XDocument.Parse(AutoCadHostCatalog.FilterPackageContentsXml(template, new[] { 2026 }));
+        var component = Assert.Single(only2026.Descendants("Components"));
+        Assert.Equal("R25.1", component.Element("RuntimeRequirements")!.Attribute("SeriesMin")!.Value);
+        Assert.Equal("./Contents/Windows/2026/Forge.Plugin.dll", component.Element("ComponentEntry")!.Attribute("ModuleName")!.Value);
+        Assert.Contains("CompanyDetails", only2026.Root!.Elements().Select(element => element.Name.LocalName));
+
+        var two = XDocument.Parse(AutoCadHostCatalog.FilterPackageContentsXml(template, new[] { 2017, 2024 }));
+        Assert.Equal(
+            new[] { "./Contents/Windows/2017/Forge.Plugin.dll", "./Contents/Windows/2024/Forge.Plugin.dll" },
+            two.Descendants("ComponentEntry").Select(entry => entry.Attribute("ModuleName")!.Value).ToArray());
+
+        var none = XDocument.Parse(AutoCadHostCatalog.FilterPackageContentsXml(template, Array.Empty<int>()));
+        Assert.Empty(none.Descendants("Components"));
+    }
+
+    [Fact]
+    public void SharedProjectAndBundleScriptsFollowTheCatalog()
+    {
+        var root = RepoRoot();
+        var shared = File.ReadAllText(Path.Combine(root, "src", "Forge.Shared", "Forge.Shared.csproj"));
+        Assert.Contains("net8.0;net48;net47;net46", shared);
+        Assert.DoesNotContain("net462", shared);
+        Assert.Contains("Newtonsoft.Json", shared);
+        Assert.Contains("SystemTextJsonNet46.cs", shared);
+
+        foreach (var script in new[] { "pack-release.ps1", "install-plugin.ps1", "smoke-lab.ps1" })
+        {
+            var text = File.ReadAllText(Path.Combine(root, "scripts", script));
+            Assert.Contains("ForgeBundleLayout.ps1", text);
+            Assert.Contains("Sync-ForgePackageContents", text);
+            Assert.DoesNotContain("Copy-Item (Join-Path $root \"plugin-bundle\\765T-Forge.bundle\\PackageContents.xml\")", text);
+        }
+
+        var layout = File.ReadAllText(Path.Combine(root, "scripts", "ForgeBundleLayout.ps1"));
+        Assert.Contains("Windows/(\\d+)/Forge\\.Plugin\\.dll", layout);
+        var smoke = File.ReadAllText(Path.Combine(root, "scripts", "smoke-lab.ps1"));
+        Assert.Contains("AutoCAD 2026 only", smoke);
+        Assert.Contains("does not build, NETLOAD, or exercise 2017-2025", smoke);
     }
 
     [Fact]

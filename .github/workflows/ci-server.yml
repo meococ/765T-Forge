@@ -22,10 +22,14 @@ jobs:
       - name: Restore
         run: dotnet restore .\765T-Forge.ServerOnly.slnf --locked-mode
 
+      - name: Build Forge.Shared for every catalog TFM
+        run: dotnet build .\src\Forge.Shared\Forge.Shared.csproj --no-restore --configuration Release
+
       - name: Build
         run: dotnet build .\765T-Forge.ServerOnly.slnf --no-restore --configuration Release
 
       - name: Test
+        # AutoCadHostCatalogTests fails when PackageContents.xml drifts from AutoCadHostCatalog.
         run: dotnet test .\765T-Forge.ServerOnly.slnf --no-build --configuration Release --verbosity normal
 
       - name: Docs drift guard

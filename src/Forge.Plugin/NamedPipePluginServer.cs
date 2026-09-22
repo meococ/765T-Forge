@@ -45,7 +45,13 @@ public sealed class NamedPipePluginServer : IDisposable
             try
             {
                 pipe = CreatePipe();
+#if NET
                 await pipe.WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
+#else
+                // The CancellationToken overload is not on .NET Framework. 2026 keeps it.
+                cancellationToken.ThrowIfCancellationRequested();
+                await pipe.WaitForConnectionAsync().ConfigureAwait(false);
+#endif
                 await HandleRequestAsync(pipe, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)

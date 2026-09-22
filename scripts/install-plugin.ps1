@@ -31,6 +31,7 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
+. (Join-Path $PSScriptRoot "ForgeBundleLayout.ps1")
 
 if (-not $SkipBuild) {
     $build = Join-Path $PSScriptRoot "build-plugin.ps1"
@@ -50,7 +51,6 @@ if (-not $InstallDir) {
 
 $bundle = Join-Path $InstallDir "765T-Forge.bundle"
 New-Item -ItemType Directory -Force -Path (Join-Path $bundle "Contents\Windows") | Out-Null
-Copy-Item (Join-Path $root "plugin-bundle\765T-Forge.bundle\PackageContents.xml") $bundle -Force
 Copy-Item (Join-Path $root "plugin-bundle\765T-Forge.bundle\README.md") $bundle -Force
 
 function Copy-ForgePluginOutput([string] $FromDir, [string] $ToDir) {
@@ -95,7 +95,12 @@ foreach ($candidate in $years) {
     $installedYears += $candidate
     Write-Host "Installed AutoCAD $candidate plugin to $netloadDir"
     Write-Host "  Autoloader module: $moduleDir\Forge.Plugin.dll"
+    if ($candidate -eq 2017 -or $candidate -eq 2018) {
+        Write-Warning "AutoCAD $candidate is built as net46 (.NET Framework 4.6, the documented CLR). This repo has not smoke-tested NETLOAD on that year. forge_exec_dotnet returns autocad_version_unsupported."
+    }
 }
+
+Sync-ForgePackageContents -BundleRoot $bundle -TemplatePath (Join-Path $root "plugin-bundle\765T-Forge.bundle\PackageContents.xml")
 
 if ($installedYears.Count -eq 0) {
     Write-Warning "No Forge.Plugin.dll was installed. Build a year whose AUTOCAD_<year>_ROOT exists."
@@ -110,7 +115,8 @@ Write-Host "     matching the MCP server env. Restart AutoCAD after changing env
 Write-Host "  3. NETLOAD the Forge.Plugin.dll built for THAT AutoCAD year (binaries are not interchangeable)."
 Write-Host "  4. Run MCP_STATUS and confirm the pipe name matches FORGE_PIPE_NAME."
 Write-Host "  5. Optional Autoloader: copy $bundle into an ApplicationPlugins folder."
-Write-Host "     PackageContents.xml loads only the component whose SeriesMin=SeriesMax matches that release."
+Write-Host "     PackageContents.xml lists only years that have Contents\Windows\<year>\Forge.Plugin.dll."
+Write-Host "     Each component still uses SeriesMin=SeriesMax for that release."
 Write-Host "     See docs\install-plugin.md"
 Write-Host ""
 Write-Host "Installed years: $($installedYears -join ', ')"

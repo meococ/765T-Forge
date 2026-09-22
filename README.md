@@ -23,7 +23,7 @@ The Vietnamese [docs/history/build-brief.md](docs/history/build-brief.md) is an 
 ## Shape
 
 - `src/Forge.Server` — MCP stdio server (`ModelContextProtocol` 1.3.0)
-- `src/Forge.Plugin` — AutoCAD 2026 .NET plugin (named pipe)
+- `src/Forge.Plugin` — per-year AutoCAD plugin (named pipe). Default output is `bin/<Configuration>/autocad-2026/`. Other years land in `autocad-<year>/` and, when packed, `Contents/Windows/<year>/Forge.Plugin.dll`
 - `src/Forge.Shared` — envelope, safety, audit, backup, QA report
 - `tests/Forge.Tests` — unit tests (no AutoCAD required)
 - `skills/765t-forge` — companion agent skill
@@ -32,7 +32,7 @@ The Vietnamese [docs/history/build-brief.md](docs/history/build-brief.md) is an 
 ## Requirements
 
 - Windows + .NET 8 SDK
-- AutoCAD 2026 for the verified plugin / live tools. Other years: set `AUTOCAD_<year>_ROOT` and build with `-p:AutoCadYear=<year>` (2017–2025 are not smoke-tested)
+- AutoCAD 2026 for the verified plugin / live tools. Other years: set `AUTOCAD_<year>_ROOT` and build with `-p:AutoCadYear=<year>` (2017–2025 are not smoke-tested). 2017–2018 target `net46`
 - `FORGE_AUTOCAD_TOKEN` (or `MCP_AUTOCAD_TOKEN`) **required** — no production default secret
 
 ## Quick install (Cursor)

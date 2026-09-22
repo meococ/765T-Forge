@@ -3,8 +3,11 @@
     One output per AutoCAD year. The year table must match Forge.Shared/AutoCadHostCatalog
     and plugin-bundle/765T-Forge.bundle/PackageContents.xml.
     Default year is 2026 so existing 2026 builds and CI stay valid.
-    Historical CLR: 2017–2018 net46, 2019–2020 net47, 2021–2024 net48, 2025–2026 net8.0-windows.
-    2017–2018 compile as net462 because System.Text.Json 8.0.5 rejects net46 (NU1202). That is not a net48 binary and is not claimed to NETLOAD on AutoCAD 2017.
+    CLR from Autodesk managed-compatibility tables: 2017–2018 net46 (.NET Framework 4.6),
+    2019–2020 net47, 2021–2024 net48, 2025–2026 net8.0-windows.
+    2017–2018 stay on net46. System.Text.Json 8.0.5 cannot restore for net46 (NU1202), so Forge.Shared
+    uses Newtonsoft.Json on that TFM only. net461 is not used: it is newer than the documented CLR,
+    and System.Text.Json 8 warns that net461 is unsupported.
   -->
   <PropertyGroup>
     <AutoCadYear Condition="'$(AutoCadYear)' == ''">2026</AutoCadYear>
@@ -16,8 +19,8 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <OutputPath>bin\$(Configuration)\autocad-$(AutoCadYear)\</OutputPath>
     <IntermediateOutputPath>obj\autocad-$(AutoCadYear)\</IntermediateOutputPath>
-    <AutoCadTargetFramework Condition="'$(AutoCadYear)' == '2017'">net462</AutoCadTargetFramework>
-    <AutoCadTargetFramework Condition="'$(AutoCadYear)' == '2018'">net462</AutoCadTargetFramework>
+    <AutoCadTargetFramework Condition="'$(AutoCadYear)' == '2017'">net46</AutoCadTargetFramework>
+    <AutoCadTargetFramework Condition="'$(AutoCadYear)' == '2018'">net46</AutoCadTargetFramework>
     <AutoCadTargetFramework Condition="'$(AutoCadYear)' == '2019'">net47</AutoCadTargetFramework>
     <AutoCadTargetFramework Condition="'$(AutoCadYear)' == '2020'">net47</AutoCadTargetFramework>
     <AutoCadTargetFramework Condition="'$(AutoCadYear)' == '2021'">net48</AutoCadTargetFramework>
@@ -72,10 +75,13 @@
   <!-- Normal builds target one AutoCadYear. Pass ForgeRestorePluginFrameworks=true only to
        restore every TFM into packages.lock.json; do not commit that rewrite unless every TFM is still present. -->
   <PropertyGroup Condition="'$(ForgeRestorePluginFrameworks)' == 'true'">
-    <TargetFrameworks>net8.0-windows;net48;net47;net462</TargetFrameworks>
+    <TargetFrameworks>net8.0-windows;net48;net47;net46</TargetFrameworks>
   </PropertyGroup>
   <PropertyGroup Condition="'$(ForgeRestorePluginFrameworks)' != 'true'">
     <TargetFramework>$(AutoCadTargetFramework)</TargetFramework>
+  </PropertyGroup>
+  <PropertyGroup>
+    <DefineConstants Condition="'$(TargetFramework)' == 'net46'">$(DefineConstants);FORGE_NET46</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -83,12 +89,13 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" />
+    <!-- Roslyn scripting is netstandard2.0. net46 (AutoCAD 2017–2018) cannot reference it. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" Condition="'$(TargetFramework)' != 'net46'" />
     <PackageReference Include="System.IO.Pipes.AccessControl" Condition="'$(TargetFrameworkIdentifier)' != '.NETFramework'" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TargetFrameworkIdentifier)' == '.NETFramework'">
-    <PackageReference Include="System.Text.Json" />
+    <PackageReference Include="System.Text.Json" Condition="'$(TargetFramework)' != 'net46'" />
     <PackageReference Include="PolySharp">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

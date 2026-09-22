@@ -1,6 +1,6 @@
 # Architecture
 
-765T-Forge is a dual-process product: an MCP stdio server that agents talk to, and an AutoCAD 2026 plugin that executes drawing work. Shared types and safety policy live in `Forge.Shared`.
+765T-Forge is a dual-process product: an MCP stdio server that agents talk to, and an AutoCAD plugin that executes drawing work. The default verified host is AutoCAD 2026. 2017–2025 are separate build outputs under `Contents/Windows/<year>/` and are not smoke-tested. Shared types and safety policy live in `Forge.Shared`.
 
 ## Runtime flow
 
