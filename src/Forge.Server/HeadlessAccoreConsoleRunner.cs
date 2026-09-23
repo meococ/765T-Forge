@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using Forge.Shared;
 
@@ -9,18 +10,33 @@ public sealed class HeadlessAccoreConsoleRunner
     private readonly ForgeEnvironment _environment;
     private readonly BackupPlanner _backupPlanner;
     private readonly SafetyPolicy _safetyPolicy;
+    private readonly Func<string, string?> _readEnv;
 
-    public HeadlessAccoreConsoleRunner(ForgeEnvironment environment, BackupPlanner backupPlanner, SafetyPolicy safetyPolicy)
+    public HeadlessAccoreConsoleRunner(
+        ForgeEnvironment environment,
+        BackupPlanner backupPlanner,
+        SafetyPolicy safetyPolicy,
+        Func<string, string?>? readEnv = null)
     {
         _environment = environment;
         _backupPlanner = backupPlanner;
         _safetyPolicy = safetyPolicy;
+        _readEnv = readEnv ?? Environment.GetEnvironmentVariable;
     }
 
     public async Task<ForgeResult> RunScriptAsync(ForgeCommand command, CancellationToken cancellationToken = default)
     {
         var args = ForgeJson.ArgsOrDefault<RunScriptArgs>(command.Args);
-        return await RunOneAsync(command.Id, args.DwgPath, args.ScriptPath, args.TimeoutSeconds, command.DryRun, command.UnsafeAcknowledged, cancellationToken)
+        return await RunOneAsync(
+                command.Id,
+                args.DwgPath,
+                args.ScriptPath,
+                args.TimeoutSeconds,
+                command.DryRun,
+                jobYear: null,
+                callYear: args.AutoCadYear,
+                command.UnsafeAcknowledged,
+                cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -90,6 +106,20 @@ public sealed class HeadlessAccoreConsoleRunner
 
         if (command.DryRun)
         {
+            for (var index = 0; index < state.Jobs.Count; index++)
+            {
+                // A dry run only resolves accoreconsole when a year was requested explicitly
+                // (job, call, or environment), so it still works on a machine with no install.
+                if (BatchDryRunShouldLocate(args))
+                {
+                    var missing = MissingConsole(command.Id, JobYear(args, index), args.AutoCadYear);
+                    if (missing is not null)
+                    {
+                        return missing;
+                    }
+                }
+            }
+
             return ForgeResult.Success(command.Id, new
             {
                 dryRun = true,
@@ -112,8 +142,9 @@ public sealed class HeadlessAccoreConsoleRunner
 
         var results = new List<object>();
         var failures = 0;
-        foreach (var job in state.Jobs)
+        for (var index = 0; index < state.Jobs.Count; index++)
         {
+            var job = state.Jobs[index];
             if (job.Status == "ok")
             {
                 results.Add(new { job.DwgPath, job.ScriptPath, Ok = true, skipped = true, status = job.Status });
@@ -123,7 +154,16 @@ public sealed class HeadlessAccoreConsoleRunner
             cancellationToken.ThrowIfCancellationRequested();
             job.Status = "running";
             state.Save();
-            var one = await RunOneAsync(command.Id, job.DwgPath, job.ScriptPath, null, dryRun: false, command.UnsafeAcknowledged, cancellationToken)
+            var one = await RunOneAsync(
+                    command.Id,
+                    job.DwgPath,
+                    job.ScriptPath,
+                    JobTimeout(args, index),
+                    dryRun: false,
+                    JobYear(args, index),
+                    args.AutoCadYear,
+                    command.UnsafeAcknowledged,
+                    cancellationToken)
                 .ConfigureAwait(false);
             if (one.Ok)
             {
@@ -183,12 +223,26 @@ public sealed class HeadlessAccoreConsoleRunner
             };
     }
 
+    /// <summary>Clamp for every AccoreConsole wait: 5-3600 seconds, default 300.</summary>
+    public static int ClampJobTimeout(int? timeoutSeconds)
+    {
+        var value = timeoutSeconds ?? 300;
+        if (value < 5)
+        {
+            return 5;
+        }
+
+        return value > 3600 ? 3600 : value;
+    }
+
     private async Task<ForgeResult> RunOneAsync(
         string commandId,
         string? dwgPath,
         string? scriptPath,
         int? timeoutSeconds,
         bool dryRun,
+        int? jobYear,
+        int? callYear,
         bool unsafeAcknowledged,
         CancellationToken cancellationToken)
     {
@@ -220,21 +274,27 @@ public sealed class HeadlessAccoreConsoleRunner
             return ForgeResult.Failure(commandId, scriptDecision.Code, scriptDecision.Message, scriptDecision.Suggestion);
         }
 
-        var accoreconsole = Path.Combine(_environment.AutoCadRoot, "accoreconsole.exe");
-        if (!File.Exists(accoreconsole))
+        var year = AccoreConsoleLocator.ResolveYear(
+            jobYear,
+            callYear,
+            _readEnv(AccoreConsoleLocator.YearEnvironmentVariable),
+            DiscoveredYear());
+        var choice = AccoreConsoleLocator.Locate(year, _readEnv, File.Exists);
+        if (!choice.Found)
         {
-            var year = string.IsNullOrWhiteSpace(_environment.AutoCadYear) ? "unknown" : _environment.AutoCadYear;
             return ForgeResult.Failure(
                 commandId,
-                "accoreconsole_not_found",
-                $"accoreconsole.exe not found at {accoreconsole} (AutoCAD year: {year}). Set FORGE_AUTOCAD_ROOT to a valid install root.");
+                choice.ErrorCode ?? AccoreConsoleLocator.NotFoundCode,
+                choice.Message ?? "accoreconsole.exe was not found.");
         }
 
+        var accoreconsole = choice.ExePath ?? "";
         if (dryRun)
         {
             return ForgeResult.Success(commandId, new
             {
                 wouldRun = accoreconsole,
+                autoCadYear = choice.Year,
                 dwgPath,
                 scriptPath,
                 backup = _backupPlanner.PlanBackupPath(dwgPath)
@@ -258,7 +318,7 @@ public sealed class HeadlessAccoreConsoleRunner
             return ForgeResult.Failure(commandId, "accoreconsole_start_failed", "Failed to start accoreconsole.exe.");
         }
 
-        var timeout = TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds ?? 300, 5, 3600));
+        var timeout = TimeSpan.FromSeconds(ClampJobTimeout(timeoutSeconds));
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(timeout);
 
@@ -270,9 +330,21 @@ public sealed class HeadlessAccoreConsoleRunner
             var stdout = await stdoutTask.ConfigureAwait(false);
             var stderr = await stderrTask.ConfigureAwait(false);
 
-            return process.ExitCode == 0
-                ? ForgeResult.Success(commandId, new { exitCode = process.ExitCode, stdout, stderr, backupPath })
-                : ForgeResult.Failure(commandId, "accoreconsole_failed", $"accoreconsole exited with code {process.ExitCode}.", stderr);
+            if (process.ExitCode != 0)
+            {
+                return ForgeResult.Failure(commandId, "accoreconsole_failed", $"accoreconsole exited with code {process.ExitCode}.", stderr);
+            }
+
+            if (AccoreConsoleScriptCheck.HasScriptError(stdout, stderr))
+            {
+                return ForgeResult.Failure(
+                    commandId,
+                    AccoreConsoleScriptCheck.ErrorCode,
+                    "accoreconsole exited 0 but the output contains an AutoCAD abort token (*Cancel*, Unknown command, or *Invalid*).",
+                    "Fix the script and re-run. These markers are positive evidence of a script error; a run without them does NOT prove the script succeeded. The only deterministic verification of the drawing is readback (forge_qa_readback / forge_qa_readback_after_timeout).");
+            }
+
+            return ForgeResult.Success(commandId, new { exitCode = process.ExitCode, stdout, stderr, backupPath });
         }
         catch (OperationCanceledException)
         {
@@ -292,11 +364,68 @@ public sealed class HeadlessAccoreConsoleRunner
         }
     }
 
+    private int? DiscoveredYear()
+    {
+        return int.TryParse(_environment.AutoCadYear, NumberStyles.None, CultureInfo.InvariantCulture, out var year)
+            ? year
+            : (int?)null;
+    }
+
+    private bool BatchDryRunShouldLocate(BatchArgs args)
+    {
+        if (args.AutoCadYear is not null || args.Jobs.Any(job => job.AutoCadYear is not null))
+        {
+            return true;
+        }
+
+        return !string.IsNullOrWhiteSpace(_readEnv(AccoreConsoleLocator.YearEnvironmentVariable));
+    }
+
+    private static int? JobTimeout(BatchArgs args, int index)
+    {
+        if (!string.IsNullOrWhiteSpace(args.ResumeBatchId) || index < 0 || index >= args.Jobs.Length)
+        {
+            return null;
+        }
+
+        return args.Jobs[index].TimeoutSeconds;
+    }
+
+    private static int? JobYear(BatchArgs args, int index)
+    {
+        if (!string.IsNullOrWhiteSpace(args.ResumeBatchId) || index < 0 || index >= args.Jobs.Length)
+        {
+            return null;
+        }
+
+        return args.Jobs[index].AutoCadYear;
+    }
+
+    private ForgeResult? MissingConsole(string commandId, int? jobYear, int? callYear)
+    {
+        var year = AccoreConsoleLocator.ResolveYear(
+            jobYear,
+            callYear,
+            _readEnv(AccoreConsoleLocator.YearEnvironmentVariable),
+            DiscoveredYear());
+        var choice = AccoreConsoleLocator.Locate(year, _readEnv, File.Exists);
+        if (choice.Found)
+        {
+            return null;
+        }
+
+        return ForgeResult.Failure(
+            commandId,
+            choice.ErrorCode ?? AccoreConsoleLocator.NotFoundCode,
+            choice.Message ?? "accoreconsole.exe was not found.");
+    }
+
     private sealed record RunScriptArgs
     {
         public string? DwgPath { get; init; }
         public string? ScriptPath { get; init; }
         public int? TimeoutSeconds { get; init; }
+        public int? AutoCadYear { get; init; }
     }
 
     private sealed record BatchJobArgs
@@ -304,6 +433,7 @@ public sealed class HeadlessAccoreConsoleRunner
         public string? DwgPath { get; init; }
         public string? ScriptPath { get; init; }
         public int? TimeoutSeconds { get; init; }
+        public int? AutoCadYear { get; init; }
     }
 
     private sealed record BatchArgs
@@ -311,5 +441,6 @@ public sealed class HeadlessAccoreConsoleRunner
         public BatchJobArgs[] Jobs { get; init; } = [];
         public bool ContinueOnError { get; init; } = true;
         public string? ResumeBatchId { get; init; }
+        public int? AutoCadYear { get; init; }
     }
 }

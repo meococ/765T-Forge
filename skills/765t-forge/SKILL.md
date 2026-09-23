@@ -13,7 +13,8 @@ Use this skill when an agent drives AutoCAD through **765T-Forge** for metro/AEC
 - The five free-text executors (`forge_exec_command`, `forge_exec_lisp`, `forge_run_script`, `forge_batch_run`, `forge_exec_dotnet`) are disabled unless the human enabled unsafe ops for this session (`FORGE_ENABLE_UNSAFE_OPS=true` and `unsafeAcknowledged=true`). Otherwise they return `unsafe_not_acknowledged`.
 - There is **no text filter**: nothing inspects the command, LISP, script, or C# you pass. Never send a whole-drawing selection (`ERASE ALL`, `*`) through an executor — the gate checks the capability, not the text, so nothing will catch it for you. Type the exact handles/names you intend.
 - If `forge_exec_command` / `forge_exec_lisp` returns `queued=true` or `completed=false` (with `undoGrouped=false`), **do not** chain writes — read back first.
-- AccoreConsole scripts: use `forge_run_script` / `forge_batch_run` (server-side capability gate only, no script scan — ADR 0002); Accore **Ok ≠ PDF/plot verification** — never treat as issue-set PDF SoT.
+- AccoreConsole scripts: use `forge_run_script` / `forge_batch_run` (server-side capability gate only, no script scan — ADR 0002). Pass `autoCadYear` (or `FORGE_ACCORECONSOLE_YEAR`) to target a specific year; Forge never falls back to a newer console. Each batch job honours its own `timeoutSeconds` (5–3600, default 300). A run whose output contains `*Cancel*`, `Unknown command`, or `*Invalid*` fails with `accoreconsole_script_error`; a run without those markers is **not** proof of success — Accore **Ok ≠ PDF/plot verification**, never treat as issue-set PDF SoT.
+- `forge_system_setvar` refuses a fixed exact-name set of trust/startup variables with `deny_sysvar` (`SECURELOAD`, `TRUSTEDPATHS`, `TRUSTEDDOMAINS`, `LEGACYCODESEARCH`, `ACADLSPASDOC`, `SAFEMODE`, `TEXTEVAL`, `DEMANDLOAD`, `APPAUTOLOAD`, `AUTOLOAD`, `EXPERT`). Do not try to work around it.
 - On plugin timeout, call **`forge_qa_readback_after_timeout`** — never retry the write blind. On `plugin_busy`, wait for the in-flight call and retry.
 - Prefer `forge_issue_set_validate` when an IssueSetContract / sheet inventory exists; do not invent the sheet set.
 - `force=true` and ceremony booleans (`dryRunDone`, `issueAcknowledged`) are **attested** ops accepts — not human-presence or CDE proof (ADR 0004). `force=true` also requires `FORGE_ALLOW_FORCE_PUBLISH=true` or the tool returns `force_not_allowed`. Prefer ceremony optional `dryRunAuditId` / `preflightAuditId` / `receiptAuditId` after real runs.
@@ -34,6 +35,12 @@ Use this skill when an agent drives AutoCAD through **765T-Forge** for metro/AEC
 | `plot_units_unavailable` | Paper units unreadable from `PlotSettings.PlotPaperUnits` | Fix the page setup; Forge will not guess |
 | `illegal_dsd_character` | DSD field contained `[`, `]`, `=`, CR/LF, or a control character | Remove it |
 | `force_not_allowed` | `force=true` while `FORGE_ALLOW_FORCE_PUBLISH` is unset | Ask the human; do not set the env var yourself |
+| `deny_sysvar` | `forge_system_setvar` target is a trust/startup variable (exact-name set) | Leave it unchanged; use a typed tool for drawing state |
+| `plot_probe_failed` | `forge_plot_to_pdf` wrote a file but the PDF probe failed | Inspect `data.pdfProbe`; do not treat the output as published |
+| `autocad_host_mismatch` | `ACADVER` is missing or unparseable, so the plugin cannot confirm the host | Run inside AutoCAD with the plugin build for that release |
+| `autocad_version_unsupported` | Running release (or requested AccoreConsole year) is outside the loaded build's series | Load the matching plugin build or request a supported year |
+| `accoreconsole_not_found` | No AccoreConsole year resolved, or the exe is missing at the resolved path | Set `FORGE_ACCORECONSOLE_YEAR` / `AUTOCAD_<year>_ROOT`; there is no newer-year fallback |
+| `accoreconsole_script_error` | AccoreConsole exited 0 but the output contains an abort token | Fix the script; a clean output is not proof of success — read back the drawing |
 
 `undoWarnings[]` (`undo_group_open_failed` / `undo_group_close_failed`) means the undo group was not clean; check `undoGrouped` and read back.
 
@@ -78,7 +85,7 @@ Prefer **`forge_recipe_issue_set`** for full issue-set runs. It reports `steps[]
 
 - Prefer `forge_system_capabilities` before choosing device/paper/CTB·STB; it restores the previous plot device and reports `currentConfig.previousDevice` / `restored` / `restoreError`.
 - Require `overwriteAcknowledged=true` when replacing an existing PDF/pack folder.
-- **Do not claim PDFs were published** unless `verification.passed` / receipt PDF probe passed and the output file exists. Page count is never verified. See `docs/capability-matrix.md`.
+- **Do not claim PDFs were published** unless `verification.passed` / receipt PDF probe passed and the output file exists. Page count is never verified. `forge_plot_to_pdf` itself fails with `plot_probe_failed` when the probe fails. See `docs/capability-matrix.md`.
 - After publish, keep the **PublishReceipt** artifact path for audit / `forge_issue_set_diff`.
 
 ## Safety expectations

@@ -17,6 +17,13 @@ See [docs/versioning.md](docs/versioning.md).
 - Nested xref BFS depth report on `forge_xref_closure` / pin / dependency_closure (`maxDepth` default 4, optional `failClosed`)
 - DSD publish seat checklist in [docs/smoke-lab.md](docs/smoke-lab.md)
 - `forge_linework_*` tool family (`dump`, `trace`, `topology`, `coverage`, `segments`, `compare`, `transform`) — server-side, AutoCAD-free CAD linework extraction and CAD↔model QA from a `pl_dump.txt` dump, with xref-safe layer filtering, a flat segment feed, per-item `matched`/`partial`/`missing_in_revit`/`extra_off_cad` marking, an optional SVG overlay, and anchor-pair similarity/affine calibration. Unit-tested only; not yet exercised against a real drawing. Live-drawing extraction is not dispatched in this build (`live_source_unavailable`)
+- `SysvarPolicy`: `forge_system_setvar` refuses a fixed exact-name set of trust/startup variables (`SECURELOAD`, `TRUSTEDPATHS`, `TRUSTEDDOMAINS`, `LEGACYCODESEARCH`, `ACADLSPASDOC`, `SAFEMODE`, `TEXTEVAL`, `DEMANDLOAD`, `APPAUTOLOAD`, `AUTOLOAD`, `EXPERT`) with `deny_sysvar`; exact membership, the value is never inspected
+- `PlotPdfGate`: `forge_plot_to_pdf` now fails with `plot_probe_failed` (`Ok=false`) when the written file fails the PDF probe, keeping the probe in `data` and the verification block
+- `AutoCadHostCatalog` + ACADVER host gate: the plugin refuses every command when `ACADVER` is missing/unparseable (`autocad_host_mismatch`) or outside the loaded build's series (`autocad_version_unsupported`); the catalog documents the factual 2017–2026 runtime table and the two shipped build targets (`net462` = 2017–2024, `net8.0-windows` = 2025–2027)
+- `AccoreConsoleLocator`: `forge_run_script` / `forge_batch_run` select the console by job year, then call year, then `FORGE_ACCORECONSOLE_YEAR`, then the discovered default; a missing exe is `accoreconsole_not_found` naming the exact path and env var, with no newer-year fallback. New `autoCadYear` arguments on `forge_run_script` / `forge_batch_run` and per batch job
+- Per-job AccoreConsole timeouts in `forge_batch_run`: each job's `timeoutSeconds` is honoured (clamped 5–3600, default 300)
+- `AccoreConsoleScriptCheck`: an AccoreConsole run whose output contains the literal abort tokens `*Cancel*`, `Unknown command`, or `*Invalid*` fails with `accoreconsole_script_error`. A run without those markers is **not** proof of success; readback remains the only deterministic verification
+- MCP result contract: `ForgeCallToolResults.MarkBusinessFailure` runs as a call-tool filter, so a `ForgeResult` with `Ok=false` sets `tools/call` `isError` and keeps the ForgeResult as structured content; server name and instructions are set via `ForgeMcpHost`
 
 ### Changed
 

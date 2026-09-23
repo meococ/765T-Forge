@@ -15,10 +15,10 @@
 | Ceremony / CDE | `forge_publish_ceremony_check` (optional AuditId evidence), `forge_cde_gate_evaluate`, `forge_transmittal_seal` — **attested** flags, not human/CDE proof (ADR 0004) |
 | Publish | `forge_plot_to_pdf`, `forge_plot_publish` (receipt with `AuditId`; DSD partial + plot fallback; `pageCount=null` / `not_available`; force needs `FORGE_ALLOW_FORCE_PUBLISH`), `forge_recipe_issue_set` (steps stop at first failure) |
 | Xref depth | `forge_xref_closure` / pin / `forge_qa_dependency_closure` (`maxDepth`, optional `failClosed`) |
-| Batch / Accore | `forge_batch_run` (+ `resumeBatchId`), `forge_batch_status`, `forge_run_script` (AccoreConsole; server-only capability gate, no script scan — **not** PDF SoT) |
+| Batch / Accore | `forge_batch_run` (+ `resumeBatchId`, per-job `timeoutSeconds` and `autoCadYear`), `forge_batch_status`, `forge_run_script` (`autoCadYear`; server-only capability gate, no script scan; abort tokens → `accoreconsole_script_error`; a clean run is **not** PDF SoT) |
 | Pack | `forge_pack_and_go` (plans, resolves names, stages, then moves; `renamedFrom` in manifest) |
 | Exec (last resort) | `forge_exec_command` / `_lisp` — check `completed`; `forge_exec_dotnet` — all five executors are `Unsafe` and need `FORGE_ENABLE_UNSAFE_OPS` + `unsafeAcknowledged`, else `unsafe_not_acknowledged`; no text filter |
 
-Error codes to branch on: `unsafe_not_acknowledged`, `plugin_busy`, `plugin_main_thread_timeout`, `exec_dotnet_timeout`, `invalid_command_id`, `frame_too_large` / `response_too_large`, `block_attribute_not_found`, `regex_timeout`, `plot_units_unavailable`, `illegal_dsd_character`, `force_not_allowed`, `undoWarnings[]` (`undo_group_open_failed` / `undo_group_close_failed`).
+Error codes to branch on: `unsafe_not_acknowledged`, `plugin_busy`, `plugin_main_thread_timeout`, `exec_dotnet_timeout`, `invalid_command_id`, `frame_too_large` / `response_too_large`, `block_attribute_not_found`, `regex_timeout`, `plot_units_unavailable`, `illegal_dsd_character`, `force_not_allowed`, `deny_sysvar`, `plot_probe_failed`, `autocad_host_mismatch`, `autocad_version_unsupported`, `accoreconsole_not_found`, `accoreconsole_script_error`, `undoWarnings[]` (`undo_group_open_failed` / `undo_group_close_failed`).
 
 Honest status: [docs/capability-matrix.md](../../../docs/capability-matrix.md)

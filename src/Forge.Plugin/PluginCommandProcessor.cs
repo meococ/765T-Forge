@@ -95,6 +95,11 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, "unauthorized", "Invalid Forge named pipe token.");
         }
 
+        if (RejectIfHostMismatch(command) is { } hostMismatch)
+        {
+            return hostMismatch;
+        }
+
         var decision = _safetyPolicy.Evaluate(command, _environment.EnableUnsafeOps);
         var auditId = _auditSink.WriteBestEffort(new AuditRecord
         {
@@ -264,6 +269,37 @@ public sealed partial class PluginCommandProcessor
         return new UndoScope(result, warnings.ToArray());
     }
 
+    /// <summary>
+    /// Fail-closed host check: ACADVER must parse and fall inside the series range of the
+    /// plugin build that is loaded. A missing, empty, whitespace, or unparseable ACADVER is a
+    /// failure (<c>autocad_host_mismatch</c>), never a pass.
+    /// </summary>
+    private static ForgeResult? RejectIfHostMismatch(ForgeCommand command)
+    {
+        string? acadVer = null;
+        try
+        {
+            acadVer = Convert.ToString(Application.GetSystemVariable("ACADVER"), CultureInfo.InvariantCulture);
+        }
+        catch (System.Exception)
+        {
+            acadVer = null;
+        }
+
+        return AutoCadHostCatalog.DecideHostMismatch(command.Id, command.Tool, PluginBuildTarget, acadVer);
+    }
+
+    /// <summary>
+    /// The plugin build loaded in this process: net462 (AutoCAD 2017-2024) or net8.0-windows
+    /// (AutoCAD 2025-2027). These are the only two binaries this repo ships.
+    /// </summary>
+    private static AutoCadBuildTarget PluginBuildTarget =>
+#if NETFRAMEWORK
+        AutoCadBuildTarget.LegacyNet462;
+#else
+        AutoCadBuildTarget.ModernNet8;
+#endif
+
     private static DocumentCollection Documents => Application.DocumentManager;
     private static Document ActiveDoc => Documents.MdiActiveDocument ?? throw new InvalidOperationException("No active AutoCAD document.");
     private static Database ActiveDb => ActiveDoc.Database;
@@ -327,6 +363,11 @@ public sealed partial class PluginCommandProcessor
         if (string.IsNullOrWhiteSpace(args.Name))
         {
             return ForgeResult.Failure(command.Id, "missing_var_name", "System variable name is required.");
+        }
+
+        if (SysvarPolicy.Reject(command.Id, args.Name) is { } denied)
+        {
+            return denied;
         }
 
         if (command.DryRun)
@@ -1234,8 +1275,10 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, "plot_no_output", $"Plot ran but no PDF was produced at {outputPath}.", "Check the output directory is writable and the layout has plottable content.");
         }
 
-        return ForgeResult.Success(
+        var probe = PdfProbeResult.Probe(outputPath, expectedPages: 1);
+        return PlotPdfGate.FromProbe(
             command.Id,
+            probe,
             new
             {
                 outputPath,
@@ -1243,14 +1286,8 @@ public sealed partial class PluginCommandProcessor
                 device,
                 paperSize,
                 plotStyle,
-                bytes = new FileInfo(outputPath).Length
-            },
-            verification: new ForgeVerification
-            {
-                Attempted = true,
-                Passed = true,
-                Message = "PDF file exists after plot.",
-                ReadBack = new { outputPath, exists = true }
+                bytes = new FileInfo(outputPath).Length,
+                pdfProbe = probe
             });
     }
 

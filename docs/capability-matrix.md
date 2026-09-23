@@ -14,8 +14,10 @@ Honest status of MCP tools. AutoCAD target: plugin components for **2017–2024*
 |------|--------|-------|
 | `forge_system_health` | implemented | |
 | `forge_system_version` | implemented | Product + envelope versions |
-| `forge_system_getvar` / `_setvar` | implemented | |
+| `forge_system_getvar` / `_setvar` | implemented | `_setvar` refuses a fixed exact-name set of trust/startup variables with `deny_sysvar` (`SECURELOAD`, `TRUSTEDPATHS`, `TRUSTEDDOMAINS`, `LEGACYCODESEARCH`, `ACADLSPASDOC`, `SAFEMODE`, `TEXTEVAL`, `DEMANDLOAD`, `APPAUTOLOAD`, `AUTOLOAD`, `EXPERT`); the value is never inspected |
 | `forge_system_capabilities` | implemented | Devices, media, page setups, layouts, layer states, plot styles; restores the previous plot device in a `finally` (`currentConfig.previousDevice` / `restored` / `restoreError`) |
+
+**Plugin host gate (ACADVER):** every plugin command fails closed when `ACADVER` is missing, empty, whitespace, or unparseable (`autocad_host_mismatch`) or when its release series is outside the loaded build's supported series (`autocad_version_unsupported`; `net462` = R21.0–R24.3, `net8.0-windows` = R25.0–R26.0). The plugin refuses rather than run against an API surface it was not compiled for.
 
 ## Document / xref / layer
 
@@ -40,7 +42,7 @@ Honest status of MCP tools. AutoCAD target: plugin components for **2017–2024*
 
 | Tool | Status | Notes |
 |------|--------|-------|
-| `forge_plot_to_pdf` | implemented | Configurable device/paper/CTB·STB/area; overwrite ack; smoke-verified. Paper units are read from `PlotSettings.PlotPaperUnits`; if that read fails, the tool returns `plot_units_unavailable` instead of guessing from the paper name |
+| `forge_plot_to_pdf` | implemented | Configurable device/paper/CTB·STB/area; overwrite ack; smoke-verified. Paper units are read from `PlotSettings.PlotPaperUnits`; if that read fails, the tool returns `plot_units_unavailable` instead of guessing from the paper name. The written file must pass the PDF probe or the call fails with `plot_probe_failed` (probe kept in `data`, verification block set) |
 | `forge_plot_publish` | partial | DSD + `Publisher.PublishDsd` + **PublishReceipt** (stamps `AuditId`) + PDF probe + preflight gate; on DSD no-output / failure, **falls back** to per-layout `-PLOT` (`fallback=plot_to_pdf`; multi-layout `singlePdf` may be unmerged); forces `BACKGROUNDPLOT`/`BGCOREPUBLISH=0`; `force=true` requires `FORGE_ALLOW_FORCE_PUBLISH`; receipt `pageCount` is `null` / `pageCountSource=not_available` (no page-count guessing) |
 | `forge_qa_*` (verify/check/audit/readback) | implemented | |
 | `forge_qa_readback_after_timeout` | implemented | Timeout recovery protocol — never retry write blind |
@@ -51,7 +53,7 @@ Honest status of MCP tools. AutoCAD target: plugin components for **2017–2024*
 | `forge_issue_set_diff` | implemented | Diff two PublishReceipt artifacts |
 | `forge_recipe_issue_set` | implemented | Normalize → fill → gate → publish; reports `steps[]` with `status` exactly `completed` or `failed`, stops at the first failure |
 | `forge_pack_and_go` | implemented | Host+xrefs+styles + `manifest.json`; plans all destinations before copying, resolves same-named xrefs deterministically (suffix from the parent folder, recorded as `renamedFrom`), stages the whole pack, then moves it into place |
-| `forge_batch_run` | implemented | AccoreConsole queue + **resume** via `resumeBatchId` |
+| `forge_batch_run` | implemented | AccoreConsole queue + **resume** via `resumeBatchId`; per-job `timeoutSeconds` (clamped 5–3600, default 300) and per-job/call `autoCadYear` (`AUTOCAD_<year>_ROOT`, no newer-year fallback) |
 | `forge_batch_status` | implemented | Load saved batch resume state |
 
 ## Registry / standards / viewport / profiles
@@ -103,8 +105,8 @@ All five free-text executors are flagged `Unsafe` in `ForgeToolRegistry` and are
 | Tool | Status | Notes |
 |------|--------|-------|
 | `forge_exec_command` / `_lisp` | implemented | Unsafe-gated; prefer sync `Editor.Command`; else `queued=true, completed=false, undoGrouped=false` |
-| `forge_run_script` | implemented | Unsafe-gated; AccoreConsole; **server-only** capability gate (ADR 0002) |
-| `forge_batch_run` | implemented | Unsafe-gated; AccoreConsole queue; **server-only** capability gate (ADR 0002) |
+| `forge_run_script` | implemented | Unsafe-gated; AccoreConsole; **server-only** capability gate (ADR 0002); `autoCadYear` selects the console by exact year; abort tokens in the output fail with `accoreconsole_script_error` (a clean run is not proof of success) |
+| `forge_batch_run` | implemented | Unsafe-gated; AccoreConsole queue; **server-only** capability gate (ADR 0002); per-job timeouts and year selection; same script-error check |
 | `forge_exec_dotnet` | implemented | Unsafe-gated; full process trust inside AutoCAD, not sandboxed; timeout reports `exec_dotnet_timeout` and cannot abort a running snippet; Roslyn assemblies ship with the plugin |
 
 ## Still planned / deferred

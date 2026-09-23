@@ -23,7 +23,7 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_system_getvar", new { name }, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_system_setvar", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
-    [Description("Set one AutoCAD system variable with backup/audit/read-back around the write.")]
+    [Description("Set one AutoCAD system variable with backup/audit/read-back around the write. Trust/startup variables are refused with deny_sysvar.")]
     public static Task<ForgeResult> SystemSetVar(ForgeToolRunner runner, string name, string value, bool dryRun = false, CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_system_setvar", new { name, value }, dryRun, cancellationToken: cancellationToken);
 
@@ -118,7 +118,7 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_layout_page_setup_apply", new { setupName, layout }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_plot_to_pdf", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
-    [Description("Plot one layout to PDF with configurable device, paper, CTB/STB plot style, area, and overwrite acknowledgement.")]
+    [Description("Plot one layout to PDF with configurable device, paper, CTB/STB plot style, area, and overwrite acknowledgement. Ok=false with plot_probe_failed when the written file fails the PDF probe; the probe stays in data.")]
     public static Task<ForgeResult> PlotToPdf(
         ForgeToolRunner runner,
         string outputPath,
@@ -587,15 +587,16 @@ public sealed class ForgeMcpTools
         }, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_batch_run", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false)]
-    [Description("Run an AccoreConsole job queue over multiple DWG/script pairs with partial-success reporting and optional resume batchId.")]
+    [Description("Run an AccoreConsole job queue over multiple DWG/script pairs with partial-success reporting and optional resume batchId. Each job's timeoutSeconds is honored (clamped 5-3600, default 300). autoCadYear selects AUTOCAD_<year>_ROOT; there is no fallback to a newer console.")]
     public static Task<ForgeResult> BatchRun(
         ForgeToolRunner runner,
         BatchJobDto[]? jobs = null,
         bool continueOnError = true,
         string? resumeBatchId = null,
+        int? autoCadYear = null,
         bool dryRun = false,
         CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_batch_run", new { jobs = jobs ?? [], continueOnError, resumeBatchId }, dryRun, cancellationToken: cancellationToken);
+        => runner.InvokeAsync("forge_batch_run", new { jobs = jobs ?? [], continueOnError, resumeBatchId, autoCadYear }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_batch_status", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Load a saved AccoreConsole batch resume state by batchId or artifact path.")]
@@ -613,9 +614,9 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_exec_lisp", new { lisp }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_run_script", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
-    [Description("Run a .scr or .lsp script against a DWG through accoreconsole.exe with pre-run backup.")]
-    public static Task<ForgeResult> RunScript(ForgeToolRunner runner, string dwgPath, string scriptPath, int? timeoutSeconds = null, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_run_script", new { dwgPath, scriptPath, timeoutSeconds }, dryRun, cancellationToken: cancellationToken);
+    [Description("Run a .scr or .lsp script against a DWG through accoreconsole.exe with pre-run backup. autoCadYear selects AUTOCAD_<year>_ROOT; there is no fallback to a newer console. A run whose output contains an AutoCAD abort token fails with accoreconsole_script_error; a clean run does not prove the script succeeded.")]
+    public static Task<ForgeResult> RunScript(ForgeToolRunner runner, string dwgPath, string scriptPath, int? timeoutSeconds = null, int? autoCadYear = null, bool dryRun = false, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_run_script", new { dwgPath, scriptPath, timeoutSeconds, autoCadYear }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_exec_dotnet", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
     [Description("Execute a C# script inside the AutoCAD plugin context with FULL PROCESS TRUST (not sandboxed). Requires the unsafe dual-gate: FORGE_ENABLE_UNSAFE_OPS=true and per-call unsafeAcknowledged=true. The call has a hard timeout that bounds waiting only; a running script cannot be aborted.")]
@@ -636,4 +637,5 @@ public sealed record BatchJobDto
     public string DwgPath { get; init; } = "";
     public string ScriptPath { get; init; } = "";
     public int? TimeoutSeconds { get; init; }
+    public int? AutoCadYear { get; init; }
 }

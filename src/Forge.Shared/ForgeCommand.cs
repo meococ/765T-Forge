@@ -41,14 +41,27 @@ public sealed record ForgeResult
         };
     }
 
-    public static ForgeResult Failure(string id, string code, string message, string? suggestion = null, string? auditId = null)
+    /// <summary>
+    /// A failed call can still carry <paramref name="data"/> (for example the report or
+    /// probe that explains the failure) and a <paramref name="verification"/> block.
+    /// </summary>
+    public static ForgeResult Failure(
+        string id,
+        string code,
+        string message,
+        string? suggestion = null,
+        string? auditId = null,
+        object? data = null,
+        ForgeVerification? verification = null)
     {
         return new ForgeResult
         {
             Id = id,
             Ok = false,
+            Data = data,
             Error = new ForgeError(code, message, suggestion),
-            AuditId = auditId
+            AuditId = auditId,
+            Verification = verification
         };
     }
 }

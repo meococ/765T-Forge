@@ -37,11 +37,19 @@ builder.Services.AddSingleton<HeadlessAccoreConsoleRunner>();
 builder.Services.AddSingleton<ForgeToolRunner>();
 
 builder.Services
-    .AddMcpServer()
+    .AddMcpServer(ForgeMcpHost.ApplyServerOptions)
     .WithStdioServerTransport()
     .WithTools<ForgeMcpTools>()
     .WithResources<ForgeMcpResources>()
-    .WithPrompts<ForgeMcpPrompts>();
+    .WithPrompts<ForgeMcpPrompts>()
+    .WithRequestFilters(filters =>
+    {
+        filters.AddCallToolFilter(next => async (request, cancellationToken) =>
+        {
+            var result = await next(request, cancellationToken).ConfigureAwait(false);
+            return ForgeCallToolResults.MarkBusinessFailure(result);
+        });
+    });
 
 await builder.Build().RunAsync().ConfigureAwait(false);
 return 0;

@@ -21,8 +21,8 @@ flowchart LR
 | **AI Agent** | Calls MCP tools (Cursor, Claude Desktop, or other MCP hosts) |
 | **Forge.Server** | Stdio MCP server (`ModelContextProtocol`); evaluates the capability gate, writes audit start/completion, routes tools |
 | **Named pipe** | JSON line protocol to the in-process plugin (`FORGE_PIPE_NAME`, default `765T.Forge.AutoCAD`); accepts concurrent connections, serializes execution (`plugin_busy`) |
-| **AccoreConsole** | Headless path for `forge_run_script` and the shipped multi-DWG `forge_batch_run` queue, resolved from `FORGE_AUTOCAD_ROOT` (or the deprecated `AUTOCAD_2026_ROOT`, else discovery) |
-| **Forge.Plugin** | `NETLOAD`ed into AutoCAD; re-checks token + gate; backups; dispatches to ObjectARX/.NET API |
+| **AccoreConsole** | Headless path for `forge_run_script` and the shipped multi-DWG `forge_batch_run` queue. `AccoreConsoleLocator` picks the console deterministically: job year, then call year, then `FORGE_ACCORECONSOLE_YEAR`, then the discovered default (`FORGE_AUTOCAD_ROOT` or the highest installed `AutoCAD <year>` containing `accoreconsole.exe`). No newer-year fallback; per-job timeouts are clamped 5–3600 (default 300) |
+| **Forge.Plugin** | `NETLOAD`ed into AutoCAD; re-checks token + gate; fails closed on a missing/unparseable/mismatched `ACADVER`; backups; dispatches to ObjectARX/.NET API |
 | **AutoCAD** | Source of truth for drawings, plotters, xrefs, and layouts; supported via two plugin components (2017–2024 / 2025–2027) |
 
 ### Request lifecycle
@@ -30,8 +30,9 @@ flowchart LR
 1. Agent invokes a tool on `ForgeMcpTools`
 2. `ForgeToolRunner` applies the server-side capability gate, audit, and dry-run short-circuit
 3. Most tools: `ForgePipeClient` → plugin `NamedPipePluginServer` → main-thread document lock → `PluginCommandProcessor`
-4. `forge_run_script` / `forge_batch_run`: server spawns `accoreconsole.exe` instead of the live pipe
-5. Plugin re-evaluates the gate, may backup the DWG, executes, returns `ForgeResult` (+ optional verification)
+4. `forge_run_script` / `forge_batch_run`: server spawns `accoreconsole.exe` (year-selected) instead of the live pipe
+5. Plugin re-evaluates the gate, checks the `ACADVER` host, may backup the DWG, executes, returns `ForgeResult` (+ optional verification)
+6. `ForgeCallToolResults.MarkBusinessFailure` runs as an MCP call-tool filter: a `ForgeResult` with `Ok=false` sets `isError` on the `tools/call` response and keeps the ForgeResult (including `data`) as structured content
 
 ## Safety and audit
 
@@ -39,9 +40,12 @@ Safety is a **trust boundary**, not a convenience filter:
 
 - **Capability gate** — the five free-text executors are `Unsafe` and need `FORGE_ENABLE_UNSAFE_OPS=true` plus per-call `unsafeAcknowledged=true`; no argument text is inspected anywhere
 - **Dual evaluation** — server and plugin both run `SafetyPolicy`; AccoreConsole paths are server-only and documented as such
+- **Host gate** — the plugin refuses when `ACADVER` is missing/unparseable (`autocad_host_mismatch`) or outside the loaded build's series (`autocad_version_unsupported`)
+- **Exact-name sysvar policy** — `forge_system_setvar` refuses the fixed trust/startup variable set with `deny_sysvar`; exact membership, never text inspection
 - **Dry-run** — writes can return the planned action without mutating the drawing
 - **Backup** — pre-write DWG copy when metadata requires it (`FORGE_BACKUP_DIR`)
 - **Audit** — JSONL records on both sides (`FORGE_AUDIT_DIR`), one file per provenance (`server-{yyyyMMdd}.jsonl` / `plugin-{yyyyMMdd}.jsonl`), correlated by `AuditId`, with exact-name secret redaction
+- **MCP result contract** — `Ok=false` sets `tools/call` `isError` so a failed gate cannot look like a successful tool call; the ForgeResult stays in structured content
 
 If a call times out, assume the write may have committed; read back before retrying. See [safety.md](safety.md) and [SECURITY.md](../SECURITY.md).
 

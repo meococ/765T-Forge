@@ -26,10 +26,23 @@ Unknown tool names are not inspected by the gate: `ForgeToolRegistry.Get` return
 
 Typed tools' business values (titleblock notes, folder names, attribute text) are not scanned. That was true before and it is true now; the difference is that nothing else is scanned either.
 
+## System variable policy (exact-name set)
+
+`forge_system_setvar` refuses a fixed set of trust and startup variables by **exact name** (case-insensitive set membership), returning `deny_sysvar`: `SECURELOAD`, `TRUSTEDPATHS`, `TRUSTEDDOMAINS`, `LEGACYCODESEARCH`, `ACADLSPASDOC`, `SAFEMODE`, `TEXTEVAL`, `DEMANDLOAD`, `APPAUTOLOAD`, `AUTOLOAD`, `EXPERT`. The name is trimmed, then compared for exact membership; no prefix, substring, or pattern matching is involved, and the value is never inspected. Every other variable (for example `FILEDIA`, `BACKGROUNDPLOT`, `PSTYLEMODE`) stays settable.
+
+## Host gate (ACADVER, fail closed)
+
+The plugin refuses every command when the running AutoCAD release cannot be confirmed or does not match the loaded plugin build:
+
+- `ACADVER` missing, empty, whitespace, or unparseable → `autocad_host_mismatch` (a failure, never a pass).
+- `ACADVER` parses but its release series is outside the loaded build's supported series (`net462` = R21.0–R24.3, `net8.0-windows` = R25.0–R26.0) → `autocad_version_unsupported`.
+
+There is no "assume the default year" path. A plugin loaded into the wrong AutoCAD release refuses with a typed error instead of running against an API surface it was not compiled for.
+
 ## Dual evaluation (pipe path) vs headless
 
 - **Named-pipe tools:** the gate runs on **both** the server (`ForgeToolRunner`) and the plugin (`PluginCommandProcessor`) using the same `SafetyPolicy` and each process's own `FORGE_ENABLE_UNSAFE_OPS`. The per-call `unsafeAcknowledged` flag is carried in the command over the pipe. See [adr/0002-dual-safety-evaluation.md](adr/0002-dual-safety-evaluation.md).
-- **Headless AccoreConsole** (`forge_run_script`, `forge_batch_run`): these tools are handled by `HeadlessAccoreConsoleRunner` on the **server** and never enter the plugin. Safety for them is the server-side capability gate only. Do not describe them as dual-eval. No script-file contents are scanned.
+- **Headless AccoreConsole** (`forge_run_script`, `forge_batch_run`): these tools are handled by `HeadlessAccoreConsoleRunner` on the **server** and never enter the plugin. Safety for them is the server-side capability gate only. Do not describe them as dual-eval. No script-file contents are scanned. Console selection is deterministic (`AccoreConsoleLocator`: job year, then call year, then `FORGE_ACCORECONSOLE_YEAR`, then the discovered default) and never falls back to a newer AutoCAD year. Each batch job honours its own `timeoutSeconds` (clamped 5–3600, default 300).
 - **Server-only tools** (`forge_batch_status`, `forge_system_tool_profile`, `forge_audit_summarize`, `forge_sheet_inventory_import`, `forge_issue_set_diff`, and the seven `forge_linework_*` tools) also never cross the pipe. The linework tools are AutoCAD-free and only write the caller-supplied `outputPath` / `overlayPath` / `transformPath` artifacts; live-drawing extraction is not dispatched in this build.
 
 ## Unsafe executor semantics (read this before enabling)
@@ -55,9 +68,23 @@ These are exact gates and exact validations. They either match or they do not; n
 | Paper units not readable from `PlotSettings.PlotPaperUnits` | Refused; units are never guessed from the paper name | `plot_units_unavailable` |
 | DSD field containing `[`, `]`, `=`, CR/LF, or another control character | Refused | `illegal_dsd_character` |
 | `force=true` while `FORGE_ALLOW_FORCE_PUBLISH` is false | Refused | `force_not_allowed` |
+| Trust/startup system variable on `forge_system_setvar` (exact-name set) | Refused before any write | `deny_sysvar` |
+| `ACADVER` missing, empty, whitespace, or unparseable | Plugin refuses the call (fail closed) | `autocad_host_mismatch` |
+| `ACADVER` parses outside the loaded plugin build's series | Plugin refuses the call | `autocad_version_unsupported` |
+| PDF probe failed after `forge_plot_to_pdf` wrote a file | Failure that still carries the probe in `data` and the verification block | `plot_probe_failed` |
+| Requested AccoreConsole year or exe not found | Failure naming the exact path and the env var to set; no newer-year fallback | `accoreconsole_not_found` |
+| AccoreConsole output contains an AutoCAD abort token | Run fails (positive evidence only; see below) | `accoreconsole_script_error` |
 | Drawing number not in a loaded registry | Refused | `deny_unknown_drawing_no` |
 | Tool with no plugin dispatch arm | Failure at dispatch | `unknown_tool` |
 | Dotnet snippet did not return before the response timeout | Timeout reported; snippet may still run | `exec_dotnet_timeout` |
+
+### AccoreConsole script-error check (positive evidence only)
+
+AccoreConsole can exit 0 even when a script command failed. `AccoreConsoleScriptCheck` therefore looks for AutoCAD's literal abort tokens `*Cancel*`, `Unknown command`, and `*Invalid*` in stdout/stderr (OrdinalIgnoreCase literal search; no patterns, no fuzzy matching).
+
+- A match fails the run with `accoreconsole_script_error`.
+- A non-match does **not** prove the script succeeded. The absence of these markers is not evidence of success and must never be read as verification.
+- The only deterministic verification of what happened to a drawing remains readback (`forge_qa_readback` / `forge_qa_readback_after_timeout`).
 
 When an undo group cannot be opened or closed, the result carries `undoWarnings[]` with codes `undo_group_open_failed` / `undo_group_close_failed`. Results also expose **`undoGrouped`**: `true` for synchronous `Editor.Command` paths, `false` for queued `SendStringToExecute` fallbacks, because queued work runs after the undo group has closed.
 
@@ -112,6 +139,8 @@ A publish receipt no longer reports a PDF page count. `pageCount` is `null` with
 2. its length is greater than 0, and
 3. its first five bytes are exactly `%PDF-`.
 
+`forge_plot_to_pdf` runs the same probe on its output and fails with `plot_probe_failed` when the probe fails, keeping the probe in `data` and the verification block. A written file that fails the probe is not reported as a successful plot.
+
 ## Drawing number registry
 
 When a sheet register is loaded (`forge_registry_load`), attribute writes that claim a drawing number must match the registry — agents must not invent sheet numbers. See [standards-and-registry.md](standards-and-registry.md).
@@ -131,6 +160,11 @@ Prefer typed tools → health first → load registry/pack when available → in
 | Mechanism | Class | Meaning |
 |-----------|--------|---------|
 | SafetyPolicy capability gate (unsafe executors require env + per-call ack) | **Enforced** | An unsafe tool cannot run without both gates; no evaluation of the text it will run |
+| Trust-sysvar refusal (exact-name set) | **Enforced** | Exact-name membership only; the value is not inspected |
+| ACADVER host gate (missing/unparseable/mismatched release) | **Enforced** | Plugin refuses before dispatch |
+| PDF probe gate on `forge_plot_to_pdf` | **Enforced** | `passed=false` becomes `Ok=false` with the probe kept in `data` |
+| MCP `isError` on `Ok=false` | **Enforced at the MCP boundary** | A failed gate reaches the agent as a tool error, not a successful call |
+| AccoreConsole abort-token check | **Positive evidence only** | A match fails the run; a non-match does not prove success |
 | Registry drawing-number fail-closed (when loaded) | **Enforced** | |
 | Overwrite acknowledgement | **Enforced** | |
 | Preflight block | **Enforced until** `force=true` **and** `FORGE_ALLOW_FORCE_PUBLISH=true` | `force` is an **ops accept** — treat as human-only process, not agent convenience |

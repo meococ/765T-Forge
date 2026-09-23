@@ -66,7 +66,7 @@ public sealed partial class ForgePipeClient
                     : $"Timed out connecting to named pipe '{_environment.PipeName}'.",
                 pipe.IsConnected
                     ? "Do not blindly retry non-idempotent writes. Check AutoCAD, then call a read-back/QA tool to see whether the operation committed."
-                    : "NETLOAD Forge.Plugin.dll in AutoCAD 2026, then call forge_system_health again.");
+                    : "NETLOAD the Forge.Plugin.dll built for the same year as the running AutoCAD, then call forge_system_health again.");
         }
         catch (Exception ex)
         {
@@ -75,7 +75,7 @@ public sealed partial class ForgePipeClient
                 command.Id,
                 "plugin_unavailable",
                 $"Could not reach AutoCAD plugin over named pipe '{_environment.PipeName}'.",
-                "Open AutoCAD 2026, NETLOAD Forge.Plugin.dll, and verify the MCP_STATUS command.");
+                "Open the AutoCAD release that matches the Forge.Plugin.dll build, NETLOAD that DLL, and verify the MCP_STATUS command.");
         }
     }
 }
