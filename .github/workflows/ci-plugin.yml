@@ -1,7 +1,17 @@
 name: CI Plugin (self-hosted)
 
-# Requires a self-hosted Windows runner with AutoCAD 2026 reference assemblies
-# and AUTOCAD_2026_ROOT set. Do not enable on GitHub-hosted runners.
+# Requires a self-hosted Windows runner labelled `autocad-2026` with AutoCAD
+# reference assemblies available. Do not enable on GitHub-hosted runners.
+#
+# This job is gated on the repository variable FORGE_SELFHOSTED_RUNNER because
+# GitHub keeps a run queued forever when no runner matches the labels. With no
+# runner registered the job is skipped and the run completes, instead of every
+# push to master leaving a permanently queued run. Set the variable to the exact
+# string `true` once the runner is registered.
+#
+# Reference roots follow src/Forge.Plugin/Forge.Plugin.csproj:
+#   modern -> FORGE_AUTOCAD_MODERN_ROOT, AUTOCAD_2025_ROOT, FORGE_AUTOCAD_ROOT, then discovery
+#   legacy -> FORGE_AUTOCAD_LEGACY_ROOT, AUTOCAD_2017_ROOT (only needed for -AllSeries)
 
 on:
   workflow_dispatch:
@@ -17,6 +27,7 @@ on:
 jobs:
   build-plugin:
     name: Build Forge.Plugin
+    if: vars.FORGE_SELFHOSTED_RUNNER == 'true'
     runs-on: [self-hosted, Windows, autocad-2026]
     steps:
       - name: Checkout
@@ -30,8 +41,8 @@ jobs:
       - name: Build plugin
         shell: pwsh
         run: |
-          if (-not $env:AUTOCAD_2026_ROOT) {
-            throw "AUTOCAD_2026_ROOT must be set on the self-hosted runner."
+          if (-not ($env:FORGE_AUTOCAD_MODERN_ROOT -or $env:AUTOCAD_2025_ROOT -or $env:FORGE_AUTOCAD_ROOT)) {
+            Write-Warning "No modern AutoCAD reference root is set; the build will fall back to discovery of the highest installed AutoCAD. Set FORGE_AUTOCAD_MODERN_ROOT to pin a specific series."
           }
           .\scripts\build-plugin.ps1 -Configuration Release -OutDir artifacts\Forge.Plugin\
 

@@ -43,6 +43,11 @@ jobs:
 
   pack-plugin:
     name: Pack Forge.Plugin (self-hosted)
+    # Gated on FORGE_SELFHOSTED_RUNNER: GitHub keeps a run queued forever when no
+    # runner matches the labels, which would hang a tagged release. With no runner
+    # registered this job is skipped, publish-release still runs, and the release
+    # is created as a draft because the plugin zip is absent.
+    if: vars.FORGE_SELFHOSTED_RUNNER == 'true'
     runs-on: [self-hosted, Windows, autocad-2026]
     continue-on-error: true
     outputs:
@@ -55,8 +60,8 @@ jobs:
         id: pack
         shell: pwsh
         run: |
-          if (-not $env:AUTOCAD_2026_ROOT) {
-            $env:AUTOCAD_2026_ROOT = "C:\Program Files\Autodesk\AutoCAD 2026"
+          if (-not ($env:FORGE_AUTOCAD_MODERN_ROOT -or $env:AUTOCAD_2025_ROOT -or $env:FORGE_AUTOCAD_ROOT)) {
+            Write-Warning "No modern AutoCAD reference root is set; falling back to discovery of the highest installed AutoCAD."
           }
           .\scripts\pack-release.ps1 -Configuration Release
           if (Test-Path artifacts/release/765T-Forge.Plugin.zip) {
@@ -77,6 +82,10 @@ jobs:
     name: Publish GitHub Release
     runs-on: windows-latest
     needs: [pack-server, pack-plugin]
+    # pack-plugin is skipped when no self-hosted runner is registered, and a skipped
+    # dependency would otherwise skip this job too. Run whenever the server pack
+    # succeeded; the completeness step below then creates a draft release.
+    if: always() && needs.pack-server.result == 'success'
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -135,7 +144,7 @@ jobs:
             | `765T-Forge.Plugin.zip` | yes (release is draft if missing) |
             | `765T-Forge.Server.sbom.cdx.json` | SBOM |
 
-            Platform: **Windows + AutoCAD 2026** Technical Preview.
+            Platform: **Windows**. Plugin supports AutoCAD 2017-2024 (`net462` build) and 2025+ (`net8.0-windows` build); the 2017-2024 assembly has not been run inside AutoCAD yet. Technical Preview.
           files: |
             artifacts/release/765T-Forge.Server-win-x64.zip
             artifacts/release/765T-Forge.Plugin.zip
