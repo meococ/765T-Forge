@@ -64,7 +64,7 @@ Prefer **`forge_recipe_issue_set`** for full issue-set runs. It reports `steps[]
 
 ## Linework (CAD ↔ Revit model QA)
 
-- The `forge_linework_*` family is **server-side and AutoCAD-free** in this build: it reads a `pl_dump.txt` dump (`source=dumpFile` + `dumpPath`). `source=drawing` (live extraction) needs the AutoCAD plugin and is not dispatched here — it fails closed with `live_source_unavailable`.
+- The `forge_linework_*` family has two sources. `source=dumpFile` + `dumpPath` reads a `pl_dump.txt` dump and resolves server-side, so it needs no AutoCAD. `source=drawing` extracts from the live drawing (model space + xref contents) and is dispatched to the AutoCAD plugin, so the plugin must be loaded and the pipe up. `forge_linework_transform` is always server-side.
 - Layer names may be xref-prefixed (`XREF$0$Layer`). `layerFilter` is prefix-aware, but prefer **`layerSuffix`** (EndsWith on the bare layer name) when targeting a specific layer; `prefix` matching silently drops xref content.
 - `forge_linework_transform` calibrates/persists/applies the CAD→Revit transform (anchor `pairs` → similarity or affine fit → `transformPath` file). Re-check `maxResidualM`; > 0.5 m means the anchors do not describe one transform.
 - `forge_linework_compare` marks every CAD segment and every Revit pipe segment (`modelSegments`/`modelSegmentsPath`) as `matched` / `partial` / `missing_in_revit` / `extra_off_cad` with distance; `overlayPath` writes a color-coded SVG for human review.

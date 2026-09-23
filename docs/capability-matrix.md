@@ -68,13 +68,13 @@ Honest status of MCP tools. AutoCAD target: plugin components for **2017–2024*
 
 ## Linework (CAD ↔ model QA)
 
-Seven `forge_linework_*` tools ship **server-side** (`RequiresAutoCad=false`). All seven are writers, not read-only: six create the caller-supplied `outputPath` when set, `forge_linework_compare` also writes `overlayPath`, and `forge_linework_transform` writes the calibration JSON to `transformPath` while calibrating. None of them edits a drawing, so none requires a backup.
+Seven `forge_linework_*` tools ship with `RequiresAutoCad=false`. Six of them (`dump`, `trace`, `topology`, `coverage`, `segments`, `compare`) resolve **server-side** for `source=dumpFile` and are dispatched to the **plugin** for `source=drawing`, so they cross the pipe only when the caller asks for the live drawing. `forge_linework_transform` is **server-only** — it is pure coordinate math. All seven are writers, not read-only: six create the caller-supplied `outputPath` when set, `forge_linework_compare` also writes `overlayPath`, and `forge_linework_transform` writes the calibration JSON to `transformPath` while calibrating. None of them edits a drawing, so none requires a backup.
 
-Status is **partial** for the six drawing-reading tools: the `source=dumpFile` pipeline (a `pl_dump.txt`-format dump) is unit-tested, but **this port has not been exercised against a real drawing or a real Revit/pipe export** — the tests that would do so are gated on evidence files that are absent in this repo. Live-drawing extraction (`source=drawing`) needs the AutoCAD plugin, which this build does not dispatch linework to; it fails closed with `live_source_unavailable`.
+Status is **partial** for the six drawing-reading tools: the `source=dumpFile` pipeline (a `pl_dump.txt`-format dump) is unit-tested, but **this port has not been exercised against a real drawing or a real Revit/pipe export** — the tests that would do so are gated on evidence files that are absent in this repo. The `source=drawing` plugin arm compiles against the installed AutoCAD assemblies but has never been run inside AutoCAD, so treat it as unverified too.
 
 | Tool | Status | Notes |
 |------|--------|-------|
-| `forge_linework_dump` | partial | Entities (line/polyline/arc/circle) as ordered vertices; `source=dumpFile` only (no AutoCAD); xref-aware layer filter |
+| `forge_linework_dump` | partial | Entities (line/polyline/arc/circle) as ordered vertices; `source=dumpFile` (no AutoCAD) or `source=drawing` (plugin); xref-aware layer filter |
 | `forge_linework_trace` | partial | Point/handle → owning entity, nearest segment index, context neighbours |
 | `forge_linework_topology` | partial | Shared-vertex nodes, edges, T-junctions, X-crossings, runs, dead ends |
 | `forge_linework_coverage` | partial | CAD-vs-model coverage: missing / partial / extra + uncovered sub-ranges |

@@ -88,9 +88,13 @@ public sealed class ForgeToolRunner
             "forge_issue_set_diff" => ResolveIssueSetDiff(command),
             // Pure coordinate math — always resolves server-side (no AutoCAD needed).
             "forge_linework_transform" => CoordTransformTool.Execute(command),
-            // Linework tools resolve locally from a dump file. This build has no plugin
-            // linework dispatch arm, so a live-drawing request fails closed in LineworkLocal.
-            _ when LineworkLocal.IsLineworkTool(tool) => LineworkLocal.Execute(command),
+            // Linework queries resolve server-side from a dump file, and are dispatched to the
+            // plugin's linework arm when the caller asks for the live drawing. The split uses the
+            // caller's explicit source argument, so it is the same decision the plugin's own
+            // loader makes and there is no guessing about which path applies.
+            _ when LineworkLocal.IsLineworkTool(tool) => LineworkLocal.IsDumpFileSource(command.Args)
+                ? LineworkLocal.Execute(command)
+                : await _pipeClient.SendAsync(command, cancellationToken).ConfigureAwait(false),
             _ => await _pipeClient.SendAsync(command, cancellationToken).ConfigureAwait(false)
         };
 

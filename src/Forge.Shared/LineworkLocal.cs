@@ -46,11 +46,13 @@ public static class LineworkLocal
         var baseArgs = ForgeJson.ArgsOrDefault<LineworkQueryArgs>(command.Args);
         if (!IsDumpFileSource(command.Args))
         {
-            // Fail closed instead of silently reading dumpPath for a caller who asked for the live drawing.
+            // Fail closed rather than silently reading dumpPath for a caller who asked for the
+            // live drawing. ForgeToolRunner routes a live-drawing request to the plugin, so this
+            // is only reachable when this resolver is called directly.
             return ForgeResult.Failure(
                 command.Id,
                 "live_source_unavailable",
-                "Live-drawing linework extraction requires the AutoCAD plugin, which this server build does not dispatch linework to. Pass source=dumpFile with dumpPath.");
+                "Live-drawing linework extraction must be dispatched to the AutoCAD plugin. Pass source=dumpFile with dumpPath to resolve without AutoCAD.");
         }
 
         if (string.IsNullOrWhiteSpace(baseArgs.DumpPath))
