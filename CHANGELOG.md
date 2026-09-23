@@ -10,6 +10,12 @@ See [docs/versioning.md](docs/versioning.md).
 
 ## [Unreleased]
 
+### Changed
+
+- Dependencies bumped: `ModelContextProtocol` 1.3.0 → 1.4.1, `Microsoft.Extensions.Hosting` and `Microsoft.Extensions.Logging.Console` 8.0.1 → 10.0.12, `Microsoft.CodeAnalysis.CSharp.Scripting` 4.12.0 → 5.9.0, `Microsoft.NET.Test.Sdk` 17.8.0 → 18.10.1, `coverlet.collector` 6.0.0 → 10.0.1, `xunit` 2.5.3 → 2.9.3, `xunit.runner.visualstudio` 2.5.3 → 2.8.2, `System.Text.Json` 8.0.5 → 8.0.6. GitHub Actions bumped to `checkout` v7, `setup-dotnet` v6, `upload-artifact` v7, `download-artifact` v8 and `softprops/action-gh-release` v3
+- `global.json` SDK moved from 8.0.422 (`rollForward: latestPatch`) to 9.0.315 (`rollForward: latestFeature`). The projects still target `net8.0` / `net8.0-windows` / `netstandard2.0` / `net462`; the newer SDK is required because the Roslyn 5.x analyzers cannot be loaded by the .NET 8 SDK compiler (CS9057). The build and both plugin targets were verified with the newer SDK
+- `TestResults/` is ignored, so collected coverage does not show up as an untracked tree
+
 ### Added
 
 - `FORGE_ALLOW_FORCE_PUBLISH` (default false) — `force=true` on publish/recipe returns `force_not_allowed` unless enabled (ADR 0004)

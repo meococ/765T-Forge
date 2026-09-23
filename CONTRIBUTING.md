@@ -4,7 +4,7 @@ Thanks for helping improve Forge. This project is an all-C# MCP server plus an A
 
 ## Prerequisites
 
-- .NET SDK matching `global.json` (8.0.422, `rollForward: latestPatch`)
+- .NET SDK matching `global.json` (9.0.315, `rollForward: latestFeature`). The projects still target `net8.0` / `net8.0-windows` / `netstandard2.0` / `net462`; the newer SDK is needed for the Roslyn 5.x analyzers.
 - Windows (plugin and AccoreConsole paths are Windows-oriented)
 - AutoCAD reference assemblies **only if** you build `Forge.Plugin`:
   - `net8.0-windows` (default): AutoCAD 2025 or 2026

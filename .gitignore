@@ -7,6 +7,9 @@ obj/
 *.log
 plot.log
 
+# Test runner output (coverage collected by `dotnet test --collect:"XPlat Code Coverage"`)
+TestResults/
+
 # AutoCAD / Forge generated artifacts
 outputs/
 backups/

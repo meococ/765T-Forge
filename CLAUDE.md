@@ -18,7 +18,7 @@ Typed "structured" tools cover the hot path; five free-text executors (`forge_ex
 
 ## Build / test
 
-Requires the .NET 8 SDK pinned in `global.json` (8.0.422, `rollForward: latestPatch`). Central package management (`Directory.Packages.props`) with lock files — versions are pinned, not floating.
+Requires the .NET SDK pinned in `global.json` (9.0.315, `rollForward: latestFeature`). The projects still target `net8.0` / `net8.0-windows` / `netstandard2.0` / `net462`; the newer SDK is required because `Microsoft.CodeAnalysis.CSharp.Scripting` 5.9.0 ships analyzers that the .NET 8 SDK compiler cannot load (CS9057). Central package management (`Directory.Packages.props`) with lock files — versions are pinned, not floating.
 
 ```powershell
 dotnet restore .\765T-Forge.ServerOnly.slnf --locked-mode

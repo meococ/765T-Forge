@@ -5,7 +5,7 @@ namespace Forge.Tests;
 public sealed class ProjectConfigurationTests
 {
     [Fact]
-    public void ModelContextProtocolIsPinnedTo130AndAspNetCoreIsAbsent()
+    public void ModelContextProtocolIsPinnedAndAspNetCoreIsAbsent()
     {
         var root = RepoRoot();
         var packages = XDocument.Load(Path.Combine(root, "Directory.Packages.props"));
@@ -13,7 +13,7 @@ public sealed class ProjectConfigurationTests
             x => x.Attribute("Include")?.Value ?? "",
             x => x.Attribute("Version")?.Value ?? "");
 
-        Assert.Equal("1.3.0", packageVersions["ModelContextProtocol"]);
+        Assert.Equal("1.4.1", packageVersions["ModelContextProtocol"]);
 
         var serverProject = XDocument.Load(Path.Combine(root, "src", "Forge.Server", "Forge.Server.csproj"));
         var packageRefs = serverProject.Descendants("PackageReference")
