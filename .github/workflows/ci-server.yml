@@ -12,10 +12,10 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           global-json-file: global.json
 
@@ -26,12 +26,20 @@ jobs:
         run: dotnet build .\765T-Forge.ServerOnly.slnf --no-restore --configuration Release
 
       - name: Test
-        run: dotnet test .\765T-Forge.ServerOnly.slnf --no-build --configuration Release --verbosity normal
+        run: dotnet test .\765T-Forge.ServerOnly.slnf --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage"
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-serveronly
+          path: '**/TestResults/**/coverage.cobertura.xml'
+          if-no-files-found: warn
 
       - name: Docs drift guard
         shell: pwsh
         run: |
-          $hits = Select-String -Path CLAUDE.md,docs\troubleshooting.md,docs\safety.md -Pattern 'scaffolded|Phase 0.*scaffold|hardcoded device' -SimpleMatch:$false -ErrorAction SilentlyContinue
+          $hits = Select-String -Path CLAUDE.md,README.md,docs\troubleshooting.md,docs\safety.md,docs\architecture.md,docs\capability-matrix.md,skills\765t-forge\SKILL.md -Pattern 'scaffolded|Phase 0.*scaffold|hardcoded device' -SimpleMatch:$false -ErrorAction SilentlyContinue
           if ($hits) {
             $hits | ForEach-Object { Write-Host $_.Path $_.LineNumber $_.Line }
             throw "Stale Phase-0 / scaffold language found in agent-facing docs. Sync with docs/capability-matrix.md."

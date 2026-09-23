@@ -68,11 +68,11 @@ public static class ForgeToolRegistry
         ["forge_transmittal_seal"] = Write("forge_transmittal_seal", "pack", idempotent: false),
         ["forge_publish_ceremony_check"] = Read("forge_publish_ceremony_check", "qa"),
         ["forge_cde_gate_evaluate"] = Read("forge_cde_gate_evaluate", "qa"),
-        ["forge_batch_run"] = new ToolMetadata("forge_batch_run", "batch", false, true, false, false, true, RequiresAutoCad: false),
+        ["forge_batch_run"] = new ToolMetadata("forge_batch_run", "batch", false, true, false, false, true, RequiresAutoCad: false, Unsafe: true),
         ["forge_batch_status"] = Read("forge_batch_status", "batch", requiresAutoCad: false),
-        ["forge_exec_command"] = Destructive("forge_exec_command", "exec"),
-        ["forge_exec_lisp"] = Destructive("forge_exec_lisp", "exec"),
-        ["forge_run_script"] = Destructive("forge_run_script", "exec", requiresAutoCad: false),
+        ["forge_exec_command"] = Destructive("forge_exec_command", "exec", unsafeTool: true),
+        ["forge_exec_lisp"] = Destructive("forge_exec_lisp", "exec", unsafeTool: true),
+        ["forge_run_script"] = Destructive("forge_run_script", "exec", requiresAutoCad: false, unsafeTool: true),
         ["forge_exec_dotnet"] = Destructive("forge_exec_dotnet", "exec", unsafeTool: true),
     };
 

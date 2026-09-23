@@ -119,7 +119,7 @@ public static class CeremonyEvidence
         {
             foreach (var line in File.ReadLines(file))
             {
-                if (string.IsNullOrWhiteSpace(line) || !line.Contains(auditId, StringComparison.Ordinal))
+                if (string.IsNullOrWhiteSpace(line) || line.IndexOf(auditId, StringComparison.Ordinal) < 0)
                 {
                     continue;
                 }

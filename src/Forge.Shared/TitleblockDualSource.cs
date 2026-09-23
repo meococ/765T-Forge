@@ -8,8 +8,10 @@ public static class TitleblockDualSource
         IReadOnlyDictionary<string, string>? titleBlockAttrMap = null)
     {
         var findings = new List<QaFinding>();
-        foreach (var (logicalKey, expected) in expectedFromRegistry)
+        foreach (var entry in expectedFromRegistry)
         {
+            var logicalKey = entry.Key;
+            var expected = entry.Value;
             var tag = logicalKey;
             if (titleBlockAttrMap is not null
                 && titleBlockAttrMap.TryGetValue(logicalKey, out var mapped)

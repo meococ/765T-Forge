@@ -23,3 +23,9 @@ Do **not** expose an unauthenticated HTTP listener on the plugin for MCP traffic
 - Strong local trust model; poor fit for remote multi-user CAD without a different design.
 - Both processes must share env (pipe name + token); health must report the configured pipe name.
 - CI can test Shared/Server without AutoCAD; plugin packaging needs a machine with AutoCAD refs.
+
+## Amendment 2026-09-22 — concurrency and the capability gate
+
+1. `maxNumberOfServerInstances` is now **4**, not 1. The extra instances let a second MCP call connect while the first request executes; execution itself is still strictly serialized by a semaphore. A request that cannot acquire the gate within the response timeout is answered with `plugin_busy` instead of being dropped as a misleading `plugin_unavailable` transport error. `plugin_main_thread_timeout` reports the distinct case where AutoCAD's main thread does not run the command-context callback in time (for example a modal dialog is open).
+2. Pipe frames are capped at an exact 4,000,000 characters: oversized requests are refused with `frame_too_large` and oversized responses are not sent, reported as `response_too_large`.
+3. The dual safety evaluation in point 4 is now the **deterministic capability gate** (see ADR 0002, Amendment 2026-09-22). The trust boundary itself — local pipe, ACL, token, dual evaluation, dual audit — is unchanged.

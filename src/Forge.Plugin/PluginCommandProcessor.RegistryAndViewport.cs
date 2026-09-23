@@ -1,3 +1,4 @@
+using System.Globalization;
 using Autodesk.AutoCAD.DatabaseServices;
 using Forge.Shared;
 
@@ -161,7 +162,7 @@ public sealed partial class PluginCommandProcessor
 
                 list.Add(new
                 {
-                    handle = vp.Handle.Value.ToString("X"),
+                    handle = vp.Handle.Value.ToString("X", CultureInfo.InvariantCulture),
                     number = vp.Number,
                     layout = layoutName,
                     customScale = vp.CustomScale,
@@ -205,7 +206,7 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, "layer_not_found", $"Layer not found: {args.Layer}");
         }
 
-        var layerIds = new ObjectIdCollection { layerTable[args.Layer] };
+        using var layerIds = new ObjectIdCollection { layerTable[args.Layer] };
         if (args.Freeze)
         {
             vp.FreezeLayersInViewport(layerIds.GetEnumerator());

@@ -1,5 +1,5 @@
+using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 
 namespace Forge.Shared;
 
@@ -40,8 +40,9 @@ public sealed class PublishReceipt
             report.Passed,
             findings = report.Findings.Select(f => new { f.Code, f.Severity, f.Message })
         }, ForgeJson.Options);
-        var bytes = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(payload));
-        return Convert.ToHexString(bytes)[..16];
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(payload));
+        return Hex.Encode(bytes).Substring(0, 16);
     }
 
     public static string? TryWriteArtifact(PublishReceipt receipt, string? auditDir = null)
@@ -55,7 +56,7 @@ public sealed class PublishReceipt
                            "receipts");
             Directory.CreateDirectory(root);
             var path = Path.Combine(root, $"receipt-{receipt.ReceiptId}.json");
-            File.WriteAllText(path, JsonSerializer.Serialize(receipt, ForgeJson.Options));
+            AtomicFile.WriteAllText(path, JsonSerializer.Serialize(receipt, ForgeJson.Options));
             return path;
         }
         catch
@@ -67,10 +68,19 @@ public sealed class PublishReceipt
 
 public sealed class PdfProbeResult
 {
+    /// <summary>Page count is never verified; this is the only value this probe reports.</summary>
+    public const string PageCountNotAvailable = "not_available";
+
     public bool Exists { get; init; }
     public long Bytes { get; init; }
     public bool NonEmpty { get; init; }
+
+    /// <summary>Always null: this probe does not parse PDF page objects.</summary>
     public int? PageCount { get; init; }
+
+    /// <summary>Provenance of <see cref="PageCount"/>. Always <see cref="PageCountNotAvailable"/>.</summary>
+    public string PageCountSource { get; init; } = PageCountNotAvailable;
+
     public int? ExpectedPages { get; init; }
     public bool PageCountMatches { get; init; }
     public bool Passed { get; init; }
@@ -78,7 +88,9 @@ public sealed class PdfProbeResult
     public string[] Warnings { get; init; } = [];
 
     /// <summary>
-    /// Lightweight PDF probe: existence, size, and page-count via /Type /Page counts (heuristic).
+    /// Deterministic PDF probe: existence, non-zero length, and an exact <c>%PDF-</c> header
+    /// (first 5 bytes). Page count is NOT verified — no PDF library is used and binary content
+    /// is never regex-scanned.
     /// </summary>
     public static PdfProbeResult Probe(string path, int? expectedPages = null)
     {
@@ -109,42 +121,61 @@ public sealed class PdfProbeResult
             };
         }
 
-        int? pageCount = null;
-        try
+        var header = ReadHeader(path);
+        var headerValid = string.Equals(header, "%PDF-", StringComparison.Ordinal);
+        if (!headerValid)
         {
-            // Heuristic: count "/Type /Page" not "/Type /Pages"
-            var text = File.ReadAllText(path);
-            var matches = Regex.Matches(text, @"/Type\s*/Page\b");
-            pageCount = matches.Count;
-            if (pageCount == 0)
-            {
-                warnings.Add("Could not detect PDF page objects; pageCount treated as unknown.");
-                pageCount = null;
-            }
-        }
-        catch (Exception ex)
-        {
-            warnings.Add($"PDF text probe failed: {ex.Message}");
+            warnings.Add("PDF header invalid: first 5 bytes are not %PDF-.");
         }
 
-        var pageOk = expectedPages is null || pageCount is null || pageCount == expectedPages;
-        if (expectedPages is not null && pageCount is not null && pageCount != expectedPages)
+        if (expectedPages is not null)
         {
-            warnings.Add($"Page count {pageCount} != expected {expectedPages}.");
+            warnings.Add($"Page count is not verified (pageCountSource={PageCountNotAvailable}); expected {expectedPages} page(s) cannot be confirmed.");
         }
 
-        var passed = bytes > 0 && pageOk;
+        var passed = headerValid;
         return new PdfProbeResult
         {
             Exists = true,
             Bytes = bytes,
             NonEmpty = bytes > 0,
-            PageCount = pageCount,
+            PageCount = null,
+            PageCountSource = PageCountNotAvailable,
             ExpectedPages = expectedPages,
-            PageCountMatches = pageOk,
+            PageCountMatches = true,
             Passed = passed,
-            Message = passed ? "PDF probe passed." : "PDF probe failed.",
+            Message = passed ? "PDF probe passed (existence, size, header)." : "PDF probe failed: header is not %PDF-.",
             Warnings = warnings.ToArray()
         };
+    }
+
+    private static string ReadHeader(string path)
+    {
+        try
+        {
+            using var stream = File.OpenRead(path);
+            var bytes = new byte[5];
+            var read = 0;
+            while (read < bytes.Length)
+            {
+                var chunk = stream.Read(bytes, read, bytes.Length - read);
+                if (chunk <= 0)
+                {
+                    break;
+                }
+
+                read += chunk;
+            }
+
+            return read == 5 ? Encoding.ASCII.GetString(bytes, 0, 5) : "";
+        }
+        catch (IOException)
+        {
+            return "";
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return "";
+        }
     }
 }

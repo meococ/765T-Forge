@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 
 namespace Forge.Shared;
@@ -20,6 +21,21 @@ public sealed record AuditRecord
 
 public sealed class FileAuditSink
 {
+    /// <summary>
+    /// Exact, case-insensitive argument property names whose values are replaced with
+    /// <c>"[redacted]"</c> before the audit JSONL line is serialized. This is an exact-name
+    /// membership test — no suffix wildcards, no fuzzy matching.
+    /// </summary>
+    private static readonly HashSet<string> SensitiveArgumentNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "hmacKey",
+        "token",
+        "authToken",
+        "secret",
+        "password",
+        "apiKey"
+    };
+
     private static readonly object Gate = new();
     private readonly string _directory;
 
@@ -63,9 +79,13 @@ public sealed class FileAuditSink
 
     private void WriteCore(AuditRecord record)
     {
-        var fileName = $"{DateTimeOffset.UtcNow:yyyyMMdd}.jsonl";
+        // Provenance is part of the file name ({source}-{yyyyMMdd}.jsonl) so two processes
+        // (server and plugin) never append to the same file and interleave partial lines.
+        var source = RequireFileNameSafeSource(record.Source);
+        var fileName = $"{source}-{DateTimeOffset.UtcNow.ToString("yyyyMMdd", CultureInfo.InvariantCulture)}.jsonl";
         var path = Path.Combine(_directory, fileName);
-        var json = JsonSerializer.Serialize(record, ForgeJson.Options) + Environment.NewLine;
+        var redacted = record with { Args = RedactArgs(record.Args) };
+        var json = JsonSerializer.Serialize(redacted, ForgeJson.Options) + Environment.NewLine;
 
         lock (Gate)
         {
@@ -84,6 +104,82 @@ public sealed class FileAuditSink
                     Thread.Sleep(25 * (attempt + 1));
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Exact validation of the provenance token used in the audit file name. Never substituted
+    /// with a default: an unset or file-name-unsafe source is reported as an audit write failure.
+    /// </summary>
+    private static string RequireFileNameSafeSource(string? source)
+    {
+        if (source is null || string.IsNullOrWhiteSpace(source))
+        {
+            throw new ArgumentException(
+                "AuditRecord.Source must be a non-empty provenance token ('server' or 'plugin') for the audit file name.",
+                nameof(source));
+        }
+
+        if (source.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        {
+            throw new ArgumentException(
+                $"AuditRecord.Source '{source}' contains characters that are not valid in a file name.",
+                nameof(source));
+        }
+
+        return source;
+    }
+
+    private static JsonElement RedactArgs(JsonElement args)
+    {
+        if (args.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
+        {
+            return args;
+        }
+
+        using var buffer = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            WriteRedacted(writer, args);
+        }
+
+        using var document = JsonDocument.Parse(buffer.ToArray());
+        return document.RootElement.Clone();
+    }
+
+    private static void WriteRedacted(Utf8JsonWriter writer, JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                writer.WriteStartObject();
+                foreach (var property in element.EnumerateObject())
+                {
+                    writer.WritePropertyName(property.Name);
+                    if (SensitiveArgumentNames.Contains(property.Name))
+                    {
+                        writer.WriteStringValue("[redacted]");
+                    }
+                    else
+                    {
+                        WriteRedacted(writer, property.Value);
+                    }
+                }
+
+                writer.WriteEndObject();
+                break;
+            case JsonValueKind.Array:
+                writer.WriteStartArray();
+                foreach (var item in element.EnumerateArray())
+                {
+                    WriteRedacted(writer, item);
+                }
+
+                writer.WriteEndArray();
+                break;
+            default:
+                element.WriteTo(writer);
+                break;
         }
     }
 

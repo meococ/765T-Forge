@@ -3,11 +3,52 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <AnalysisLevel>latest</AnalysisLevel>
+    <AnalysisMode>Recommended</AnalysisMode>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!--
+      MSB3277 is the Autodesk reference-version-conflict warning. Referencing AcMgd,
+      AcCoreMgd and AcDbMgd always produces it because AutoCAD's managed assemblies
+      carry .NET Framework identities that conflict with the .NET 8 reference pack.
+      The conflict is inherent to the product, not actionable, and is excluded by
+      name here rather than by lowering the warning level for everything.
+    -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);MSB3277</WarningsNotAsErrors>
+    <MSBuildWarningsAsMessages>$(MSBuildWarningsAsMessages);MSB3277</MSBuildWarningsAsMessages>
+    <!--
+      Security/correctness rules that must never be silently ignored, even if a
+      future change lowers TreatWarningsAsErrors. Rule IDs are listed explicitly;
+      no wildcard or category-wide selection is used.
+    -->
+    <WarningsAsErrors>$(WarningsAsErrors);CA2000;CA2211;CA5350;CA5351;CA5394;CA3001;CA3002;CA3003;CA3004;CA3005;CA3006;CA3007;CA3008;CA3009;CA3010;CA3011;CA3012</WarningsAsErrors>
+    <!--
+      Explicit rule-ID exclusions, by exact ID only (no wildcards, no
+      category-wide selection). Each entry states the concrete reason it cannot be
+      satisfied without changing runtime behaviour or the public API:
+
+        CA1031 - 65 sites are deliberate best-effort catch-alls whose whole purpose
+                 is to keep AutoCAD responsive when a side write fails (audit sink,
+                 CDE sidecar, receipt/seal writes, named-pipe accept loop). The
+                 failure is still reported through a result code or a finding at
+                 each site; narrowing the catch type would change which failures
+                 are swallowed. This is tracked debt, not an accepted design.
+                 Do NOT add new catch (Exception) sites - narrow the catch to the
+                 exact exception set instead.
+        CA1822 - the flagged members are public API on public types
+                 (SafetyPolicy.Evaluate, PublishReceipt.ComputePreflightHash,
+                 ForgeToolRunner.ToolCatalogJson); making them static is a
+                 breaking API change.
+        CA1716 - the namespace Forge.Shared is the library's public identity;
+                 renaming it is a breaking API change.
+
+      These are the only excluded IDs; every other diagnostic is fatal.
+    -->
+    <NoWarn>$(NoWarn);CA1031;CA1822;CA1716</NoWarn>
     <Version>0.3.0</Version>
     <Authors>765T</Authors>
     <Company>765T</Company>
     <Product>765T-Forge</Product>
-    <Description>AutoCAD 2026 MCP server for metro/AEC drawing production workflows.</Description>
+    <Description>MCP server and AutoCAD plugin for metro/AEC drawing production workflows (AutoCAD 2017+).</Description>
     <Copyright>Copyright (c) 2026 765T</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/765T/765T-Forge</RepositoryUrl>

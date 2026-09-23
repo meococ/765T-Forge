@@ -11,13 +11,15 @@
   UpgradeCode="{A7C3E9F1-B765-4F0A-9E00-000000000000}">
   <CompanyDetails Name="765T" Url="https://github.com/765T/765T-Forge" />
   <Components>
-    <!-- AutoCAD 2026 = R25.1 (not R24.x which covers ~2021–2024) -->
-    <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R25.1" SeriesMax="R25.1" />
-    <ComponentEntry
-      AppName="765T-Forge"
-      ModuleName="./Contents/Windows/Forge.Plugin.dll"
-      AppDescription="765T-Forge named-pipe MCP plugin"
-      LoadOnAutoCADStartup="True"
-      LoadOnCommandInvocation="False" />
+    <!-- AutoCAD 2017-2024 = .NET Framework 4.6-4.8 (Series R21.0 - R24.3) -->
+    <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R21.0" SeriesMax="R24.3" />
+    <ComponentEntry ModuleName="./Contents/2017/Forge.Plugin.dll" AppName="765T-Forge"
+                    AppDescription="765T-Forge named-pipe MCP plugin (.NET Framework 4.6.2)"
+                    LoadOnAutoCADStartup="True" LoadOnCommandInvocation="False" />
+    <!-- AutoCAD 2025-2026 = .NET 8 (Series R25.0 - R25.1). AutoCAD 2027 = .NET 10 (R26.0). -->
+    <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R25.0" SeriesMax="R26.0" />
+    <ComponentEntry ModuleName="./Contents/2025/Forge.Plugin.dll" AppName="765T-Forge"
+                    AppDescription="765T-Forge named-pipe MCP plugin (.NET 8)"
+                    LoadOnAutoCADStartup="True" LoadOnCommandInvocation="False" />
   </Components>
 </ApplicationPackage>

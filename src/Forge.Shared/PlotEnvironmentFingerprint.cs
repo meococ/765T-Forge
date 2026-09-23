@@ -36,8 +36,9 @@ public sealed class PlotEnvironmentFingerprint
             ExpectedPaper,
             ExpectedPlotStyle
         }, ForgeJson.Options);
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(payload));
-        return Convert.ToHexString(bytes)[..16];
+        using var sha = SHA256.Create();
+        var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(payload));
+        return Hex.Encode(bytes).Substring(0, 16);
     }
 
     public PlotEnvironmentFingerprint WithHash()

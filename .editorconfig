@@ -21,3 +21,24 @@ end_of_line = crlf
 
 [*.{cmd,bat}]
 end_of_line = crlf
+
+[*.cs]
+# Explicit, minimal rule-ID severity map. These are enforced by
+# EnforceCodeStyleInBuild/TreatWarningsAsErrors. No category-wide or wildcard
+# severities are used.
+dotnet_diagnostic.CA1031.severity = error
+dotnet_diagnostic.CA2000.severity = error
+dotnet_diagnostic.CA5350.severity = error
+dotnet_diagnostic.CA5351.severity = error
+dotnet_diagnostic.CA5394.severity = error
+# IDE0005 only runs in command-line builds when GenerateDocumentationFile is
+# true. At 'warning' the compiler emits EnableGenerateDocumentationFile, which
+# TreatWarningsAsErrors escalates to an error, so the rule is pinned at
+# 'suggestion': explicit and active in the IDE, non-fatal in the build.
+dotnet_diagnostic.IDE0005.severity = suggestion
+# CA2000 dispose-ownership transfer, by exact documentation ID. The two Autodesk
+# calls below hand ownership to a longer-lived owner, so disposing them here would
+# be a bug: Documents.Open returns a Document owned by the DocumentManager, and a
+# PlotSettings passed to Transaction.AddNewlyCreatedDBObject is owned by the
+# database. CA2000 stays enabled and fatal for every other symbol.
+dotnet_code_quality.CA2000.excluded_symbol_names = M:Forge.Plugin.PluginCommandProcessor.OpenDocument(Forge.Shared.ForgeCommand)|M:Forge.Plugin.PluginCommandProcessor.PageSetupImport(Forge.Shared.ForgeCommand)

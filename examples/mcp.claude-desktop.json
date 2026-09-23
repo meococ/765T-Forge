@@ -8,7 +8,7 @@
         "FORGE_PIPE_NAME": "765T.Forge.AutoCAD",
         "FORGE_BACKUP_DIR": "%LOCALAPPDATA%\\765T-Forge\\backups",
         "FORGE_AUDIT_DIR": "%LOCALAPPDATA%\\765T-Forge\\audit",
-        "AUTOCAD_2026_ROOT": "C:\\Program Files\\Autodesk\\AutoCAD 2026",
+        "FORGE_AUTOCAD_ROOT": "C:\\Program Files\\Autodesk\\AutoCAD 2026",
         "FORGE_ENABLE_UNSAFE_OPS": "false"
       }
     }

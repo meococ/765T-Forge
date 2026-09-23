@@ -1,13 +1,22 @@
 # CODEOWNERS — require review on trust-sensitive paths.
-# Replace @765T-maintainers with real GitHub team/user handles for the org.
+#
+# CODEOWNERS is only enforced on repositories with a GitHub Teams plan or a
+# CODEOWNERS-required-review rule configured in branch protection. If @765T is
+# not a valid owner handle in this repository, required review will silently
+# not run. Verify with `gh api repos/:owner/:repo/branches/master/protection`.
+#
+# Owner handle below is `@765T`, the GitHub org/user that owns this repository
+# per `.mcp/server.json` id `io.github.765T/765t-forge`. No GitHub Team slug is
+# invented here. Replace `@765T` with a real team/user handle once one exists,
+# then re-verify with the branch-protection API call above.
 
-*                                       @765T-maintainers
+*                                       @765T
 
-/src/Forge.Shared/SafetyPolicy.cs       @765T-maintainers
-/src/Forge.Plugin/                      @765T-maintainers
-/docs/capability-matrix.md              @765T-maintainers
-/docs/safety.md                         @765T-maintainers
-/docs/getting-started.md                @765T-maintainers
-/skills/                                @765T-maintainers
-/.github/                               @765T-maintainers
-/scripts/pack-release.ps1               @765T-maintainers
+/src/Forge.Shared/SafetyPolicy.cs       @765T
+/src/Forge.Plugin/                      @765T
+/docs/capability-matrix.md              @765T
+/docs/safety.md                         @765T
+/docs/getting-started.md                @765T
+/skills/                                @765T
+/.github/                               @765T
+/scripts/pack-release.ps1               @765T

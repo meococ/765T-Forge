@@ -7,7 +7,7 @@ using Forge.Shared;
 
 namespace Forge.Plugin;
 
-public sealed class Plugin : IExtensionApplication
+public sealed class Plugin : IExtensionApplication, IDisposable
 {
     private NamedPipePluginServer? _server;
 
@@ -38,9 +38,14 @@ public sealed class Plugin : IExtensionApplication
 
     public void Terminate()
     {
+        Dispose();
+        WriteMessage("\n[765T-Forge] Plugin stopped.");
+    }
+
+    public void Dispose()
+    {
         _server?.Dispose();
         _server = null;
-        WriteMessage("\n[765T-Forge] Plugin stopped.");
     }
 
     private static void WriteMessage(string message)

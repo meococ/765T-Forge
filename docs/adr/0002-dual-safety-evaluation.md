@@ -32,3 +32,28 @@ In addition to server-only evaluation:
 2. Accore dry-run is a **plan** (paths / wouldRun), not a rehearsal of mutation or plot output.
 3. `forge_batch_run` uses `OpenWorld=false` on MCP args by design; safety depends on **per-script file scan** at execution — document this so agents do not assume job JSON is denylisted.
 4. Skill, cheatsheet, and `docs/safety.md` must name `forge_run_script` / `forge_batch_run` and the dual-eval exception; omission is a safety defect.
+
+## Amendment 2026-09-22 — the text denylist was deleted
+
+**What changed.** The regex command denylist in `SafetyPolicy` has been **removed entirely**, and
+with it the nine `deny_*` command error codes it produced. The server-side control is now a
+deterministic **capability gate**: read-only tools are allowed; the five free-text executors (`forge_exec_command`,
+`forge_exec_lisp`, `forge_run_script`, `forge_batch_run`, `forge_exec_dotnet`) are flagged `Unsafe`
+and require **both** `FORGE_ENABLE_UNSAFE_OPS=true` and per-call `unsafeAcknowledged=true`, otherwise
+they are refused with `unsafe_not_acknowledged`. No argument text is inspected anywhere.
+
+**Why.** Keyword matching cannot model AutoCAD command aliases, unique-prefix abbreviations, menu
+macros, or AutoLISP. A denylist that misses the aliases a user actually types produced false
+confidence — worse than no filter, because it was documented as a control. The replacement gates
+the capability itself rather than trying to guess the text that will exercise it.
+
+**Effect on the decisions above.** Dual evaluation is unchanged in shape: both the server and the
+plugin call the same shared `SafetyPolicy` and both must independently have unsafe ops enabled. Point
+2's "gate `forge_exec_dotnet` with env and per-call acknowledgement on both sides" is now the gate for
+all five executors. The AccoreConsole exception in point 3 is unchanged, except that the server-side
+evaluation is the capability gate, not a script-file scan.
+
+**Effect on consequences.** The consequence "Changing deny patterns requires tests in
+`SafetyPolicyTests`" is superseded: changes to the gate (which tools are `Unsafe`, or the two
+conditions) must be covered in `SafetyPolicyTests`, and `docs/safety.md` / `SECURITY.md` must stay in
+sync.

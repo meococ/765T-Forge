@@ -26,17 +26,28 @@ public sealed class ProjectConfigurationTests
     }
 
     [Fact]
-    public void PluginTargetsNet8WindowsAndUsesAutoCadRootProperty()
+    public void PluginTargetsLegacyAndModernSeriesWithExplicitRoots()
     {
         var root = RepoRoot();
         var pluginProjectPath = Path.Combine(root, "src", "Forge.Plugin", "Forge.Plugin.csproj");
         var pluginProject = XDocument.Load(pluginProjectPath);
-        var target = pluginProject.Descendants("TargetFramework").Single().Value;
+        var targetFrameworks = pluginProject.Descendants("TargetFrameworks")
+            .Select(x => x.Value)
+            .ToArray();
         var text = File.ReadAllText(pluginProjectPath);
 
-        Assert.Equal("net8.0-windows", target);
-        Assert.Contains("$(AutoCadRoot)\\AcCoreMgd.dll", text);
-        Assert.Contains("AUTOCAD_2026_ROOT", text);
+        // net8.0-windows is always built; net462 is opt-in behind ForgeBuildLegacy.
+        Assert.Equal(2, targetFrameworks.Length);
+        Assert.Contains("net8.0-windows", targetFrameworks);
+        Assert.Contains("net462;net8.0-windows", targetFrameworks);
+
+        // Two named roots, resolved in an explicit documented order.
+        Assert.Contains("FORGE_AUTOCAD_MODERN_ROOT", text);
+        Assert.Contains("AUTOCAD_2025_ROOT", text);
+        Assert.Contains("FORGE_AUTOCAD_ROOT", text);
+        Assert.Contains("FORGE_AUTOCAD_LEGACY_ROOT", text);
+        Assert.Contains("AUTOCAD_2017_ROOT", text);
+
         Assert.Contains("<Private>false</Private>", text);
         Assert.DoesNotContain("net9.0", text);
     }

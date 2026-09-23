@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Forge.Shared;
 
 public sealed class BackupPlanner
@@ -16,7 +18,7 @@ public sealed class BackupPlanner
             throw new ArgumentException("Drawing path is required.", nameof(drawingPath));
         }
 
-        var stamp = (timestamp ?? DateTimeOffset.Now).ToString("yyyyMMdd-HHmmss-fffffff");
+        var stamp = (timestamp ?? DateTimeOffset.Now).ToString("yyyyMMdd-HHmmss-fffffff", CultureInfo.InvariantCulture);
         var fileName = Path.GetFileNameWithoutExtension(drawingPath);
         var extension = Path.GetExtension(drawingPath);
         var safeName = string.Join("_", fileName.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries));
@@ -25,7 +27,7 @@ public sealed class BackupPlanner
 
     public string? TryBackup(string? drawingPath)
     {
-        if (string.IsNullOrWhiteSpace(drawingPath) || !File.Exists(drawingPath))
+        if (drawingPath is null || string.IsNullOrWhiteSpace(drawingPath) || !File.Exists(drawingPath))
         {
             return null;
         }

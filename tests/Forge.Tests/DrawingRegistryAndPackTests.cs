@@ -5,7 +5,7 @@ namespace Forge.Tests;
 public sealed class DrawingRegistryAndPackTests
 {
     [Fact]
-    public void Registry_RejectsUnknownDrawingNumber()
+    public void RegistryRejectsUnknownDrawingNumber()
     {
         var path = WriteTempJson("""
             {
@@ -31,7 +31,7 @@ public sealed class DrawingRegistryAndPackTests
     }
 
     [Fact]
-    public void Pack_EvaluateLayers_AndDrawingNoRegex()
+    public void PackEvaluateLayersAndDrawingNoRegex()
     {
         var path = WriteTempJson("""
             {
@@ -60,7 +60,7 @@ public sealed class DrawingRegistryAndPackTests
     }
 
     [Fact]
-    public void ToolProfiles_ExposeCorePlotQa()
+    public void ToolProfilesExposeCorePlotQa()
     {
         Assert.True(ToolProfiles.TryGet("plot", out var tools));
         Assert.Contains("forge_qa_preflight", tools);

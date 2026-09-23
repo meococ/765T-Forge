@@ -42,14 +42,14 @@ public sealed class StandardsPack
 
         if (!string.IsNullOrWhiteSpace(DrawingNoRegex))
         {
-            _ = new Regex(DrawingNoRegex, RegexOptions.CultureInvariant | RegexOptions.Compiled);
+            _ = new Regex(DrawingNoRegex, RegexOptions.CultureInvariant | RegexOptions.Compiled, ForgeConstants.RegexMatchTimeout);
         }
     }
 
     public IReadOnlyList<QaFinding> EvaluateLayers(IEnumerable<string> presentLayers)
     {
         var findings = new List<QaFinding>();
-        var present = presentLayers.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var present = new HashSet<string>(presentLayers, StringComparer.OrdinalIgnoreCase);
         foreach (var layer in Layers)
         {
             if (!present.Contains(layer))
@@ -99,7 +99,7 @@ public sealed class StandardsPack
 
         if (!string.IsNullOrWhiteSpace(PlotDevice)
             && !string.IsNullOrWhiteSpace(deviceName)
-            && !PlotDevice.Equals(deviceName, StringComparison.OrdinalIgnoreCase))
+            && !string.Equals(PlotDevice, deviceName, StringComparison.OrdinalIgnoreCase))
         {
             findings.Add(new QaFinding(
                 "pack_plot_device_mismatch",
@@ -111,7 +111,7 @@ public sealed class StandardsPack
 
         if (!string.IsNullOrWhiteSpace(PaperSize)
             && !string.IsNullOrWhiteSpace(paperSize)
-            && !PaperSize.Equals(paperSize, StringComparison.OrdinalIgnoreCase))
+            && !string.Equals(PaperSize, paperSize, StringComparison.OrdinalIgnoreCase))
         {
             findings.Add(new QaFinding(
                 "pack_paper_mismatch",
@@ -147,8 +147,23 @@ public sealed class StandardsPack
             return true;
         }
 
-        if (!Regex.IsMatch(drawingNo, DrawingNoRegex))
+        if (!string.IsNullOrWhiteSpace(DrawingNoRegex))
         {
+            try
+            {
+                var regex = new Regex(DrawingNoRegex!, RegexOptions.CultureInvariant, ForgeConstants.RegexMatchTimeout);
+                if (regex.IsMatch(drawingNo))
+                {
+                    return true;
+                }
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                errorCode = "regex_timeout";
+                message = $"Drawing number '{drawingNo}' evaluation against pack regex '{DrawingNoRegex}' exceeded {ForgeConstants.RegexMatchTimeoutMilliseconds} ms.";
+                return false;
+            }
+
             errorCode = "deny_drawing_no_format";
             message = $"Drawing number '{drawingNo}' does not match pack regex '{DrawingNoRegex}'.";
             return false;

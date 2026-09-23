@@ -22,8 +22,9 @@ public static class DependencyClosure
             }
 
             using var stream = File.OpenRead(path);
-            var hash = SHA256.HashData(stream);
-            return Convert.ToHexString(hash)[..16];
+            using var sha = SHA256.Create();
+            var hash = sha.ComputeHash(stream);
+            return Hex.Encode(hash).Substring(0, 16);
         }
         catch
         {

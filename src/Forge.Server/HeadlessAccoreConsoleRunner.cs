@@ -19,18 +19,29 @@ public sealed class HeadlessAccoreConsoleRunner
 
     public async Task<ForgeResult> RunScriptAsync(ForgeCommand command, CancellationToken cancellationToken = default)
     {
-        var args = ForgeJson.FromElement<RunScriptArgs>(command.Args) ?? new RunScriptArgs();
-        return await RunOneAsync(command.Id, args.DwgPath, args.ScriptPath, args.TimeoutSeconds, command.DryRun, cancellationToken)
+        var args = ForgeJson.ArgsOrDefault<RunScriptArgs>(command.Args);
+        return await RunOneAsync(command.Id, args.DwgPath, args.ScriptPath, args.TimeoutSeconds, command.DryRun, command.UnsafeAcknowledged, cancellationToken)
             .ConfigureAwait(false);
     }
 
     public async Task<ForgeResult> RunBatchAsync(ForgeCommand command, CancellationToken cancellationToken = default)
     {
-        var args = ForgeJson.FromElement<BatchArgs>(command.Args) ?? new BatchArgs();
+        var args = ForgeJson.ArgsOrDefault<BatchArgs>(command.Args);
         BatchResumeState state;
         if (!string.IsNullOrWhiteSpace(args.ResumeBatchId))
         {
-            var loaded = BatchResumeState.Load(args.ResumeBatchId);
+            BatchResumeState? loaded;
+            try
+            {
+                loaded = Path.IsPathRooted(args.ResumeBatchId)
+                    ? BatchResumeState.LoadFromPath(args.ResumeBatchId)
+                    : BatchResumeState.Load(args.ResumeBatchId);
+            }
+            catch (ArgumentException ex)
+            {
+                return ForgeResult.Failure(command.Id, "invalid_batch_id", ex.Message);
+            }
+
             if (loaded is null)
             {
                 return ForgeResult.Failure(command.Id, "batch_not_found", $"Cannot resume batch '{args.ResumeBatchId}'.");
@@ -112,7 +123,7 @@ public sealed class HeadlessAccoreConsoleRunner
             cancellationToken.ThrowIfCancellationRequested();
             job.Status = "running";
             state.Save();
-            var one = await RunOneAsync(command.Id, job.DwgPath, job.ScriptPath, null, dryRun: false, cancellationToken)
+            var one = await RunOneAsync(command.Id, job.DwgPath, job.ScriptPath, null, dryRun: false, command.UnsafeAcknowledged, cancellationToken)
                 .ConfigureAwait(false);
             if (one.Ok)
             {
@@ -178,6 +189,7 @@ public sealed class HeadlessAccoreConsoleRunner
         string? scriptPath,
         int? timeoutSeconds,
         bool dryRun,
+        bool unsafeAcknowledged,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(dwgPath) || string.IsNullOrWhiteSpace(scriptPath))
@@ -195,8 +207,14 @@ public sealed class HeadlessAccoreConsoleRunner
             return ForgeResult.Failure(commandId, "script_not_found", $"Script file not found: {scriptPath}");
         }
 
-        var scriptText = await File.ReadAllTextAsync(scriptPath, cancellationToken).ConfigureAwait(false);
-        var scriptDecision = _safetyPolicy.EvaluateText("forge_run_script", scriptText);
+        // Defense-in-depth: forge_run_script is an unsafe executor (arbitrary user text).
+        // Gate the capability, never the script text.
+        var scriptCommand = new ForgeCommand
+        {
+            Tool = "forge_run_script",
+            UnsafeAcknowledged = unsafeAcknowledged
+        };
+        var scriptDecision = _safetyPolicy.Evaluate(scriptCommand, _environment.EnableUnsafeOps);
         if (!scriptDecision.Allowed)
         {
             return ForgeResult.Failure(commandId, scriptDecision.Code, scriptDecision.Message, scriptDecision.Suggestion);
@@ -205,7 +223,11 @@ public sealed class HeadlessAccoreConsoleRunner
         var accoreconsole = Path.Combine(_environment.AutoCadRoot, "accoreconsole.exe");
         if (!File.Exists(accoreconsole))
         {
-            return ForgeResult.Failure(commandId, "accoreconsole_not_found", $"accoreconsole.exe not found at {accoreconsole}.");
+            var year = string.IsNullOrWhiteSpace(_environment.AutoCadYear) ? "unknown" : _environment.AutoCadYear;
+            return ForgeResult.Failure(
+                commandId,
+                "accoreconsole_not_found",
+                $"accoreconsole.exe not found at {accoreconsole} (AutoCAD year: {year}). Set FORGE_AUTOCAD_ROOT to a valid install root.");
         }
 
         if (dryRun)

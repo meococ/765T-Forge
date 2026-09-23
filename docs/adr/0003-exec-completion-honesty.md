@@ -22,3 +22,10 @@
 - Page-setup import prefers a sync Database/`PlotSettings` path; when it must still queue `-PSETUPIN`, results expose `queued=true` / `completed=false` (matrix: **implemented** with fallback honesty — not a forever-`partial` tool).
 - Dry-run on open-world / Accore paths must not be described as full behavioral simulation. Agents must re-read state before write; ceremony `dryRunDone` is **attested**, not proven (see ADR 0004).
 - `Ok=true` with `completed=false` / Accore exit 0 / DSD `fallback=plot_to_pdf` are distinct honesty signals — skills must branch on them, not collapse to “success.”
+
+## Amendment 2026-09-22 — undo grouping, step status, and executor timeouts
+
+1. Results exposing queued work now also expose **`undoGrouped`**: `true` for synchronous `Editor.Command` paths, `false` for queued `SendStringToExecute` fallbacks, because queued work runs after the undo group has closed. When the undo group itself cannot be opened or closed, the result carries `undoWarnings[]` with codes `undo_group_open_failed` / `undo_group_close_failed`.
+2. `forge_recipe_issue_set` reports `steps[]` where each step's `status` is exactly `completed` or `failed`, and it stops at the first failure. Do not describe a partially executed recipe as success.
+3. `forge_exec_dotnet` has a response timeout that cannot abort a snippet already running inside AutoCAD; the timeout result code is `exec_dotnet_timeout` and the snippet may still complete. Read back before retrying.
+4. A second concurrent plugin request while one is in flight returns `plugin_busy`; a main-thread callback that never runs in time (for example a modal dialog) returns `plugin_main_thread_timeout`. Neither is an executed command, and neither may be treated as success or as "nothing happened."

@@ -30,3 +30,53 @@ artifacts/
 # JetBrains
 .idea/
 *.sln.iml
+
+# Root-level scratch files from tooling and agent sessions.
+# Scoped to the repo root so a legitimate nested .tmp-* file stays visible.
+/.tmp-*
+*.tmp
+
+# ---------------------------------------------------------------------------
+# CAD drawings and AutoCAD session/plot debris
+# Exact globs only. No character-class guessing, no fuzzy rules, no sampling.
+# `*.dwl` / `*.dwl2` / `*.svf` / `*.sv$` are already listed above and are
+# intentionally not repeated here.
+# ---------------------------------------------------------------------------
+*.dwg
+*.dxf
+*.dwf
+*.dwt
+*.dxb
+*.acs
+*.tmpcopy
+*.bak.dwg
+*_recover.dwg
+
+# Plot / image outputs produced by smoke runs.
+# Path-scoped on purpose: tracked docs must never be hidden by a repo-wide
+# *.pdf / *.png rule. Both the direct-child and nested forms are listed because
+# each is a distinct exact glob.
+/tests/*.png
+/tests/*.jpg
+/tests/*.pdf
+/tests/**/*.png
+/tests/**/*.jpg
+/tests/**/*.pdf
+/outputs/*.png
+/outputs/*.jpg
+/outputs/*.pdf
+/outputs/**/*.png
+/outputs/**/*.jpg
+/outputs/**/*.pdf
+
+# AutoCAD script debris from R&D runs.
+# Scoped to /tests/ only: scripts/ uses .ps1 and must stay visible.
+/tests/*.scr
+
+# Python cache from tests/fixtures/taluy/gen_*.py
+__pycache__/
+*.py[cod]
+
+# OS metadata
+.DS_Store
+Thumbs.db

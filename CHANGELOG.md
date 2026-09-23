@@ -10,8 +10,6 @@ See [docs/versioning.md](docs/versioning.md).
 
 ## [Unreleased]
 
-## [0.3.0] - Unreleased
-
 ### Added
 
 - `FORGE_ALLOW_FORCE_PUBLISH` (default false) — `force=true` on publish/recipe returns `force_not_allowed` unless enabled (ADR 0004)
@@ -21,13 +19,19 @@ See [docs/versioning.md](docs/versioning.md).
 
 ### Changed
 
+- Plugin now ships dual-target builds: .NET Framework 4.6.2 (AutoCAD 2017–2024) and .NET 8 (AutoCAD 2025+).
 - `PublishReceipt.AuditId` stamped from command audit correlation
 - DSD publish forces `BGCOREPUBLISH=0` (with restore) and richer fallback diagnostics (`singlePdfUnmerged`, exception type, fallback reason)
 - Product SemVer **0.3.0** (Unreleased — do not tag until dual-seat DSD primary PASS)
 
 ### Fixed
 
-- (none yet beyond honesty/trust hardening above)
+- Doc drift: README env table + getting-started note for `FORGE_ALLOW_FORCE_PUBLISH`; packaging-nuget SemVer; smoke-lab v0.2.1 tag status; evals README 0.3 test pointer
+
+### Security
+
+- Free-text executors (`forge_exec_command`, `forge_exec_lisp`, `forge_run_script`, `forge_batch_run`, `forge_exec_dotnet`) now require the same unsafe dual-gate (`FORGE_ENABLE_UNSAFE_OPS` + `unsafeAcknowledged`) instead of free-text command filtering.
+- Secrets such as `hmacKey` are redacted from audit records.
 
 ## [0.2.1] - 2026-07-11
 
@@ -105,6 +109,7 @@ See [docs/versioning.md](docs/versioning.md).
 - Typed hot-path tools and gated open-world executors
 - `765T-Forge.ServerOnly.slnf` and unit tests
 
+[0.3.0]: https://github.com/765T/765T-Forge/releases/tag/v0.3.0
 [0.2.1]: https://github.com/765T/765T-Forge/releases/tag/v0.2.1
 [0.2.0]: https://github.com/765T/765T-Forge/releases/tag/v0.2.0
 [0.1.0]: https://github.com/765T/765T-Forge/releases/tag/v0.1.0

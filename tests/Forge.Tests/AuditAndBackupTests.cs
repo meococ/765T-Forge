@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Forge.Shared;
 
@@ -55,5 +56,98 @@ public sealed class AuditAndBackupTests
         var second = planner.PlanBackupPath(@"D:\Metro\A101.dwg", stamp.AddTicks(1));
 
         Assert.NotEqual(first, second);
+    }
+
+    [Fact]
+    public void BackupPlannerUsesGregorianDigitsUnderNonGregorianCulture()
+    {
+        var previous = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = new CultureInfo("th-TH");
+            var planner = new BackupPlanner(Path.Combine("C:", "forge-backups"));
+
+            var path = planner.PlanBackupPath(@"D:\Metro\A101.dwg", new DateTimeOffset(2026, 7, 8, 10, 20, 30, TimeSpan.Zero));
+
+            Assert.Contains("A101.20260708-102030-", path);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previous;
+        }
+    }
+
+    [Fact]
+    public async Task AuditSinkRedactsExactlyListedSensitiveArgumentNames()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "765T-Forge-Tests", Guid.NewGuid().ToString("N"));
+        var sink = new FileAuditSink(dir);
+        await sink.WriteAsync(new AuditRecord
+        {
+            Source = "test",
+            Tool = "forge_transmittal_seal",
+            CommandId = "c1",
+            Allowed = true,
+            Args = ForgeJson.ToElement(new
+            {
+                hmacKey = "top-secret-hmac",
+                token = "top-secret-token",
+                password = "top-secret-password",
+                nested = new { apiKey = "top-secret-api", keep = "monkey-value" },
+                values = new[] { new { secret = "top-secret-array" } }
+            })
+        });
+
+        var jsonl = Directory.GetFiles(dir, "*.jsonl").Single();
+        var text = await File.ReadAllTextAsync(jsonl);
+
+        Assert.DoesNotContain("top-secret-hmac", text);
+        Assert.DoesNotContain("top-secret-token", text);
+        Assert.DoesNotContain("top-secret-password", text);
+        Assert.DoesNotContain("top-secret-api", text);
+        Assert.DoesNotContain("top-secret-array", text);
+        Assert.Contains("monkey-value", text);
+        Assert.Contains("[redacted]", text);
+        using var _ = JsonDocument.Parse(text.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries).Single());
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("../escape")]
+    [InlineData("with space")]
+    [InlineData("under_score")]
+    [InlineData("a/b")]
+    public void BatchResumeStateRejectsUnsafeBatchIds(string batchId)
+    {
+        var state = new BatchResumeState { BatchId = batchId };
+        var dir = Path.Combine(Path.GetTempPath(), "765T-Forge-Tests", Guid.NewGuid().ToString("N"));
+
+        Assert.Throws<ArgumentException>(() => state.Save(dir));
+        Assert.Throws<ArgumentException>(() => BatchResumeState.Load(batchId));
+    }
+
+    [Fact]
+    public void BatchResumeStateAcceptsValidatedBatchIdAndWritesAtomically()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "765T-Forge-Tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var state = new BatchResumeState { BatchId = "batch-abc-123" };
+            state.Save(dir);
+
+            Assert.True(File.Exists(state.ArtifactPath));
+            Assert.False(File.Exists(state.ArtifactPath + ".tmp"));
+            Assert.NotNull(BatchResumeState.LoadFromPath(state.ArtifactPath!));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BatchResumeStateLoadFromPathRequiresRootedPath()
+    {
+        Assert.Throws<ArgumentException>(() => BatchResumeState.LoadFromPath("not-rooted.json"));
     }
 }

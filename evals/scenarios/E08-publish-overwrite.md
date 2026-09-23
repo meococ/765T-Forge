@@ -1,4 +1,4 @@
-# E08 — Publish overwrite guard
+# E08 — Publish overwrite acknowledgement
 
 ## Setup
 - Existing PDF at the target `outputPath`.

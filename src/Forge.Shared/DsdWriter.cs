@@ -8,13 +8,51 @@ namespace Forge.Shared;
 /// </summary>
 public static class DsdWriter
 {
+    /// <summary>
+    /// Exact structural validation of a DSD field value. <c>[</c> and <c>]</c> delimit DSD
+    /// sections and <c>=</c> separates a key from its value, so any of them inside a value can
+    /// inject additional sheets or keys; CR/LF and other control characters break the line
+    /// structure. Values are rejected, never escaped, because DSD has no escape sequence.
+    /// </summary>
+    public static void ValidateField(string fieldName, string? value)
+    {
+        if (value is null)
+        {
+            return;
+        }
+
+        foreach (var character in value)
+        {
+            if (character is '[' or ']' or '=' || character == '\r' || character == '\n' || char.IsControl(character))
+            {
+                throw new ArgumentException(
+                    $"DSD field '{fieldName}' contains the illegal character U+{(int)character:X4} ('[', ']', '=' and control characters are DSD structural characters).",
+                    fieldName);
+            }
+        }
+    }
+
     public static string Build(string dwgPath, string outputPath, IReadOnlyList<string> layouts, bool singlePdf)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(dwgPath);
-        ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
+        if (string.IsNullOrWhiteSpace(dwgPath))
+        {
+            throw new ArgumentException("Value cannot be null or whitespace.", nameof(dwgPath));
+        }
+
+        if (string.IsNullOrWhiteSpace(outputPath))
+        {
+            throw new ArgumentException("Value cannot be null or whitespace.", nameof(outputPath));
+        }
         if (layouts is null || layouts.Count == 0)
         {
             throw new ArgumentException("At least one layout is required.", nameof(layouts));
+        }
+
+        ValidateField(nameof(dwgPath), dwgPath);
+        ValidateField(nameof(outputPath), outputPath);
+        for (var index = 0; index < layouts.Count; index++)
+        {
+            ValidateField($"{nameof(layouts)}[{index}]", layouts[index]);
         }
 
         var sb = new StringBuilder();

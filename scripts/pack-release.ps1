@@ -1,19 +1,38 @@
 <#
 .SYNOPSIS
-  Pack release artifacts: always publish Forge.Server; optionally pack plugin when AutoCAD refs exist.
+  Pack release artifacts: always publish Forge.Server; optionally pack the plugin when AutoCAD refs exist.
+
+.DESCRIPTION
+  The plugin zip mirrors the Autodesk bundle layout: PackageContents.xml, README.md, Contents\2025\
+  (net8.0-windows, AutoCAD 2025-2027) and, with -AllSeries, Contents\2017\ (net462, AutoCAD 2017-2024).
+  Autodesk Ac*.dll reference assemblies are never shipped.
+
+  Reference roots follow src/Forge.Plugin/Forge.Plugin.csproj:
+    modern -> FORGE_AUTOCAD_MODERN_ROOT, AUTOCAD_2025_ROOT, FORGE_AUTOCAD_ROOT, then AutoCAD 2026/2025
+    legacy -> FORGE_AUTOCAD_LEGACY_ROOT, AUTOCAD_2017_ROOT
+
+.PARAMETER Configuration
+  Build configuration. Default Release.
+
 .PARAMETER SkipPlugin
   Skip plugin packaging (default for CI without AutoCAD).
+
+.PARAMETER AllSeries
+  Also pack the legacy net462 component for AutoCAD 2017-2024. Fails if the legacy reference root is
+  missing instead of shipping a bundle with a dead 2017 component.
 #>
 [CmdletBinding()]
 param(
     [ValidateSet("Debug", "Release")]
     [string] $Configuration = "Release",
-    [switch] $SkipPlugin
+    [switch] $SkipPlugin,
+    [switch] $AllSeries
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
+. (Join-Path $PSScriptRoot "autocad-roots.ps1")
 
 $releaseRoot = Join-Path $root "artifacts\release"
 $serverOut = Join-Path $releaseRoot "server"
@@ -46,37 +65,58 @@ Compress-Archive -Path (Join-Path $serverOut "*") -DestinationPath $serverZip
 Write-Host "Wrote $serverZip"
 
 $pluginPacked = $false
+$pluginPackedSeries = ""
 if (-not $SkipPlugin) {
-    if (-not $env:AUTOCAD_2026_ROOT) {
-        $env:AUTOCAD_2026_ROOT = "C:\Program Files\Autodesk\AutoCAD 2026"
-    }
-
-    $acadDll = Join-Path $env:AUTOCAD_2026_ROOT "AcCoreMgd.dll"
-    if (-not (Test-Path $acadDll)) {
-        Write-Warning "AutoCAD not found at AUTOCAD_2026_ROOT. Skipping plugin pack."
+    $modernRoot = Resolve-ForgeAutoCadModernRoot
+    if ([string]::IsNullOrWhiteSpace($modernRoot)) {
+        Write-Warning "No AutoCAD 2025/2026 reference root found (FORGE_AUTOCAD_MODERN_ROOT / AUTOCAD_2025_ROOT / FORGE_AUTOCAD_ROOT). Skipping plugin pack."
     }
     else {
-        New-Item -ItemType Directory -Force -Path $pluginOut | Out-Null
+        if ($AllSeries) {
+            $legacyRoot = Resolve-ForgeAutoCadLegacyRoot
+            Assert-ForgeAutoCadReferenceRoot `
+                -Label "legacy net462 (AutoCAD 2017-2024)" `
+                -Root $legacyRoot `
+                -Remedy "Set FORGE_AUTOCAD_LEGACY_ROOT (or the deprecated AUTOCAD_2017_ROOT) to the AutoCAD 2017 install directory or the ObjectARX 2017 SDK 'inc' folder, or pack without -AllSeries."
+        }
+
+        if (Test-Path $pluginOut) { Remove-Item $pluginOut -Recurse -Force }
+        $modernOut = Join-Path $pluginOut "Contents\2025"
+        New-Item -ItemType Directory -Force -Path $modernOut | Out-Null
+
         $pluginProj = Join-Path $root "src\Forge.Plugin\Forge.Plugin.csproj"
-        Write-Host "Building Forge.Plugin..."
-        dotnet build $pluginProj --configuration $Configuration -p:OutDir="$pluginOut\"
+        Write-Host "Building Forge.Plugin net8.0-windows against $modernRoot..."
+        dotnet build $pluginProj --configuration $Configuration -f net8.0-windows -p:ForgeAutoCadModernRoot="$modernRoot" --nologo
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        Copy-Item -Path (Join-Path $root "src\Forge.Plugin\bin\$Configuration\net8.0-windows\*") -Destination $modernOut -Recurse -Force
+
+        if ($AllSeries) {
+            $legacyOut = Join-Path $pluginOut "Contents\2017"
+            New-Item -ItemType Directory -Force -Path $legacyOut | Out-Null
+            Write-Host "Building Forge.Plugin net462 against $legacyRoot..."
+            dotnet build $pluginProj --configuration $Configuration -f net462 -p:ForgeBuildLegacy=true --nologo
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            Copy-Item -Path (Join-Path $root "src\Forge.Plugin\bin\$Configuration\net462\*") -Destination $legacyOut -Recurse -Force
+            $pluginPackedSeries = "2017;2025"
+        }
+        else {
+            Write-Warning "Packing without -AllSeries: Contents\2017 is absent, so AutoCAD 2017-2024 will not load this bundle."
+            $pluginPackedSeries = "2025"
+        }
+
+        # Bundle manifest and README travel with the payload.
+        Copy-Item (Join-Path $root "plugin-bundle\765T-Forge.bundle\PackageContents.xml") $pluginOut -Force
+        Copy-Item (Join-Path $root "plugin-bundle\765T-Forge.bundle\README.md") $pluginOut -Force
+
+        # Autodesk reference assemblies are never redistributed (see NOTICE.md).
+        Get-ChildItem -Path $pluginOut -Recurse -File |
+            Where-Object { $_.Name -match '^(AcCoreMgd|AcDbMgd|AcMgd)\.dll$' } |
+            ForEach-Object { Remove-Item $_.FullName -Force }
 
         $pluginZip = Join-Path $releaseRoot "765T-Forge.Plugin.zip"
         if (Test-Path $pluginZip) { Remove-Item $pluginZip -Force }
         Compress-Archive -Path (Join-Path $pluginOut "*") -DestinationPath $pluginZip
-
-        $tmp = Join-Path $releaseRoot "plugin-filtered"
-        if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
-        New-Item -ItemType Directory -Force -Path $tmp | Out-Null
-        Expand-Archive -Path $pluginZip -DestinationPath $tmp -Force
-        Get-ChildItem -Path $tmp -Recurse -File |
-            Where-Object { $_.Name -match '^(AcCoreMgd|AcDbMgd|AcMgd)\.dll$' } |
-            ForEach-Object { Remove-Item $_.FullName -Force }
-        Remove-Item $pluginZip -Force
-        Compress-Archive -Path (Join-Path $tmp "*") -DestinationPath $pluginZip
-        Remove-Item $tmp -Recurse -Force
-        Write-Host "Wrote $pluginZip (Autodesk Ac*.dll excluded)"
+        Write-Host "Wrote $pluginZip (Contents\2017 and Contents\2025 as packed; Autodesk Ac*.dll excluded)"
         $pluginPacked = $true
     }
 }
@@ -86,15 +126,17 @@ else {
 
 $pluginPackedText = if ($pluginPacked) { "true" } else { "false" }
 $completeText = if ((-not $SkipPlugin.IsPresent) -and $pluginPacked) { "true" } else { "false" }
-Write-Host "Pack complete. Server=yes PluginPacked=$pluginPackedText Output=$releaseRoot"
+Write-Host "Pack complete. Server=yes PluginPacked=$pluginPackedText Series=$pluginPackedSeries Output=$releaseRoot"
 
 $statusFile = Join-Path $releaseRoot "RELEASE_STATUS.txt"
 @(
     "765T-Forge release pack status"
     "ServerZip=yes"
     "PluginZip=$pluginPackedText"
+    "PluginSeries=$pluginPackedSeries"
     "Complete=$completeText"
     "Note=A GitHub Release without 765T-Forge.Plugin.zip is INCOMPLETE."
+    "Note=A plugin zip without Contents/2017 is INCOMPLETE for AutoCAD 2017-2024."
 ) | Set-Content -LiteralPath $statusFile -Encoding utf8
 Write-Host "Wrote $statusFile"
 

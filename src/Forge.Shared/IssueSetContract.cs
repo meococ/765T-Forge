@@ -62,7 +62,7 @@ public sealed class IssueSetContract
         DrawingRegistry? registry = null)
     {
         var findings = new List<QaFinding>();
-        var layouts = presentLayouts.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var layouts = new HashSet<string>(presentLayouts, StringComparer.OrdinalIgnoreCase);
 
         foreach (var sheet in Sheets)
         {
@@ -89,7 +89,7 @@ public sealed class IssueSetContract
             if (registry?.FindByDrawingNo(sheet.DrawingNo) is { } regSheet
                 && !string.IsNullOrWhiteSpace(sheet.Rev)
                 && !string.IsNullOrWhiteSpace(regSheet.Rev)
-                && !sheet.Rev.Equals(regSheet.Rev, StringComparison.OrdinalIgnoreCase))
+                && !string.Equals(sheet.Rev, regSheet.Rev, StringComparison.OrdinalIgnoreCase))
             {
                 findings.Add(new QaFinding(
                     "issue_set_rev_mismatch",

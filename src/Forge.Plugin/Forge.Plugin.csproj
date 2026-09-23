@@ -1,10 +1,67 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <!-- net8.0-windows is always built. net462 is opt-in because it needs AutoCAD 2017 refs. -->
+    <TargetFrameworks>net8.0-windows</TargetFrameworks>
+    <TargetFrameworks Condition="'$(ForgeBuildLegacy)' == 'true'">net462;net8.0-windows</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AutoCadRoot Condition="'$(AUTOCAD_2026_ROOT)' != ''">$(AUTOCAD_2026_ROOT)</AutoCadRoot>
-    <AutoCadRoot Condition="'$(AutoCadRoot)' == ''">C:\Program Files\Autodesk\AutoCAD 2026</AutoCadRoot>
+    <LangVersion>latest</LangVersion>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RootNamespace>Forge.Plugin</RootNamespace>
+    <!--
+      forge_exec_dotnet needs Microsoft.CodeAnalysis.CSharp.Scripting (and its transitive Roslyn
+      assemblies) at runtime inside AutoCAD. Without this, NuGet package assemblies are not copied
+      next to Forge.Plugin.dll and the executor cannot load at all.
+    -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <!--
+    AutoCAD series -> .NET runtime mapping (Autodesk official):
+
+      AutoCAD 2017, 2018 -> .NET Framework 4.6  (Series R21.0, R21.2)
+      AutoCAD 2019, 2020 -> .NET Framework 4.7  (Series R22.0, R23.0)
+      AutoCAD 2021-2024  -> .NET Framework 4.8  (Series R24.0 - R24.3)
+      AutoCAD 2025, 2026 -> .NET 8               (Series R25.0, R25.1)
+      AutoCAD 2027       -> .NET 10              (Series R26.0)
+
+    Two assemblies are produced from the same sources:
+
+      net462         -> AutoCAD 2017-2024. Built only when -p:ForgeBuildLegacy=true and compiled
+                        against AutoCAD 2017 reference assemblies, so the emitted IL only touches
+                        APIs present in the 2017 managed API and runs on the 4.6/4.7/4.8 CLRs.
+      net8.0-windows -> AutoCAD 2025-2027. The net8.0 assembly also loads on AutoCAD 2027's
+                        .NET 10 runtime because net8.0 IL runs forward on the .NET 10 CLR.
+
+    net462-only source shims live in Compatibility/ and are guarded with #if NETFRAMEWORK.
+  -->
+
+  <!--
+    AutoCAD reference assembly roots. Resolution is exact and explicit; a root is never guessed
+    from a partial match and a newer install is never substituted for the legacy target.
+
+    Modern (net8.0-windows): $(FORGE_AUTOCAD_MODERN_ROOT) -> $(AUTOCAD_2025_ROOT) -> $(FORGE_AUTOCAD_ROOT)
+      -> the highest exact path in the .NET 8 reference series (AutoCAD 2026, then 2025) that contains
+         AcCoreMgd.dll, AcDbMgd.dll and AcMgd.dll (resolved in ForgeResolveAutoCadModernReferences).
+    Legacy (net462): $(FORGE_AUTOCAD_LEGACY_ROOT) -> $(AUTOCAD_2017_ROOT). If it is empty or any of the
+      three DLLs is missing the build fails with a clear error instead of falling back to a newer series.
+  -->
+  <PropertyGroup>
+    <ForgeAutoCadModernRoot Condition="'$(ForgeAutoCadModernRoot)' == ''">$(FORGE_AUTOCAD_MODERN_ROOT)</ForgeAutoCadModernRoot>
+    <ForgeAutoCadModernRoot Condition="'$(ForgeAutoCadModernRoot)' == ''">$(AUTOCAD_2025_ROOT)</ForgeAutoCadModernRoot>
+    <ForgeAutoCadModernRoot Condition="'$(ForgeAutoCadModernRoot)' == ''">$(FORGE_AUTOCAD_ROOT)</ForgeAutoCadModernRoot>
+
+    <ForgeAutoCadLegacyRoot Condition="'$(ForgeAutoCadLegacyRoot)' == ''">$(FORGE_AUTOCAD_LEGACY_ROOT)</ForgeAutoCadLegacyRoot>
+    <ForgeAutoCadLegacyRoot Condition="'$(ForgeAutoCadLegacyRoot)' == ''">$(AUTOCAD_2017_ROOT)</ForgeAutoCadLegacyRoot>
+  </PropertyGroup>
+
+  <!--
+    The legacy build restores a different TFM set, so it writes its own lock file instead of
+    flipping the committed packages.lock.json between single-TFM and multi-TFM shapes.
+  -->
+  <PropertyGroup>
+    <NuGetLockFilePath Condition="'$(ForgeBuildLegacy)' == 'true'">packages.legacy.lock.json</NuGetLockFilePath>
   </PropertyGroup>
 
   <ItemGroup>
@@ -12,22 +69,96 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Roslyn scripting ships a netstandard2.0 asset, so it serves both the net8 and the net462 build. -->
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" />
-    <PackageReference Include="System.IO.Pipes.AccessControl" />
+    <!-- net8.0-windows uses NamedPipeServerStreamAcl.Create; net462 uses the framework PipeSecurity ctor. -->
+    <PackageReference Include="System.IO.Pipes.AccessControl" Condition="'$(TargetFramework)' == 'net8.0-windows'" />
+    <!-- Lets the net462 target compile without a .NET Framework targeting pack installed. -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Condition="'$(TargetFramework)' == 'net462'" PrivateAssets="all" />
   </ItemGroup>
 
+  <!--
+    Modern reference series, highest year first. AutoCAD 2027 is .NET 10, so its assemblies cannot
+    be referenced from a net8.0 compilation (CS1705); the net8.0-windows reference series is exactly
+    AutoCAD 2025-2026 (.NET 8) and the produced net8.0 assembly still loads on AutoCAD 2027's
+    .NET 10 runtime. Adding a future .NET 8-series year means adding one exact path below.
+
+    Exact literal paths and exact Exists gates only. An MSBuild item glob cannot express this scan:
+    globs have no character classes (so "AutoCAD <4 digits>" cannot be matched exactly), MSBuild has
+    no string ordering operator (so the highest year cannot be selected), and item batching order is
+    not guaranteed. The glob below is used for diagnostics only.
+  -->
   <ItemGroup>
-    <Reference Include="AcCoreMgd">
-      <HintPath>$(AutoCadRoot)\AcCoreMgd.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="AcDbMgd">
-      <HintPath>$(AutoCadRoot)\AcDbMgd.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="AcMgd">
-      <HintPath>$(AutoCadRoot)\AcMgd.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
+    <ForgeAutoCadInstalledCandidate Include="C:\Program Files\Autodesk\AutoCAD ????\AcCoreMgd.dll" />
   </ItemGroup>
+
+  <Target Name="ForgeResolveAutoCadModernReferences"
+          BeforeTargets="ResolveAssemblyReferences"
+          Condition="'$(TargetFramework)' == 'net8.0-windows'">
+    <PropertyGroup Condition="'$(ForgeAutoCadModernRoot)' == '' AND Exists('C:\Program Files\Autodesk\AutoCAD 2026\AcCoreMgd.dll') AND Exists('C:\Program Files\Autodesk\AutoCAD 2026\AcDbMgd.dll') AND Exists('C:\Program Files\Autodesk\AutoCAD 2026\AcMgd.dll')">
+      <ForgeAutoCadModernRoot>C:\Program Files\Autodesk\AutoCAD 2026</ForgeAutoCadModernRoot>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(ForgeAutoCadModernRoot)' == '' AND Exists('C:\Program Files\Autodesk\AutoCAD 2025\AcCoreMgd.dll') AND Exists('C:\Program Files\Autodesk\AutoCAD 2025\AcDbMgd.dll') AND Exists('C:\Program Files\Autodesk\AutoCAD 2025\AcMgd.dll')">
+      <ForgeAutoCadModernRoot>C:\Program Files\Autodesk\AutoCAD 2025</ForgeAutoCadModernRoot>
+    </PropertyGroup>
+
+    <PropertyGroup>
+      <_ForgeModernMissing></_ForgeModernMissing>
+      <_ForgeModernMissing Condition="!Exists('$(ForgeAutoCadModernRoot)\AcCoreMgd.dll')">$(_ForgeModernMissing)AcCoreMgd.dll; </_ForgeModernMissing>
+      <_ForgeModernMissing Condition="!Exists('$(ForgeAutoCadModernRoot)\AcDbMgd.dll')">$(_ForgeModernMissing)AcDbMgd.dll; </_ForgeModernMissing>
+      <_ForgeModernMissing Condition="!Exists('$(ForgeAutoCadModernRoot)\AcMgd.dll')">$(_ForgeModernMissing)AcMgd.dll; </_ForgeModernMissing>
+      <_ForgeInstalledYears>@(ForgeAutoCadInstalledCandidate->'%(Directory)')</_ForgeInstalledYears>
+    </PropertyGroup>
+
+    <Error Condition="'$(ForgeAutoCadModernRoot)' == ''"
+           Text="Forge.Plugin net8.0-windows needs AutoCAD 2025 or 2026 (.NET 8) reference assemblies; neither exact series path exists. AutoCAD 2027 is .NET 10 and cannot be referenced from a net8.0 build. Installed AutoCAD installs found: $(_ForgeInstalledYears). Set FORGE_AUTOCAD_MODERN_ROOT (or AUTOCAD_2025_ROOT / FORGE_AUTOCAD_ROOT) to an AutoCAD 2025/2026 install directory." />
+    <Error Condition="'$(ForgeAutoCadModernRoot)' != '' AND '$(_ForgeModernMissing)' != ''"
+           Text="Forge.Plugin net8.0-windows reference assemblies are incomplete under ForgeAutoCadModernRoot='$(ForgeAutoCadModernRoot)'. Missing: $(_ForgeModernMissing)" />
+
+    <ItemGroup>
+      <Reference Include="AcCoreMgd">
+        <HintPath>$(ForgeAutoCadModernRoot)\AcCoreMgd.dll</HintPath>
+        <Private>false</Private>
+      </Reference>
+      <Reference Include="AcDbMgd">
+        <HintPath>$(ForgeAutoCadModernRoot)\AcDbMgd.dll</HintPath>
+        <Private>false</Private>
+      </Reference>
+      <Reference Include="AcMgd">
+        <HintPath>$(ForgeAutoCadModernRoot)\AcMgd.dll</HintPath>
+        <Private>false</Private>
+      </Reference>
+    </ItemGroup>
+  </Target>
+
+  <Target Name="ForgeResolveAutoCadLegacyReferences"
+          BeforeTargets="ResolveAssemblyReferences"
+          Condition="'$(TargetFramework)' == 'net462'">
+    <PropertyGroup>
+      <_ForgeLegacyMissing></_ForgeLegacyMissing>
+      <_ForgeLegacyMissing Condition="!Exists('$(ForgeAutoCadLegacyRoot)\AcCoreMgd.dll')">$(_ForgeLegacyMissing)AcCoreMgd.dll; </_ForgeLegacyMissing>
+      <_ForgeLegacyMissing Condition="!Exists('$(ForgeAutoCadLegacyRoot)\AcDbMgd.dll')">$(_ForgeLegacyMissing)AcDbMgd.dll; </_ForgeLegacyMissing>
+      <_ForgeLegacyMissing Condition="!Exists('$(ForgeAutoCadLegacyRoot)\AcMgd.dll')">$(_ForgeLegacyMissing)AcMgd.dll; </_ForgeLegacyMissing>
+    </PropertyGroup>
+
+    <Error Condition="'$(ForgeAutoCadLegacyRoot)' == ''"
+           Text="Forge.Plugin net462 (AutoCAD 2017-2024) must be compiled against AutoCAD 2017 reference assemblies; there is deliberately no fallback to a newer series. Set FORGE_AUTOCAD_LEGACY_ROOT (or the deprecated AUTOCAD_2017_ROOT) to the AutoCAD 2017 install directory or the ObjectARX 2017 SDK 'inc' folder." />
+    <Error Condition="'$(ForgeAutoCadLegacyRoot)' != '' AND '$(_ForgeLegacyMissing)' != ''"
+           Text="Forge.Plugin net462 requires AutoCAD 2017 reference assemblies. Set FORGE_AUTOCAD_LEGACY_ROOT (or the deprecated AUTOCAD_2017_ROOT) to the AutoCAD 2017 install directory or the ObjectARX 2017 SDK 'inc' folder. Missing under ForgeAutoCadLegacyRoot='$(ForgeAutoCadLegacyRoot)': $(_ForgeLegacyMissing)" />
+
+    <ItemGroup>
+      <Reference Include="AcCoreMgd">
+        <HintPath>$(ForgeAutoCadLegacyRoot)\AcCoreMgd.dll</HintPath>
+        <Private>false</Private>
+      </Reference>
+      <Reference Include="AcDbMgd">
+        <HintPath>$(ForgeAutoCadLegacyRoot)\AcDbMgd.dll</HintPath>
+        <Private>false</Private>
+      </Reference>
+      <Reference Include="AcMgd">
+        <HintPath>$(ForgeAutoCadLegacyRoot)\AcMgd.dll</HintPath>
+        <Private>false</Private>
+      </Reference>
+    </ItemGroup>
+  </Target>
 </Project>

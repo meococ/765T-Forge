@@ -14,7 +14,11 @@ public static class ForgeConstants
     /// <summary>Backward-compatible alias for ProductVersion (legacy field name).</summary>
     public const string ProtocolVersion = ProductVersion;
 
-    public const string AutoCadVersion = "2026";
+    /// <summary>Match timeout applied to every user/pack-supplied regex. Greppable: RegexMatchTimeout.</summary>
+    public const int RegexMatchTimeoutMilliseconds = 250;
+
+    /// <summary>Match timeout applied to every user/pack-supplied regex.</summary>
+    public static readonly TimeSpan RegexMatchTimeout = TimeSpan.FromMilliseconds(RegexMatchTimeoutMilliseconds);
 
     /// <summary>Only used when FORGE_DEV_ALLOW_DEFAULT_TOKEN=true. Never for production.</summary>
     public const string DevOnlyInsecureToken = "dev-only-insecure-token";

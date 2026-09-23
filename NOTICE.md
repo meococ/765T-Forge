@@ -8,13 +8,16 @@ AutoCAD®, ObjectARX®, Autodesk®, and related names are trademarks or register
 
 ## No redistribution of Autodesk binaries
 
-This repository does **not** redistribute Autodesk proprietary assemblies (for example `AcCoreMgd.dll`, `AcDbMgd.dll`, `AcMgd.dll`, or other AutoCAD runtime components). Plugin projects reference those assemblies from a local AutoCAD installation via `AUTOCAD_2026_ROOT` (or the default install path).
+This repository does **not** redistribute Autodesk proprietary assemblies (for example `AcCoreMgd.dll`, `AcDbMgd.dll`, `AcMgd.dll`, or other AutoCAD runtime components). Plugin projects reference those assemblies from a local AutoCAD installation via `FORGE_AUTOCAD_MODERN_ROOT` / `FORGE_AUTOCAD_LEGACY_ROOT` (or the deprecated `AUTOCAD_2026_ROOT` / `AUTOCAD_2017_ROOT` aliases and `FORGE_AUTOCAD_ROOT`).
 
 Do not commit, package, or publish Autodesk DLLs with Forge releases.
 
 ## Licensed AutoCAD required
 
-To run the AutoCAD plugin and live MCP tools that talk to a drawing session, you need a **licensed installation of AutoCAD 2026** (or a compatible Autodesk product that provides the referenced APIs) on Windows.
+To run the AutoCAD plugin and live MCP tools that talk to a drawing session, you need a **licensed installation of a supported AutoCAD release** on Windows:
+
+- the `net8.0-windows` plugin component targets AutoCAD 2025–2026;
+- the `net462` plugin component targets AutoCAD 2017–2024 and must be built against AutoCAD 2017 reference assemblies. It has been prepared but not yet compiled on a machine with those references, so that runtime support is not yet verified.
 
 The MCP server (`Forge.Server`) and unit tests can build and run without AutoCAD when using `765T-Forge.ServerOnly.slnf`. Headless script execution via AccoreConsole also requires a local AutoCAD install that provides `accoreconsole.exe`.
 

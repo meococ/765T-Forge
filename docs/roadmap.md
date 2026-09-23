@@ -11,7 +11,7 @@ Product SemVer is independent of historical “Phase” labels in the archived b
 | Phase 3 skill/docs | Docs + skill | 0.2.0 | Shipped; keep syncing |
 | Phase 4 evals | Eval scenarios E01–E10 | 0.2.x | Scenarios in-repo; live DWG lab private |
 | — | P0 publish-ready GitHub + exclusive AEC gates | **0.2.1** | Technical Preview shipped |
-| — | Publish determinism hardening | **0.3.0** | **In progress (Unreleased)** — trust gates + nested xref depth + DSD diagnostics; dual-seat DSD PASS pending |
+| — | Publish determinism hardening | **0.3.0** | **In progress (Unreleased)** — trust gates + nested xref depth + DSD diagnostics + deterministic capability gate + dual-TFM plugin; dual-seat DSD PASS and 2017-series build verification pending |
 | — | Moat ops DNA | **0.4.0** | Differential UX polish, screenshot after PDF, richer CDE adapters |
 
 ## Already shipped in 0.2.x (do not re-list as 0.3.0 targets)
@@ -30,7 +30,9 @@ Clash 3D / Civil 3D / full SSM **write** / national “metro ontology” / gener
    - Nested xref BFS depth report (`maxDepth`, optional `failClosed`) + pin/dependency wire-up — **code landed**; multi-seat smoke still required before claiming complete nested SoT.
    - `FORGE_ALLOW_FORCE_PUBLISH` + ceremony optional AuditId evidence + receipt `AuditId` stamp — **code landed**.
    - DSD diagnostics (`BGCOREPUBLISH`, richer fallback payload) + seat checklist — **code/docs landed**.
-   - **Still required to tag:** DSD **primary** path smoke-PASS on ≥2 metro seats (see [smoke-lab.md](smoke-lab.md) seat checklist).
+   - Deterministic capability gate replacing the regex command denylist (`unsafe_not_acknowledged`; no argument text is inspected) — **code landed**.
+   - Dual-TFM plugin build (`net8.0-windows` + opt-in `net462`) with per-series verification script — **code landed**; the 2017–2024 assembly is prepared but **not yet compiled against AutoCAD 2017 reference assemblies**, so that runtime support is unverified.
+   - **Still required to tag:** DSD **primary** path smoke-PASS on ≥2 metro seats (see [smoke-lab.md](smoke-lab.md) seat checklist) and a recorded `verify-plugin-series.ps1` pass for each series claimed.
 2. **v0.4.0** — Moat polish: differential UX, optional screenshot **after** PDF verify, richer CDE **partner** adapters (still not “we are the CDE”).
 
 **Shipped:** **v0.2.1** Technical Preview — see CHANGELOG. **0.3.0** is Unreleased — not production-ready for unattended issue-set publish.
@@ -44,4 +46,6 @@ Until evidence lands in CHANGELOG/smoke-lab:
 - Do not claim ceremony_check / cde_gate_evaluate ≡ ISO 19650 issuance or Acc/BIM360 upload.
 - Do not claim nested xref closure is complete while depth is capped / best-effort open.
 - Do not claim SSM write or visual QA screenshot.
+- Do not claim AutoCAD 2017–2024 runtime support is verified — the legacy assembly is prepared, not built against 2017 references.
+- Do not claim Forge filters or blocklists command text — there is no text denylist; the control is the capability gate.
 - Do not tag **v0.3.0** until dual-seat DSD primary PASS is recorded.

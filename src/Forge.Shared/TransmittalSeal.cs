@@ -48,12 +48,14 @@ public sealed class TransmittalSeal
         if (!string.IsNullOrEmpty(hmacKey))
         {
             algorithm = "HMACSHA256";
-            digest = Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(hmacKey), bytes));
+            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(hmacKey!));
+            digest = Hex.Encode(hmac.ComputeHash(bytes));
         }
         else
         {
             algorithm = "SHA256";
-            digest = Convert.ToHexString(SHA256.HashData(bytes));
+            using var sha = SHA256.Create();
+            digest = Hex.Encode(sha.ComputeHash(bytes));
         }
 
         return new TransmittalSeal
@@ -83,7 +85,7 @@ public sealed class TransmittalSeal
                            "seals");
             Directory.CreateDirectory(root);
             var path = Path.Combine(root, $"seal-{seal.SealId}.json");
-            File.WriteAllText(path, JsonSerializer.Serialize(seal, ForgeJson.Options));
+            AtomicFile.WriteAllText(path, JsonSerializer.Serialize(seal, ForgeJson.Options));
             seal.ArtifactPath = path;
             return path;
         }

@@ -33,7 +33,7 @@ public sealed class XrefClosurePin
             var root = directory ?? DefaultPinDir();
             Directory.CreateDirectory(root);
             var path = Path.Combine(root, $"pin-{pin.PinId}.json");
-            File.WriteAllText(path, JsonSerializer.Serialize(pin, ForgeJson.Options));
+            AtomicFile.WriteAllText(path, JsonSerializer.Serialize(pin, ForgeJson.Options));
             return path;
         }
         catch
@@ -57,10 +57,14 @@ public sealed class XrefClosurePin
     public static IReadOnlyList<QaFinding> Compare(IEnumerable<XrefPinNode> current, XrefClosurePin pin)
     {
         var findings = new List<QaFinding>();
-        var currentByName = current.ToDictionary(n => n.Name, StringComparer.OrdinalIgnoreCase);
+        // Names may legitimately repeat (same file name under different hosts, cycle nodes).
+        // GroupBy keeps every node instead of throwing on duplicate keys.
+        var currentByName = current
+            .GroupBy(n => n.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.ToArray(), StringComparer.OrdinalIgnoreCase);
         foreach (var expected in pin.Nodes)
         {
-            if (!currentByName.TryGetValue(expected.Name, out var live))
+            if (!currentByName.TryGetValue(expected.Name, out var liveNodes))
             {
                 findings.Add(new QaFinding(
                     "xref_pin_missing_node",
@@ -71,11 +75,31 @@ public sealed class XrefClosurePin
                 continue;
             }
 
-            var pathChanged = !string.Equals(NormalizePath(expected.Path), NormalizePath(live.Path), StringComparison.OrdinalIgnoreCase);
-            var hashChanged = !string.IsNullOrWhiteSpace(expected.ContentHash)
-                              && !string.Equals(expected.ContentHash, live.ContentHash, StringComparison.OrdinalIgnoreCase);
-            var lengthChanged = expected.Length is not null && live.Length is not null && expected.Length != live.Length;
-            if (pathChanged || hashChanged || lengthChanged)
+            if (liveNodes.Length > 1)
+            {
+                findings.Add(new QaFinding(
+                    "xref_pin_duplicate_live_node",
+                    "error",
+                    $"Pinned xref name '{expected.Name}' matches {liveNodes.Length} live nodes; comparison is ambiguous.",
+                    "Reference xrefs by host-qualified PinKey (ParentName>Name) and re-pin.",
+                    "forge_xref_pin_verify"));
+            }
+
+            var anyMismatch = false;
+            foreach (var live in liveNodes)
+            {
+                var pathChanged = !string.Equals(NormalizePath(expected.Path), NormalizePath(live.Path), StringComparison.OrdinalIgnoreCase);
+                var hashChanged = !string.IsNullOrWhiteSpace(expected.ContentHash)
+                                  && !string.Equals(expected.ContentHash, live.ContentHash, StringComparison.OrdinalIgnoreCase);
+                var lengthChanged = expected.Length is not null && live.Length is not null && expected.Length != live.Length;
+                if (pathChanged || hashChanged || lengthChanged)
+                {
+                    anyMismatch = true;
+                    break;
+                }
+            }
+
+            if (anyMismatch)
             {
                 findings.Add(new QaFinding(
                     "xref_pin_mismatch",

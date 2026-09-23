@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Autodesk.AutoCAD.ApplicationServices;
@@ -11,6 +12,21 @@ public sealed partial class PluginCommandProcessor
 {
     private static ForgeResult SystemCapabilities(ForgeCommand command)
     {
+        // Enumerating devices requires SetCurrentConfig, which mutates the session's current
+        // plot device. Capture the exact API value first and restore it in a finally.
+        string? previousDevice = null;
+        string? previousDeviceCaptureError = null;
+        var currentConfigRestored = false;
+        string? currentConfigRestoreError = null;
+        try
+        {
+            previousDevice = PlotConfigManager.CurrentConfig?.DeviceName;
+        }
+        catch (System.Exception ex)
+        {
+            previousDeviceCaptureError = $"{ex.GetType().Name}: {ex.Message}";
+        }
+
         var devices = new List<object>();
         try
         {
@@ -19,53 +35,53 @@ public sealed partial class PluginCommandProcessor
             {
                 var info = deviceList[i];
                 var media = new List<string>();
+                string? mediaError = null;
                 try
                 {
                     var config = PlotConfigManager.SetCurrentConfig(info.DeviceName);
-                    var mediaProp = config.GetType().GetProperty("CanonicalMediaNameList")
-                                    ?? config.GetType().GetProperty("CanonicalMediaNames");
-                    var mediaValue = mediaProp?.GetValue(config);
-                    if (mediaValue is System.Collections.IEnumerable enumerable and not string)
+                    foreach (var item in config.CanonicalMediaNames)
                     {
-                        foreach (var item in enumerable)
+                        if (item is not null)
                         {
-                            if (item is not null)
-                            {
-                                media.Add(item.ToString()!);
-                            }
-                        }
-                    }
-                    else
-                    {
-                        var method = config.GetType().GetMethod("GetCanonicalMediaNameList", Type.EmptyTypes);
-                        if (method?.Invoke(config, null) is System.Collections.IEnumerable list)
-                        {
-                            foreach (var item in list)
-                            {
-                                if (item is not null)
-                                {
-                                    media.Add(item.ToString()!);
-                                }
-                            }
+                            media.Add(item);
                         }
                     }
                 }
-                catch
+                catch (System.Exception ex)
                 {
-                    // Some devices reject media enumeration outside plot context.
+                    // An empty media list must not read as "device has no paper sizes".
+                    mediaError = $"{ex.GetType().Name}: {ex.Message}";
                 }
 
                 devices.Add(new
                 {
                     name = info.DeviceName,
                     media = media.Take(40).ToArray(),
-                    mediaTruncated = media.Count > 40
+                    mediaTruncated = media.Count > 40,
+                    mediaError
                 });
             }
         }
         catch (System.Exception ex)
         {
             devices.Add(new { error = ex.Message });
+        }
+        finally
+        {
+            if (previousDevice is not null)
+            {
+                try
+                {
+                    PlotConfigManager.SetCurrentConfig(previousDevice);
+                    currentConfigRestored = true;
+                }
+                catch (System.Exception ex)
+                {
+                    // Surface the failed restore: later plots without an explicit device would
+                    // silently use whatever device was enumerated last.
+                    currentConfigRestoreError = $"{ex.GetType().Name}: {ex.Message}";
+                }
+            }
         }
 
         var pageSetups = new List<string>();
@@ -88,9 +104,10 @@ public sealed partial class PluginCommandProcessor
         }
 
         var plotStyles = new List<string>();
+        string? plotStylesError = null;
         try
         {
-            var stylePath = Convert.ToString(Application.GetSystemVariable("ROAMABLEROOTPREFIX")) ?? "";
+            var stylePath = Convert.ToString(Application.GetSystemVariable("ROAMABLEROOTPREFIX"), CultureInfo.InvariantCulture) ?? "";
             var plotters = Path.Combine(stylePath, "Plotters", "Plot Styles");
             if (Directory.Exists(plotters))
             {
@@ -98,9 +115,10 @@ public sealed partial class PluginCommandProcessor
                 plotStyles.AddRange(Directory.EnumerateFiles(plotters, "*.stb").Select(Path.GetFileName)!);
             }
         }
-        catch
+        catch (System.Exception ex)
         {
-            // Best effort.
+            // An empty plot-style list must not read as "no styles installed".
+            plotStylesError = $"{ex.GetType().Name}: {ex.Message}";
         }
 
         return ForgeResult.Success(command.Id, new
@@ -109,8 +127,16 @@ public sealed partial class PluginCommandProcessor
             devices,
             pageSetups,
             layouts,
-            layerStates = InvokeLayerStateManager("GetLayerStateNames"),
-            plotStyles = plotStyles.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).ToArray()
+            layerStates = GetLayerStateNames(),
+            plotStyles = plotStyles.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).ToArray(),
+            plotStylesError,
+            currentConfig = new
+            {
+                previousDevice,
+                previousDeviceCaptureError,
+                restored = currentConfigRestored,
+                restoreError = currentConfigRestoreError
+            }
         });
     }
 
@@ -190,7 +216,7 @@ public sealed partial class PluginCommandProcessor
         if (args.Reload)
         {
             using var reloadTr = ActiveDb.TransactionManager.StartTransaction();
-            var reloadIds = FindXrefIds(reloadTr, args.Name);
+            using var reloadIds = FindXrefIds(reloadTr, args.Name);
             if (reloadIds.Count > 0)
             {
                 ActiveDb.ReloadXrefs(reloadIds);
@@ -233,8 +259,23 @@ public sealed partial class PluginCommandProcessor
     {
         var args = Args<PreflightArgs>(command);
         var report = BuildPreflightReport(args.RequiredTitleblockTags, args.TitleblockBlockName, args.ExpectedLayers);
-        var artifactPath = TryWriteQaArtifact(report);
+        var artifactPath = TryWriteQaArtifact(report, out var artifactError);
         report = report with { ArtifactPath = artifactPath };
+        if (artifactError is not null)
+        {
+            // An unwritten artifact must be reported, not hidden behind a null path.
+            var findings = new List<QaFinding>(report.Findings)
+            {
+                new(
+                    "qa_artifact_write_failed",
+                    "warning",
+                    $"QA report artifact could not be written: {artifactError}",
+                    "Check write access to %LOCALAPPDATA%\\765T-Forge\\qa.",
+                    "forge_qa_preflight")
+            };
+            report = QaReport.FromFindings(report.Document, findings, report.Context)
+                with { Id = report.Id, CreatedUtc = report.CreatedUtc, ArtifactPath = null };
+        }
         return ForgeResult.Success(command.Id, report, verification: new ForgeVerification
         {
             Attempted = true,
@@ -320,16 +361,12 @@ public sealed partial class PluginCommandProcessor
         var xrefs = ReadXrefs();
         foreach (var xref in xrefs)
         {
-            var type = xref.GetType();
-            var name = type.GetProperty("name")?.GetValue(xref)?.ToString() ?? "?";
-            var unloaded = Equals(type.GetProperty("isUnloaded")?.GetValue(xref), true);
-            var pathExists = Equals(type.GetProperty("pathExists")?.GetValue(xref), true);
-            if (unloaded || !pathExists)
+            if (xref.IsUnloaded || !xref.PathExists)
             {
                 findings.Add(new QaFinding(
                     "xref_unhealthy",
                     "error",
-                    $"Xref '{name}' is unloaded or missing.",
+                    $"Xref '{xref.Name}' is unloaded or missing.",
                     "Use forge_xref_repath / forge_xref_reload / forge_xref_normalize_relative.",
                     "forge_xref_list"));
             }
@@ -357,7 +394,7 @@ public sealed partial class PluginCommandProcessor
                         "Confirm block name / paper-space titleblock.",
                         "forge_block_list_attributes"));
                 }
-                else if (string.IsNullOrWhiteSpace(match.Value) || match.Value.Contains("####", StringComparison.Ordinal))
+                else if (string.IsNullOrWhiteSpace(match.Value) || match.Value.Contains("####"))
                 {
                     findings.Add(new QaFinding(
                         "titleblock_tag_empty",
@@ -373,9 +410,10 @@ public sealed partial class PluginCommandProcessor
         {
             using var tr = ActiveDb.TransactionManager.StartTransaction();
             var layerTable = (LayerTable)tr.GetObject(ActiveDb.LayerTableId, OpenMode.ForRead);
-            var names = layerTable.Cast<ObjectId>()
-                .Select(id => ((LayerTableRecord)tr.GetObject(id, OpenMode.ForRead)).Name)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var names = new HashSet<string>(
+                layerTable.Cast<ObjectId>()
+                    .Select(id => ((LayerTableRecord)tr.GetObject(id, OpenMode.ForRead)).Name),
+                StringComparer.OrdinalIgnoreCase);
             tr.Commit();
             foreach (var layer in expectedLayers)
             {
@@ -415,11 +453,16 @@ public sealed partial class PluginCommandProcessor
             int? bgPlot = null;
             try
             {
-                bgPlot = Convert.ToInt32(Application.GetSystemVariable("BACKGROUNDPLOT"));
+                bgPlot = Convert.ToInt32(Application.GetSystemVariable("BACKGROUNDPLOT"), CultureInfo.InvariantCulture);
             }
-            catch
+            catch (System.Exception ex)
             {
-                // Best effort.
+                findings.Add(new QaFinding(
+                    "plot_env_read_failed",
+                    "error",
+                    $"BACKGROUNDPLOT could not be read: {ex.Message}",
+                    "Repair the AutoCAD session profile; a publish gate must not assume the variable is unset.",
+                    "forge_qa_plot_fingerprint"));
             }
 
             findings.AddRange(pack.EvaluatePlotBindings(
@@ -456,7 +499,7 @@ public sealed partial class PluginCommandProcessor
 
                 var attrs = FindBlockAttributes(titleblockBlockName, null, forWrite: false).ToArray();
                 var match = attrs.FirstOrDefault(a => a.Tag.Equals(tag, StringComparison.OrdinalIgnoreCase));
-                if (match is null || string.IsNullOrWhiteSpace(match.Value) || match.Value.Contains("####", StringComparison.Ordinal))
+                if (match is null || string.IsNullOrWhiteSpace(match.Value) || match.Value.Contains("####"))
                 {
                     findings.Add(new QaFinding(
                         "pack_titleblock_required",
@@ -472,7 +515,7 @@ public sealed partial class PluginCommandProcessor
             // Without a pack, still warn when background plot is enabled (tribal knowledge).
             try
             {
-                var bg = Convert.ToInt32(Application.GetSystemVariable("BACKGROUNDPLOT"));
+                var bg = Convert.ToInt32(Application.GetSystemVariable("BACKGROUNDPLOT"), CultureInfo.InvariantCulture);
                 if (bg != 0)
                 {
                     findings.Add(new QaFinding(
@@ -483,9 +526,14 @@ public sealed partial class PluginCommandProcessor
                         "forge_system_setvar"));
                 }
             }
-            catch
+            catch (System.Exception ex)
             {
-                // Best effort.
+                findings.Add(new QaFinding(
+                    "plot_env_read_failed",
+                    "error",
+                    $"BACKGROUNDPLOT could not be read: {ex.Message}",
+                    "Repair the AutoCAD session profile; a publish gate must not assume the variable is unset.",
+                    "forge_qa_plot_fingerprint"));
             }
         }
 
@@ -496,7 +544,17 @@ public sealed partial class PluginCommandProcessor
             findings.AddRange(contract.ValidateAgainst(layoutNames, DrawingRegistryStore.Current));
         }
 
-        var fingerprint = CapturePlotFingerprint();
+        var fingerprint = CapturePlotFingerprint(out var fingerprintReadErrors);
+        foreach (var readError in fingerprintReadErrors)
+        {
+            findings.Add(new QaFinding(
+                "plot_env_read_failed",
+                "error",
+                $"Plot environment read failed: {readError}",
+                "Repair the plotter configuration or run forge_system_capabilities for details.",
+                "forge_system_capabilities"));
+        }
+
         findings.AddRange(fingerprint.EvaluateAgainstPack(pack));
 
         var registry = DrawingRegistryStore.Current;
@@ -523,7 +581,20 @@ public sealed partial class PluginCommandProcessor
         }
 
         int? fileDia = null;
-        try { fileDia = Convert.ToInt32(Application.GetSystemVariable("FILEDIA")); } catch { }
+        try
+        {
+            fileDia = Convert.ToInt32(Application.GetSystemVariable("FILEDIA"), CultureInfo.InvariantCulture);
+        }
+        catch (System.Exception ex)
+        {
+            findings.Add(new QaFinding(
+                "plot_env_read_failed",
+                "error",
+                $"FILEDIA could not be read: {ex.Message}",
+                "Repair the AutoCAD session profile; modal-dialog risk cannot be assessed without FILEDIA.",
+                "forge_qa_modal_trap"));
+        }
+
         findings.AddRange(ModalTrapHints.EvaluateAutomationSysvars(fileDia));
 
         return QaReport.FromFindings(document, findings, new
@@ -561,15 +632,15 @@ public sealed partial class PluginCommandProcessor
             foreach (ObjectId id in space)
             {
                 var obj = tr.GetObject(id, OpenMode.ForRead);
-                if (obj is DBText dbText && dbText.TextString.Contains("####", StringComparison.Ordinal))
+                if (obj is DBText dbText && dbText.TextString.Contains("####"))
                 {
                     hits.Add($"DBText handle {dbText.Handle} contains ####");
                 }
-                else if (obj is MText mText && mText.Contents.Contains("####", StringComparison.Ordinal))
+                else if (obj is MText mText && mText.Contents.Contains("####"))
                 {
                     hits.Add($"MText handle {mText.Handle} contains ####");
                 }
-                else if (obj is AttributeDefinition attDef && attDef.TextString.Contains("####", StringComparison.Ordinal))
+                else if (obj is AttributeDefinition attDef && attDef.TextString.Contains("####"))
                 {
                     hits.Add($"AttributeDefinition {attDef.Tag} contains ####");
                 }
@@ -578,7 +649,7 @@ public sealed partial class PluginCommandProcessor
                     foreach (ObjectId attrId in br.AttributeCollection)
                     {
                         if (tr.GetObject(attrId, OpenMode.ForRead) is AttributeReference attr &&
-                            attr.TextString.Contains("####", StringComparison.Ordinal))
+                            attr.TextString.Contains("####"))
                         {
                             hits.Add($"Attribute {attr.Tag} on block {br.Name} contains ####");
                         }
@@ -591,8 +662,9 @@ public sealed partial class PluginCommandProcessor
         return hits;
     }
 
-    private static string? TryWriteQaArtifact(QaReport report)
+    private static string? TryWriteQaArtifact(QaReport report, out string? error)
     {
+        error = null;
         try
         {
             var dir = Path.Combine(
@@ -601,11 +673,12 @@ public sealed partial class PluginCommandProcessor
                 "qa");
             Directory.CreateDirectory(dir);
             var path = Path.Combine(dir, $"qa-{report.Id}.json");
-            File.WriteAllText(path, JsonSerializer.Serialize(report, ForgeJson.Options), Encoding.UTF8);
+            AtomicFile.WriteAllText(path, JsonSerializer.Serialize(report, ForgeJson.Options));
             return path;
         }
-        catch
+        catch (System.Exception ex)
         {
+            error = $"{ex.GetType().Name}: {ex.Message}";
             return null;
         }
     }
@@ -619,77 +692,115 @@ public sealed partial class PluginCommandProcessor
         }
 
         var diffs = new List<object>();
-        var updated = 0;
-
-        foreach (var entry in args.Entries)
-        {
-            if (!string.IsNullOrWhiteSpace(entry.Layout))
-            {
-                try
-                {
-                    LayoutManager.Current.CurrentLayout = entry.Layout;
-                }
-                catch (Autodesk.AutoCAD.Runtime.Exception)
-                {
-                    return ForgeResult.Failure(command.Id, "layout_not_found", $"Layout not found: {entry.Layout}");
-                }
-            }
-
-            foreach (var pair in entry.Attributes)
-            {
-                if (AuthorizeAttributeWrite(command, pair.Key, pair.Value) is { } denied)
-                {
-                    return denied;
-                }
-
-                var before = FindBlockAttributes(entry.BlockName, entry.Handle, forWrite: false)
-                    .FirstOrDefault(a => a.Tag.Equals(pair.Key, StringComparison.OrdinalIgnoreCase));
-                diffs.Add(new
-                {
-                    layout = entry.Layout,
-                    blockName = entry.BlockName,
-                    tag = pair.Key,
-                    before = before?.Value,
-                    after = pair.Value
-                });
-
-                if (command.DryRun)
-                {
-                    continue;
-                }
-
-                var setCommand = new ForgeCommand
-                {
-                    Id = command.Id,
-                    Tool = "forge_block_set_attr",
-                    Args = ForgeJson.ToElement(new
-                    {
-                        tag = pair.Key,
-                        value = pair.Value,
-                        blockName = entry.BlockName,
-                        handle = entry.Handle
-                    }),
-                    DryRun = false
-                };
-                var setResult = SetBlockAttribute(setCommand);
-                if (!setResult.Ok)
-                {
-                    return setResult;
-                }
-
-                updated++;
-            }
-        }
 
         if (command.DryRun)
         {
+            foreach (var entry in args.Entries)
+            {
+                foreach (var pair in entry.Attributes)
+                {
+                    if (AuthorizeAttributeWrite(command, pair.Key, pair.Value) is { } denied)
+                    {
+                        return denied;
+                    }
+
+                    var before = FindBlockAttributes(entry.BlockName, entry.Handle, forWrite: false)
+                        .FirstOrDefault(a => a.Tag.Equals(pair.Key, StringComparison.OrdinalIgnoreCase));
+                    diffs.Add(new
+                    {
+                        layout = entry.Layout,
+                        blockName = entry.BlockName,
+                        tag = pair.Key,
+                        before = before?.Value,
+                        after = pair.Value
+                    });
+                }
+            }
+
             return DryRun(command, new { diffs });
+        }
+
+        // One transaction for the whole campaign: a failure on any attribute aborts the
+        // transaction and leaves the drawing completely unchanged (no per-attribute commits).
+        var updated = 0;
+        using (var tr = ActiveDb.TransactionManager.StartTransaction())
+        {
+            foreach (var entry in args.Entries)
+            {
+                if (!string.IsNullOrWhiteSpace(entry.Layout))
+                {
+                    try
+                    {
+                        LayoutManager.Current.CurrentLayout = entry.Layout;
+                    }
+                    catch (Autodesk.AutoCAD.Runtime.Exception)
+                    {
+                        return ForgeResult.Failure(command.Id, "layout_not_found", $"Layout not found: {entry.Layout}");
+                    }
+                }
+
+                foreach (var pair in entry.Attributes)
+                {
+                    if (AuthorizeAttributeWrite(command, pair.Key, pair.Value) is { } denied)
+                    {
+                        return denied;
+                    }
+
+                    var matches = FindBlockReferences(tr, entry.BlockName, entry.Handle).ToArray();
+                    string? before = null;
+                    var beforeCaptured = false;
+                    var wrote = 0;
+                    foreach (var br in matches)
+                    {
+                        foreach (ObjectId attrId in br.AttributeCollection)
+                        {
+                            if (tr.GetObject(attrId, OpenMode.ForWrite) is not AttributeReference attr ||
+                                !attr.Tag.Equals(pair.Key, StringComparison.OrdinalIgnoreCase))
+                            {
+                                continue;
+                            }
+
+                            if (!beforeCaptured)
+                            {
+                                before = attr.TextString;
+                                beforeCaptured = true;
+                            }
+
+                            attr.TextString = pair.Value ?? "";
+                            wrote++;
+                            updated++;
+                        }
+                    }
+
+                    if (wrote == 0)
+                    {
+                        // A tag that matches nothing must not read as a successful campaign;
+                        // returning here disposes the transaction without committing.
+                        return ForgeResult.Failure(
+                            command.Id,
+                            "block_attribute_not_found",
+                            $"No block attribute matched tag '{pair.Key}' (blockName='{entry.BlockName ?? "*"}', handle='{entry.Handle ?? "*"}').",
+                            "Call forge_block_list_attributes to confirm the exact tag and block selection.");
+                    }
+
+                    diffs.Add(new
+                    {
+                        layout = entry.Layout,
+                        blockName = entry.BlockName,
+                        tag = pair.Key,
+                        before,
+                        after = pair.Value
+                    });
+                }
+            }
+
+            tr.Commit();
         }
 
         return ForgeResult.Success(
             command.Id,
             new { updated, diffs },
-            verification: new ForgeVerification { Attempted = true, Passed = updated > 0, ReadBack = diffs });
+            verification: new ForgeVerification { Attempted = true, Passed = true, ReadBack = diffs });
     }
 
     private ForgeResult RecipeIssueSet(ForgeCommand command)
@@ -700,6 +811,8 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, "missing_issue_set_args", "outputPath and layouts are required.");
         }
 
+        // Each completed step is reported with an exact status of "completed" or "failed",
+        // and a failure stops the chain immediately.
         var steps = new List<object>();
 
         if (args.NormalizeXrefs)
@@ -711,10 +824,16 @@ public sealed partial class PluginCommandProcessor
                 Args = ForgeJson.ToElement(new { reload = true }),
                 DryRun = command.DryRun
             });
-            steps.Add(new { step = "normalize_xrefs", normalize.Ok, normalize.Data, normalize.Error });
+            steps.Add(new
+            {
+                step = "normalize_xrefs",
+                status = normalize.Ok ? "completed" : "failed",
+                normalize.Data,
+                normalize.Error
+            });
             if (!normalize.Ok)
             {
-                return normalize;
+                return normalize with { Data = new { steps, failedStep = "normalize_xrefs", detail = normalize.Data } };
             }
         }
 
@@ -727,10 +846,16 @@ public sealed partial class PluginCommandProcessor
                 Args = ForgeJson.ToElement(new { name = args.LayerState }),
                 DryRun = command.DryRun
             });
-            steps.Add(new { step = "layer_state", restore.Ok, restore.Data, restore.Error });
+            steps.Add(new
+            {
+                step = "layer_state",
+                status = restore.Ok ? "completed" : "failed",
+                restore.Data,
+                restore.Error
+            });
             if (!restore.Ok)
             {
-                return restore;
+                return restore with { Data = new { steps, failedStep = "layer_state", detail = restore.Data } };
             }
         }
 
@@ -743,15 +868,27 @@ public sealed partial class PluginCommandProcessor
                 Args = ForgeJson.ToElement(args.Campaign),
                 DryRun = command.DryRun
             });
-            steps.Add(new { step = "titleblock_campaign", campaign.Ok, campaign.Data, campaign.Error });
+            steps.Add(new
+            {
+                step = "titleblock_campaign",
+                status = campaign.Ok ? "completed" : "failed",
+                campaign.Data,
+                campaign.Error
+            });
             if (!campaign.Ok)
             {
-                return campaign;
+                return campaign with { Data = new { steps, failedStep = "titleblock_campaign", detail = campaign.Data } };
             }
         }
 
         var preflight = BuildPreflightReport(args.RequiredTitleblockTags, args.TitleblockBlockName, args.ExpectedLayers);
-        steps.Add(new { step = "preflight", preflight.Passed, preflight });
+        steps.Add(new
+        {
+            step = "preflight",
+            status = preflight.Passed ? "completed" : "failed",
+            passed = preflight.Passed,
+            preflight
+        });
 
         if (!ForcePublishGate.IsAllowed(args.Force, _environment.AllowForcePublish))
         {
@@ -797,10 +934,16 @@ public sealed partial class PluginCommandProcessor
             DryRun = false,
             AuditId = command.AuditId
         });
-        steps.Add(new { step = "publish", publish.Ok, publish.Data, publish.Error });
+        steps.Add(new
+        {
+            step = "publish",
+            status = publish.Ok ? "completed" : "failed",
+            publish.Data,
+            publish.Error
+        });
         if (!publish.Ok)
         {
-            return publish with { Data = new { steps, publish.Data } };
+            return publish with { Data = new { steps, failedStep = "publish", detail = publish.Data } };
         }
 
         return ForgeResult.Success(
@@ -824,18 +967,14 @@ public sealed partial class PluginCommandProcessor
         }
 
         var outputDir = Path.GetFullPath(args.OutputDirectory!);
-        var files = new List<object>();
-        var hostName = Path.GetFileName(hostPath);
-        var plannedHost = Path.Combine(outputDir, hostName);
-
-        files.Add(new { role = "host", source = hostPath, destination = plannedHost });
+        var plan = new List<PackPlanEntry>
+        {
+            new("host", Path.GetFileName(hostPath), hostPath, Missing: false, ResolveError: null)
+        };
 
         foreach (var xref in ReadXrefs())
         {
-            var type = xref.GetType();
-            var path = type.GetProperty("path")?.GetValue(xref)?.ToString();
-            var name = type.GetProperty("name")?.GetValue(xref)?.ToString() ?? "xref";
-            if (string.IsNullOrWhiteSpace(path))
+            if (string.IsNullOrWhiteSpace(xref.Path))
             {
                 continue;
             }
@@ -843,68 +982,90 @@ public sealed partial class PluginCommandProcessor
             string absolute;
             try
             {
-                absolute = Path.IsPathRooted(path)
-                    ? Path.GetFullPath(path)
-                    : Path.GetFullPath(Path.Combine(Path.GetDirectoryName(hostPath)!, path));
+                absolute = Path.IsPathRooted(xref.Path)
+                    ? Path.GetFullPath(xref.Path)
+                    : Path.GetFullPath(Path.Combine(Path.GetDirectoryName(hostPath)!, xref.Path));
             }
-            catch
+            catch (ArgumentException ex)
             {
+                plan.Add(new PackPlanEntry("xref", xref.Name, xref.Path, Missing: true, ResolveError: ex.Message));
                 continue;
             }
 
             if (!File.Exists(absolute))
             {
-                files.Add(new { role = "xref", name, source = path, missing = true });
+                plan.Add(new PackPlanEntry("xref", xref.Name, xref.Path, Missing: true, ResolveError: "File not found."));
                 continue;
             }
 
-            files.Add(new
-            {
-                role = "xref",
-                name,
-                source = absolute,
-                destination = Path.Combine(outputDir, Path.GetFileName(absolute))
-            });
+            plan.Add(new PackPlanEntry("xref", xref.Name, absolute, Missing: false, ResolveError: null));
         }
 
         foreach (var style in args.IncludePlotStyles)
         {
-            var resolved = ResolvePlotStylePath(style);
-            if (resolved is null)
+            if (!TryResolvePlotStylePath(style, out var resolved, out var resolveError))
             {
-                files.Add(new { role = "plot_style", name = style, missing = true });
+                plan.Add(new PackPlanEntry("plot_style", style, style, Missing: true, ResolveError: resolveError));
                 continue;
             }
 
+            plan.Add(new PackPlanEntry("plot_style", style, resolved!, Missing: false, ResolveError: null));
+        }
+
+        var copyable = plan.Where(x => !x.Missing).ToArray();
+        var destinations = PackDestinationResolver.Resolve(
+            copyable.Select(x => x.Source).ToArray(),
+            outputDir);
+
+        var files = new List<object>();
+        var destinationIndex = 0;
+        foreach (var entry in plan)
+        {
+            if (entry.Missing)
+            {
+                files.Add(new
+                {
+                    role = entry.Role,
+                    name = entry.Name,
+                    source = entry.Source,
+                    missing = true,
+                    resolveError = entry.ResolveError
+                });
+                continue;
+            }
+
+            var destination = destinations[destinationIndex++];
+            var desiredName = Path.GetFileName(entry.Source);
+            var actualName = Path.GetFileName(destination);
             files.Add(new
             {
-                role = "plot_style",
-                source = resolved,
-                destination = Path.Combine(outputDir, Path.GetFileName(resolved))
+                role = entry.Role,
+                name = entry.Name,
+                source = entry.Source,
+                destination,
+                renamedFrom = string.Equals(desiredName, actualName, StringComparison.OrdinalIgnoreCase)
+                    ? null
+                    : desiredName
             });
         }
+
+        var hostDestination = destinations[0];
 
         if (command.DryRun)
         {
             return DryRun(command, new { outputDir, files });
         }
 
-        Directory.CreateDirectory(outputDir);
-        foreach (var file in files)
+        // Overwrite gate is evaluated against the exact resolved destinations before any copy.
+        var overwriteIndex = 0;
+        foreach (var entry in plan)
         {
-            var type = file.GetType();
-            if (Equals(type.GetProperty("missing")?.GetValue(file), true))
+            if (entry.Missing)
             {
                 continue;
             }
 
-            var source = type.GetProperty("source")?.GetValue(file)?.ToString();
-            var destination = type.GetProperty("destination")?.GetValue(file)?.ToString();
-            if (string.IsNullOrWhiteSpace(source) || string.IsNullOrWhiteSpace(destination))
-            {
-                continue;
-            }
-
+            var destination = destinations[overwriteIndex++];
             if (File.Exists(destination) && !args.OverwriteAcknowledged)
             {
                 return ForgeResult.Failure(
@@ -913,47 +1074,116 @@ public sealed partial class PluginCommandProcessor
                     $"Refusing to overwrite existing pack file: {destination}",
                     "Pass overwriteAcknowledged=true after confirming the destination folder is safe.");
             }
-
-            File.Copy(source, destination, overwrite: args.OverwriteAcknowledged);
         }
 
-        // Rewrite host copy xref paths to same-folder relative names.
-        if (args.RewritePaths)
+        // Stage the whole pack in a temp directory and move it into place only on success, so a
+        // mid-pack failure cannot leave a half-written pack at the destination.
+        var stageDir = Path.Combine(Path.GetTempPath(), $"forge-pack-{command.Id}");
+        string? manifestPath = null;
+        var staged = new List<(string StagedPath, string Destination)>();
+        try
         {
-            using var db = new Database(false, true);
-            db.ReadDwgFile(plannedHost, FileOpenMode.OpenForReadAndWriteNoShare, true, "");
-            using (var tr = db.TransactionManager.StartTransaction())
+            if (Directory.Exists(stageDir))
             {
-                var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
-                foreach (ObjectId id in blockTable)
-                {
-                    var btr = (BlockTableRecord)tr.GetObject(id, OpenMode.ForWrite);
-                    if (!btr.IsFromExternalReference && !btr.IsFromOverlayReference)
-                    {
-                        continue;
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(btr.PathName))
-                    {
-                        btr.PathName = Path.GetFileName(btr.PathName);
-                    }
-                }
-
-                tr.Commit();
+                Directory.Delete(stageDir, recursive: true);
             }
 
-            db.SaveAs(plannedHost, DwgVersion.Current);
-        }
+            Directory.CreateDirectory(stageDir);
+            var index = 0;
+            foreach (var entry in copyable)
+            {
+                var destination = destinations[index++];
+                var stagedPath = Path.Combine(stageDir, Path.GetFileName(destination));
+                File.Copy(entry.Source, stagedPath, overwrite: true);
+                staged.Add((stagedPath, destination));
+            }
 
-        var manifestPath = Path.Combine(outputDir, "manifest.json");
-        var manifest = new
+            var stagedHost = staged[0].StagedPath;
+
+            // Rewrite host copy xref paths to same-folder relative names.
+            if (args.RewritePaths)
+            {
+                using var db = new Database(false, true);
+                db.ReadDwgFile(stagedHost, FileOpenMode.OpenForReadAndWriteNoShare, true, "");
+                using (var tr = db.TransactionManager.StartTransaction())
+                {
+                    var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+                    foreach (ObjectId id in blockTable)
+                    {
+                        var btr = (BlockTableRecord)tr.GetObject(id, OpenMode.ForWrite);
+                        if (!btr.IsFromExternalReference && !btr.IsFromOverlayReference)
+                        {
+                            continue;
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(btr.PathName))
+                        {
+                            btr.PathName = Path.GetFileName(btr.PathName);
+                        }
+                    }
+
+                    tr.Commit();
+                }
+
+                db.SaveAs(stagedHost, DwgVersion.Current);
+            }
+
+            manifestPath = Path.Combine(stageDir, "manifest.json");
+            var manifest = new
+            {
+                createdUtc = DateTimeOffset.UtcNow,
+                host = Path.GetFileName(hostDestination),
+                files,
+                forge = ForgeConstants.ProductVersion
+            };
+            File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest, ForgeJson.Options), Encoding.UTF8);
+
+            Directory.CreateDirectory(outputDir);
+            foreach (var (stagedPath, destination) in staged)
+            {
+                if (File.Exists(destination))
+                {
+                    if (!args.OverwriteAcknowledged)
+                    {
+                        return ForgeResult.Failure(
+                            command.Id,
+                            "pack_overwrite_not_acknowledged",
+                            $"Refusing to overwrite existing pack file: {destination}",
+                            "Pass overwriteAcknowledged=true after confirming the destination folder is safe.");
+                    }
+
+                    File.Delete(destination);
+                }
+
+                File.Move(stagedPath, destination);
+            }
+
+            var finalManifestPath = Path.Combine(outputDir, "manifest.json");
+            File.Move(manifestPath, finalManifestPath);
+            manifestPath = finalManifestPath;
+        }
+        catch (System.Exception ex)
         {
-            createdUtc = DateTimeOffset.UtcNow,
-            host = hostName,
-            files,
-            forge = ForgeConstants.ProductVersion
-        };
-        File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest, ForgeJson.Options), Encoding.UTF8);
+            return ForgeResult.Failure(
+                command.Id,
+                "pack_failed",
+                $"Pack-and-go failed while staging: {ex.Message}",
+                "The destination was not modified; fix the reported error and retry.");
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(stageDir))
+                {
+                    Directory.Delete(stageDir, recursive: true);
+                }
+            }
+            catch
+            {
+                // The staged temp directory is best-effort cleanup; the pack result is unaffected.
+            }
+        }
 
         return ForgeResult.Success(
             command.Id,
@@ -961,27 +1191,40 @@ public sealed partial class PluginCommandProcessor
             verification: new ForgeVerification
             {
                 Attempted = true,
-                Passed = File.Exists(plannedHost) && File.Exists(manifestPath),
-                ReadBack = new { manifestPath }
+                Passed = manifestPath is not null && File.Exists(manifestPath) && File.Exists(hostDestination),
+                ReadBack = new { manifestPath, hostDestination }
             });
     }
 
-    private static string? ResolvePlotStylePath(string styleName)
+    private sealed record PackPlanEntry(string Role, string? Name, string Source, bool Missing, string? ResolveError);
+
+    private static bool TryResolvePlotStylePath(string styleName, out string? resolved, out string? error)
     {
+        resolved = null;
+        error = null;
         if (File.Exists(styleName))
         {
-            return Path.GetFullPath(styleName);
+            resolved = Path.GetFullPath(styleName);
+            return true;
         }
 
         try
         {
-            var stylePath = Convert.ToString(Application.GetSystemVariable("ROAMABLEROOTPREFIX")) ?? "";
+            var stylePath = Convert.ToString(Application.GetSystemVariable("ROAMABLEROOTPREFIX"), CultureInfo.InvariantCulture) ?? "";
             var candidate = Path.Combine(stylePath, "Plotters", "Plot Styles", styleName);
-            return File.Exists(candidate) ? candidate : null;
+            if (File.Exists(candidate))
+            {
+                resolved = candidate;
+                return true;
+            }
+
+            error = $"Plot style not found: '{styleName}' or '{candidate}'.";
+            return false;
         }
-        catch
+        catch (System.Exception ex)
         {
-            return null;
+            error = $"{ex.GetType().Name}: {ex.Message}";
+            return false;
         }
     }
 

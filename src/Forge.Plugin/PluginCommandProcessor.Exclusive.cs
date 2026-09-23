@@ -1,3 +1,4 @@
+using System.Globalization;
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.PlottingServices;
@@ -9,10 +10,20 @@ public sealed partial class PluginCommandProcessor
 {
     private static ForgeResult QaPlotFingerprint(ForgeCommand command)
     {
-        var fp = CapturePlotFingerprint();
+        var fp = CapturePlotFingerprint(out var readErrors);
         var findings = fp.EvaluateAgainstPack(StandardsPackStore.Current).ToList();
+        foreach (var readError in readErrors)
+        {
+            findings.Add(new QaFinding(
+                "plot_env_read_failed",
+                "error",
+                $"Plot environment read failed: {readError}",
+                "Repair the plotter configuration or run forge_system_capabilities for details.",
+                "forge_system_capabilities"));
+        }
+
         var report = QaReport.FromFindings(ActiveDocumentPath(), findings, fp);
-        return ForgeResult.Success(command.Id, new { fingerprint = fp, report }, verification: new ForgeVerification
+        return ForgeResult.Success(command.Id, new { fingerprint = fp, report, readErrors }, verification: new ForgeVerification
         {
             Attempted = true,
             Passed = report.Passed,
@@ -21,12 +32,16 @@ public sealed partial class PluginCommandProcessor
         });
     }
 
-    private static PlotEnvironmentFingerprint CapturePlotFingerprint()
+    private static PlotEnvironmentFingerprint CapturePlotFingerprint(out string[] readErrors)
     {
+        var errors = new List<string>();
         int? pstyle = null, bg = null, bgCore = null;
-        try { pstyle = Convert.ToInt32(Application.GetSystemVariable("PSTYLEMODE")); } catch { }
-        try { bg = Convert.ToInt32(Application.GetSystemVariable("BACKGROUNDPLOT")); } catch { }
-        try { bgCore = Convert.ToInt32(Application.GetSystemVariable("BGCOREPUBLISH")); } catch { }
+        try { pstyle = Convert.ToInt32(Application.GetSystemVariable("PSTYLEMODE"), CultureInfo.InvariantCulture); }
+        catch (System.Exception ex) { errors.Add($"PSTYLEMODE: {ex.Message}"); }
+        try { bg = Convert.ToInt32(Application.GetSystemVariable("BACKGROUNDPLOT"), CultureInfo.InvariantCulture); }
+        catch (System.Exception ex) { errors.Add($"BACKGROUNDPLOT: {ex.Message}"); }
+        try { bgCore = Convert.ToInt32(Application.GetSystemVariable("BGCOREPUBLISH"), CultureInfo.InvariantCulture); }
+        catch (System.Exception ex) { errors.Add($"BGCOREPUBLISH: {ex.Message}"); }
 
         var pack = StandardsPackStore.Current;
         var devices = new List<string>();
@@ -38,10 +53,13 @@ public sealed partial class PluginCommandProcessor
                 devices.Add(deviceList[i].DeviceName);
             }
         }
-        catch
+        catch (System.Exception ex)
         {
-            // Best effort — capabilities tool is richer.
+            // An empty device list must not read as "no devices configured" — report the failure.
+            errors.Add($"PlotConfigManager.Devices: {ex.Message}");
         }
+
+        readErrors = errors.ToArray();
 
         return new PlotEnvironmentFingerprint
         {
@@ -157,10 +175,13 @@ public sealed partial class PluginCommandProcessor
     private static ForgeResult QaModalTrap(ForgeCommand command)
     {
         int? fileDia = null, expert = null;
-        try { fileDia = Convert.ToInt32(Application.GetSystemVariable("FILEDIA")); } catch { }
-        try { expert = Convert.ToInt32(Application.GetSystemVariable("EXPERT")); } catch { }
+        var findings = new List<QaFinding>();
+        try { fileDia = Convert.ToInt32(Application.GetSystemVariable("FILEDIA"), CultureInfo.InvariantCulture); }
+        catch (System.Exception ex) { findings.Add(SysvarReadFinding("FILEDIA", ex)); }
+        try { expert = Convert.ToInt32(Application.GetSystemVariable("EXPERT"), CultureInfo.InvariantCulture); }
+        catch (System.Exception ex) { findings.Add(SysvarReadFinding("EXPERT", ex)); }
 
-        var findings = ModalTrapHints.EvaluateAutomationSysvars(fileDia, expert, commandActive: false, modalDialogLikely: false);
+        findings.AddRange(ModalTrapHints.EvaluateAutomationSysvars(fileDia, expert, commandActive: false, modalDialogLikely: false));
         var report = QaReport.FromFindings(ActiveDocumentPath(), findings, new { fileDia, expert });
         return ForgeResult.Success(command.Id, report, verification: new ForgeVerification
         {
@@ -257,6 +278,17 @@ public sealed partial class PluginCommandProcessor
         });
     }
 
+    /// <summary>
+    /// An unreadable sysvar must not read as "trap absent": report the exact read failure.
+    /// </summary>
+    private static QaFinding SysvarReadFinding(string name, System.Exception exception)
+        => new(
+            "plot_env_read_failed",
+            "error",
+            $"System variable {name} could not be read: {exception.GetType().Name}: {exception.Message}",
+            "Repair the AutoCAD session profile; automation-trap risk cannot be assessed without this value.",
+            "forge_qa_modal_trap");
+
     private sealed record ClosureWalkArgs
     {
         public int? MaxDepth { get; init; }
@@ -278,22 +310,28 @@ public sealed partial class PluginCommandProcessor
         maxDepth = XrefClosureEval.ClampMaxDepth(maxDepth);
         var results = new List<XrefClosureNode>();
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var queue = new Queue<(string? ParentName, string Name, string Path, bool IsOverlay, bool IsUnloaded, string? Status, int Depth)>();
+        var queue = new Queue<XrefNodeInfo>();
 
         foreach (var xref in ReadXrefs())
         {
-            var type = xref.GetType();
-            var name = type.GetProperty("name")?.GetValue(xref)?.ToString() ?? "";
-            var path = ResolveXrefFullPath(type.GetProperty("path")?.GetValue(xref)?.ToString());
-            var isUnloaded = Equals(type.GetProperty("isUnloaded")?.GetValue(xref), true);
-            var isOverlay = Equals(type.GetProperty("isOverlay")?.GetValue(xref), true);
-            var status = type.GetProperty("status")?.GetValue(xref)?.ToString();
-            queue.Enqueue((null, name, path, isOverlay, isUnloaded, status, 1));
+            queue.Enqueue(xref with
+            {
+                Path = ResolveXrefFullPath(xref.Path),
+                Depth = 1,
+                ParentName = null
+            });
         }
 
         while (queue.Count > 0)
         {
-            var (parent, name, path, isOverlay, isUnloaded, status, depth) = queue.Dequeue();
+            var xref = queue.Dequeue();
+            var parent = xref.ParentName;
+            var name = xref.Name;
+            var path = xref.Path;
+            var isOverlay = xref.IsOverlay;
+            var isUnloaded = xref.IsUnloaded;
+            var status = xref.Status;
+            var depth = xref.Depth;
             var normKey = string.IsNullOrWhiteSpace(path) ? $"{parent}>{name}" : path;
             if (!visited.Add(normKey))
             {
@@ -342,9 +380,11 @@ public sealed partial class PluginCommandProcessor
                 continue;
             }
 
-            if (!TryReadNestedXrefs(path, out var children, out _))
+            if (!TryReadNestedXrefs(path, out var children, out var readError))
             {
-                results[^1] = new XrefClosureNode
+                Application.DocumentManager.MdiActiveDocument?.Editor.WriteMessage(
+                    $"\n[765T-Forge] Nested xref read failed for '{path}': {readError}");
+                results[results.Count - 1] = new XrefClosureNode
                 {
                     Name = name,
                     Path = path,
@@ -360,7 +400,7 @@ public sealed partial class PluginCommandProcessor
 
             foreach (var child in children)
             {
-                queue.Enqueue((name, child.Name, child.Path, child.IsOverlay, child.IsUnloaded, child.Status, depth + 1));
+                queue.Enqueue(child with { ParentName = name, Depth = depth + 1 });
             }
         }
 
@@ -395,48 +435,57 @@ public sealed partial class PluginCommandProcessor
         }
     }
 
-    private sealed record NestedXrefRef(string Name, string Path, bool IsOverlay, bool IsUnloaded, string? Status);
-
-    private static bool TryReadNestedXrefs(string dwgPath, out List<NestedXrefRef> children, out string? error)
+    private static bool TryReadNestedXrefs(string dwgPath, out List<XrefNodeInfo> children, out string? error)
     {
         children = [];
         error = null;
-        Database? db = null;
         try
         {
-            db = new Database(false, true);
-            db.ReadDwgFile(dwgPath, FileOpenMode.OpenForReadAndAllShare, true, null);
-            using var tr = db.TransactionManager.StartTransaction();
-            var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
-            foreach (ObjectId id in blockTable)
+            using (var db = new Database(false, true))
             {
-                var btr = (BlockTableRecord)tr.GetObject(id, OpenMode.ForRead);
-                if (!btr.IsFromExternalReference && !btr.IsFromOverlayReference)
+                try
                 {
-                    continue;
+                    db.ReadDwgFile(dwgPath, FileOpenMode.OpenForReadAndAllShare, true, null);
+                    using var tr = db.TransactionManager.StartTransaction();
+                    var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+                    foreach (ObjectId id in blockTable)
+                    {
+                        var btr = (BlockTableRecord)tr.GetObject(id, OpenMode.ForRead);
+                        if (!btr.IsFromExternalReference && !btr.IsFromOverlayReference)
+                        {
+                            continue;
+                        }
+
+                        var resolved = ResolveXrefFullPathAgainst(btr.PathName, dwgPath);
+                        children.Add(new XrefNodeInfo(
+                            btr.Name,
+                            resolved,
+                            btr.IsFromOverlayReference,
+                            btr.IsUnloaded,
+                            btr.XrefStatus.ToString(),
+                            XrefNodeInfo.NoTabOrder,
+                            0,
+                            null)
+                        {
+                            PathExists = !string.IsNullOrWhiteSpace(resolved) && File.Exists(resolved)
+                        });
+                    }
+
+                    tr.Commit();
+                    return true;
                 }
-
-                var resolved = ResolveXrefFullPathAgainst(btr.PathName, dwgPath);
-                children.Add(new NestedXrefRef(
-                    btr.Name,
-                    resolved,
-                    btr.IsFromOverlayReference,
-                    btr.IsUnloaded,
-                    btr.XrefStatus.ToString()));
+                catch (System.Exception ex)
+                {
+                    error = ex.Message;
+                    children = [];
+                    return false;
+                }
             }
-
-            tr.Commit();
-            return true;
         }
         catch (System.Exception ex)
         {
             error = ex.Message;
-            children = [];
             return false;
-        }
-        finally
-        {
-            db?.Dispose();
         }
     }
 

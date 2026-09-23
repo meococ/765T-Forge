@@ -6,7 +6,7 @@ namespace Forge.Tests;
 public sealed class FixtureGoldenTests
 {
     [Fact]
-    public void HealthFixture_HasOkStatus()
+    public void HealthFixtureHasOkStatus()
     {
         var path = Path.Combine(AppContext.BaseDirectory, "Fixtures", "health-ok.json");
         if (!File.Exists(path))
@@ -20,7 +20,7 @@ public sealed class FixtureGoldenTests
     }
 
     [Fact]
-    public void PreflightFailFixture_IsNotPassed()
+    public void PreflightFailFixtureIsNotPassed()
     {
         var path = FindRepoFile("tests/Forge.Tests/Fixtures/preflight-fail.json");
         var report = JsonSerializer.Deserialize<QaReport>(File.ReadAllText(path), ForgeJson.Options);

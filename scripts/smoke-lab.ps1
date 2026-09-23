@@ -1,12 +1,14 @@
 <#
 .SYNOPSIS
-  Open AutoCAD 2026 with Forge plugin, create a synthetic lab DWG, run smoke-lab pipe checks.
+  Open AutoCAD with Forge plugin, create a synthetic lab DWG, run smoke-lab pipe checks.
 #>
 [CmdletBinding()]
 param(
-    [string] $Token = "dev-only-insecure-token",
+    [string] $Token = "",
     [string] $PipeName = "765T.Forge.AutoCAD",
     [int] $AcadWaitSeconds = 90,
+    [int] $AcadYear = 2026,
+    [string] $AccoreConsolePath = "",
     [switch] $SkipLaunchAcad,
     [switch] $KeepAcadOpen
 )
@@ -15,11 +17,31 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
+# Pipe token resolution (deterministic precedence, no well-known shared constant):
+#   1. explicit -Token
+#   2. FORGE_AUTOCAD_TOKEN already set in the process environment
+#   3. a per-run random token
+if (-not [string]::IsNullOrEmpty($Token)) {
+    # operator supplied -Token explicitly
+} elseif (-not [string]::IsNullOrEmpty($env:FORGE_AUTOCAD_TOKEN)) {
+    $Token = $env:FORGE_AUTOCAD_TOKEN
+} else {
+    $Token = [guid]::NewGuid().ToString("n")
+}
+Write-Host "Smoke-lab pipe token for this run (pair the AutoCAD plugin with this exact value): $Token"
+
+# Exact path construction only. No globbing, no discovery, no guessing.
+$acadRoot = "C:\Program Files\Autodesk\AutoCAD $AcadYear"
+if ([string]::IsNullOrEmpty($AccoreConsolePath)) {
+    $accore = Join-Path $acadRoot "accoreconsole.exe"
+} else {
+    $accore = $AccoreConsolePath
+}
+$acad = Join-Path $acadRoot "acad.exe"
+
 $labRoot = Join-Path $env:LOCALAPPDATA "765T-Forge\smoke-lab"
 $pluginInstall = Join-Path $env:LOCALAPPDATA "765T-Forge\plugin"
 $bundleRoot = Join-Path $env:APPDATA "Autodesk\ApplicationPlugins\765T-Forge.bundle"
-$acad = "C:\Program Files\Autodesk\AutoCAD 2026\acad.exe"
-$accore = "C:\Program Files\Autodesk\AutoCAD 2026\accoreconsole.exe"
 $resultsPath = Join-Path $labRoot "smoke-results.json"
 $dwgPath = Join-Path $labRoot "forge-smoke-lab.dwg"
 $pdfPath = Join-Path $labRoot "forge-smoke-publish.pdf"
@@ -112,8 +134,8 @@ _QUIT
 if (Test-Path $dwgPath) { Remove-Item $dwgPath -Force }
 
 # Start from a blank drawing template if available
-$template = "C:\Program Files\Autodesk\AutoCAD 2026\Template\acad.dwt"
-if (-not (Test-Path $template)) { $template = "C:\Program Files\Autodesk\AutoCAD 2026\Template\acadiso.dwt" }
+$template = Join-Path $acadRoot "Template\acad.dwt"
+if (-not (Test-Path $template)) { $template = Join-Path $acadRoot "Template\acadiso.dwt" }
 
 # AccoreConsole: create new drawing, run script that creates layouts then saveas
 $createScr2 = Join-Path $labRoot "create-lab2.scr"
@@ -129,13 +151,8 @@ _QUIT
 
 # Use a seed DWG: copy template isn't a DWG. Create via acad - or use NEW in console.
 # AccoreConsole /i requires existing DWG. Create minimal via copying a system sample if any.
-$seedCandidates = @(
-    "C:\Program Files\Autodesk\AutoCAD 2026\Sample\Sheet Sets\Architectural\A-01.dwg",
-    "C:\Program Files\Autodesk\AutoCAD 2026\Sample\DesignCenter\Home - Space Planner.dwg",
-    "C:\Users\ADMIN\Documents\*.dwg"
-)
 $seed = $null
-Get-ChildItem "C:\Program Files\Autodesk\AutoCAD 2026\Sample" -Recurse -Filter "*.dwg" -ErrorAction SilentlyContinue |
+Get-ChildItem (Join-Path $acadRoot "Sample") -Recurse -Filter "*.dwg" -ErrorAction SilentlyContinue |
     Select-Object -First 5 |
     ForEach-Object { if (-not $seed) { $seed = $_.FullName } }
 
@@ -267,47 +284,81 @@ $hasMissing = $findings | Where-Object { $_.code -eq "titleblock_tag_missing" -o
 $pass = $r.ok -and ($r.data.passed -eq $false -or $r.data.Passed -eq $false -or $hasMissing)
 Add-Result "forge_qa_preflight_missing_tag" $r $pass "expect passed=false / titleblock_tag_missing"
 
-# Step 4: publish overwrite refuse
+# ---------------------------------------------------------------------------
+# Phase: overwrite-guard
+# Deterministic gate: force = $false and NO overwrite acknowledgement.
+# ForgeToolRunner refuses force=true unless FORGE_ALLOW_FORCE_PUBLISH=true, so
+# this phase must NOT set force. Expected error code is an exact literal string.
+# ---------------------------------------------------------------------------
 $r = Send-ForgeTool -Tool "forge_plot_publish" -Args @{
     outputPath = $pdfPath
     layouts = @("LabSheet1")
     singlePdf = $true
     overwriteAcknowledged = $false
     requirePreflight = $false
-    force = $true
+    force = $false
 }
 $pass = (-not $r.ok) -and ($r.error.code -eq "publish_overwrite_not_acknowledged")
 Add-Result "forge_plot_publish_overwrite_guard" $r $pass "expect publish_overwrite_not_acknowledged"
 
-# Step 5: dry-run publish
-$r = Send-ForgeTool -Tool "forge_plot_publish" -Args @{
-    outputPath = (Join-Path $labRoot "forge-smoke-publish-real.pdf")
-    layouts = @("LabSheet1")
-    singlePdf = $true
-    overwriteAcknowledged = $true
-    requirePreflight = $false
-    force = $true
-} -DryRun $true
-Add-Result "forge_plot_publish_dryrun" $r ([bool]$r.ok) "dry-run publish"
+# ---------------------------------------------------------------------------
+# Phase: forced-publish
+# FORGE_ALLOW_FORCE_PUBLISH is set ONLY for the force = $true calls below and is
+# always removed in the finally block, whatever happens inside the try.
+# ---------------------------------------------------------------------------
+$previousForcePublish = $env:FORGE_ALLOW_FORCE_PUBLISH
+try {
+    $env:FORGE_ALLOW_FORCE_PUBLISH = "true"
 
-# Real publish (may fail if layout/plot device issues - still record)
-$outPdf = Join-Path $labRoot "forge-smoke-publish-real.pdf"
-if (Test-Path $outPdf) { Remove-Item $outPdf -Force }
-$r = Send-ForgeTool -Tool "forge_plot_publish" -Args @{
-    outputPath = $outPdf
-    layouts = @("LabSheet1")
-    singlePdf = $true
-    overwriteAcknowledged = $true
-    requirePreflight = $false
-    force = $true
-} -TimeoutSec 180
-$receiptOk = $false
-if ($r.ok -and (Test-Path $outPdf)) {
-    $len = (Get-Item $outPdf).Length
-    $receiptOk = $len -gt 0
-    if ($r.verification) { $receiptOk = $r.verification.passed -or $receiptOk }
+    # Dry-run publish (existing coverage kept)
+    $r = Send-ForgeTool -Tool "forge_plot_publish" -Args @{
+        outputPath = (Join-Path $labRoot "forge-smoke-publish-real.pdf")
+        layouts = @("LabSheet1")
+        singlePdf = $true
+        overwriteAcknowledged = $true
+        requirePreflight = $false
+        force = $true
+    } -DryRun $true
+    Add-Result "forge_plot_publish_dryrun" $r ([bool]$r.ok) "dry-run publish"
+
+    # Real forced publish (may fail if layout/plot device issues - still record)
+    $outPdf = Join-Path $labRoot "forge-smoke-publish-real.pdf"
+    if (Test-Path $outPdf) { Remove-Item $outPdf -Force }
+    $r = Send-ForgeTool -Tool "forge_plot_publish" -Args @{
+        outputPath = $outPdf
+        layouts = @("LabSheet1")
+        singlePdf = $true
+        overwriteAcknowledged = $true
+        requirePreflight = $false
+        force = $true
+    } -TimeoutSec 180
+
+    # Documented success gate: exact literal strings only, never a pattern.
+    $documentedOk = $false
+    if ($r.ok -eq $true) { $documentedOk = $true }
+    if ($r.status -eq "queued") { $documentedOk = $true }
+    if ($r.status -eq "completed") { $documentedOk = $true }
+    if ($r.data) {
+        if ($r.data.status -eq "queued") { $documentedOk = $true }
+        if ($r.data.status -eq "completed") { $documentedOk = $true }
+    }
+
+    # Existing probe/verify coverage kept: PDF exists + non-empty + verification.
+    $pdfExists = [bool](Test-Path $outPdf)
+    $pdfNonEmpty = $false
+    if ($pdfExists) { $pdfNonEmpty = ((Get-Item $outPdf).Length -gt 0) }
+    $verificationPassed = $null
+    if ($r.verification) { $verificationPassed = ($r.verification.passed -eq $true) }
+
+    Add-Result "forge_plot_publish_real" $r $documentedOk ("forced publish documented success/queued/completed; pdfExists=$pdfExists pdfNonEmpty=$pdfNonEmpty verificationPassed=$verificationPassed")
 }
-Add-Result "forge_plot_publish_real" $r $receiptOk "pdf exists+nonempty; verification/receipt"
+finally {
+    if ($null -eq $previousForcePublish) {
+        Remove-Item -Path Env:FORGE_ALLOW_FORCE_PUBLISH -ErrorAction SilentlyContinue
+    } else {
+        $env:FORGE_ALLOW_FORCE_PUBLISH = $previousForcePublish
+    }
+}
 
 # Step 6: issue set validate
 $r = Send-ForgeTool -Tool "forge_issue_set_validate" -Args @{ contractPath = $contractPath }

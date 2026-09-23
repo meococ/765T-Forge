@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Forge.Server;
 
-public sealed class ForgePipeClient
+public sealed partial class ForgePipeClient
 {
     private readonly ForgeEnvironment _environment;
     private readonly ILogger<ForgePipeClient> _logger;
@@ -16,6 +16,9 @@ public sealed class ForgePipeClient
         _environment = environment;
         _logger = logger;
     }
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Named pipe request failed.")]
+    private partial void LogPipeRequestFailed(Exception exception);
 
     public async Task<ForgeResult> SendAsync(ForgeCommand command, CancellationToken cancellationToken = default)
     {
@@ -67,7 +70,7 @@ public sealed class ForgePipeClient
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Named pipe request failed.");
+            LogPipeRequestFailed(ex);
             return ForgeResult.Failure(
                 command.Id,
                 "plugin_unavailable",

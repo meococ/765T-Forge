@@ -38,24 +38,52 @@ public sealed class CdeGateRules
                 "forge_cde_gate_evaluate"));
         }
 
-        if (!string.IsNullOrWhiteSpace(NamingRegex) && !string.IsNullOrWhiteSpace(drawingNo)
-            && !Regex.IsMatch(drawingNo, NamingRegex))
+        if (!string.IsNullOrWhiteSpace(NamingRegex) && !string.IsNullOrWhiteSpace(drawingNo))
         {
-            findings.Add(new QaFinding(
-                "cde_naming_invalid",
-                "error",
-                $"Drawing number '{drawingNo}' fails CDE naming regex.",
-                SuggestedTool: "forge_cde_gate_evaluate"));
+            try
+            {
+                var naming = new Regex(NamingRegex!, RegexOptions.CultureInvariant, ForgeConstants.RegexMatchTimeout);
+                if (!naming.IsMatch(drawingNo))
+                {
+                    findings.Add(new QaFinding(
+                        "cde_naming_invalid",
+                        "error",
+                        $"Drawing number '{drawingNo}' fails CDE naming regex.",
+                        SuggestedTool: "forge_cde_gate_evaluate"));
+                }
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                findings.Add(new QaFinding(
+                    "regex_timeout",
+                    "error",
+                    $"CDE naming regex '{NamingRegex}' exceeded {ForgeConstants.RegexMatchTimeoutMilliseconds} ms for drawing number '{drawingNo}'.",
+                    SuggestedTool: "forge_cde_gate_evaluate"));
+            }
         }
 
-        if (!string.IsNullOrWhiteSpace(RevisionScheme) && !string.IsNullOrWhiteSpace(rev)
-            && !Regex.IsMatch(rev, RevisionScheme))
+        if (!string.IsNullOrWhiteSpace(RevisionScheme) && !string.IsNullOrWhiteSpace(rev))
         {
-            findings.Add(new QaFinding(
-                "cde_rev_invalid",
-                "error",
-                $"Revision '{rev}' fails scheme '{RevisionScheme}'.",
-                SuggestedTool: "forge_cde_gate_evaluate"));
+            try
+            {
+                var scheme = new Regex(RevisionScheme!, RegexOptions.CultureInvariant, ForgeConstants.RegexMatchTimeout);
+                if (!scheme.IsMatch(rev))
+                {
+                    findings.Add(new QaFinding(
+                        "cde_rev_invalid",
+                        "error",
+                        $"Revision '{rev}' fails scheme '{RevisionScheme}'.",
+                        SuggestedTool: "forge_cde_gate_evaluate"));
+                }
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                findings.Add(new QaFinding(
+                    "regex_timeout",
+                    "error",
+                    $"CDE revision scheme regex '{RevisionScheme}' exceeded {ForgeConstants.RegexMatchTimeoutMilliseconds} ms for revision '{rev}'.",
+                    SuggestedTool: "forge_cde_gate_evaluate"));
+            }
         }
 
         return findings;
@@ -67,7 +95,7 @@ public sealed class CdeGateRules
         {
             Directory.CreateDirectory(directory);
             var path = Path.Combine(directory, "cde-sidecar.json");
-            File.WriteAllText(path, JsonSerializer.Serialize(metadata, ForgeJson.Options));
+            AtomicFile.WriteAllText(path, JsonSerializer.Serialize(metadata, ForgeJson.Options));
             return path;
         }
         catch

@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.EditorInput;
@@ -31,14 +32,70 @@ public sealed partial class PluginCommandProcessor
         _auditSink = auditSink;
     }
 
+    /// <summary>
+    /// Synchronous entry point for tools whose AutoCAD work completes synchronously. It refuses
+    /// <c>forge_exec_dotnet</c> with an explicit failure instead of blocking on async work, so the
+    /// old sync-over-async deadlock cannot be reintroduced. The named-pipe server routes that one
+    /// tool through <see cref="ProcessAsync"/> so Roslyn scripts run on a genuinely awaited path.
+    /// </summary>
     public ForgeResult Process(ForgeCommand command)
     {
-        if (!string.Equals(command.AuthToken, _environment.Token, StringComparison.Ordinal))
+        if (ForgeAsyncDispatch.RequiresAwaitedDispatch(command.Tool))
+        {
+            return ForgeResult.Failure(
+                command.Id,
+                "async_dispatch_required",
+                $"{command.Tool} requires the awaited dispatch path and cannot run synchronously.",
+                "Dispatch through PluginCommandProcessor.ProcessAsync inside the AutoCAD command context.");
+        }
+
+        return ProcessAsync(command, CancellationToken.None).GetAwaiter().GetResult();
+    }
+
+    public Task<ForgeResult> ProcessAsync(ForgeCommand command, CancellationToken cancellationToken = default)
+        => ProcessGuardedAsync(command, cancellationToken);
+
+    /// <summary>
+    /// Maps a malformed <c>args</c> payload to a determinate <c>invalid_args</c> failure.
+    /// Without this, a JSON shape the tool's argument record cannot bind throws out of the
+    /// dispatch and surfaces as a generic <c>plugin_exception</c>, which tells the caller
+    /// nothing about what to fix.
+    /// </summary>
+    private async Task<ForgeResult> ProcessGuardedAsync(ForgeCommand command, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await ProcessCoreAsync(command, cancellationToken).ConfigureAwait(true);
+        }
+        catch (JsonException ex)
+        {
+            return ForgeResult.Failure(
+                command.Id,
+                "invalid_args",
+                $"args does not match the schema for {command.Tool}: {ex.Message}",
+                "Send args as a JSON object whose property types match the tool input schema.");
+        }
+    }
+
+    private async Task<ForgeResult> ProcessCoreAsync(ForgeCommand command, CancellationToken cancellationToken)
+    {
+        // Single plugin-boundary check for the wire-supplied command id. The id is interpolated
+        // into temporary file names, so it must match ^[A-Za-z0-9-]{1,64}$ exactly.
+        if (!ForgeCommandId.IsValid(command.Id))
+        {
+            return ForgeResult.Failure(
+                "",
+                "invalid_command_id",
+                "command.Id must match ^[A-Za-z0-9-]{1,64}$.",
+                "Send a GUID-style id (hex and dashes only).");
+        }
+
+        if (!ForgeTokenComparison.Equals(command.AuthToken, _environment.Token))
         {
             return ForgeResult.Failure(command.Id, "unauthorized", "Invalid Forge named pipe token.");
         }
 
-        var decision = _safetyPolicy.Evaluate(command);
+        var decision = _safetyPolicy.Evaluate(command, _environment.EnableUnsafeOps);
         var auditId = _auditSink.WriteBestEffort(new AuditRecord
         {
             Source = "plugin",
@@ -68,6 +125,12 @@ public sealed partial class PluginCommandProcessor
         {
             backupPath = _backupPlanner.TryBackup(ActiveDocumentPath());
         }
+
+        Task<ForgeResult> DispatchAsync() => command.Tool.ToLowerInvariant() switch
+        {
+            "forge_exec_dotnet" => ExecDotNetAsync(command, cancellationToken),
+            _ => Task.FromResult(Dispatch())
+        };
 
         ForgeResult Dispatch() => command.Tool.ToLowerInvariant() switch
         {
@@ -113,7 +176,6 @@ public sealed partial class PluginCommandProcessor
             "forge_viewport_set_layer_freeze" => ViewportSetLayerFreeze(command),
             "forge_exec_command" => ExecCommand(command),
             "forge_exec_lisp" => ExecLisp(command),
-            "forge_exec_dotnet" => ExecDotNet(command),
             "forge_qa_plot_fingerprint" => QaPlotFingerprint(command),
             "forge_qa_dependency_closure" => QaDependencyClosure(command),
             "forge_qa_dual_source" => QaDualSource(command),
@@ -127,47 +189,79 @@ public sealed partial class PluginCommandProcessor
             _ => ForgeResult.Failure(command.Id, "unknown_tool", $"Unknown Forge tool: {command.Tool}")
         };
 
-        var result = metadata.ReadOnly || command.DryRun
-            ? Dispatch()
-            : WithUndoMark(Dispatch);
+        ForgeResult result;
+        UndoWarning[] undoWarnings = [];
+        if (metadata.ReadOnly || command.DryRun)
+        {
+            result = await DispatchAsync().ConfigureAwait(true);
+        }
+        else
+        {
+            var scope = await WithUndoMarkAsync(() => DispatchAsync()).ConfigureAwait(true);
+            result = scope.Result;
+            undoWarnings = scope.Warnings;
+        }
+
+        object? data = result.Ok && backupPath is not null
+            ? new { result.Data, backupPath }
+            : result.Data;
+        if (undoWarnings.Length > 0)
+        {
+            data = new { result.Data, backupPath, undoWarnings };
+        }
 
         return result with
         {
             AuditId = auditId,
-            Data = result.Ok && backupPath is not null
-                ? new { result.Data, backupPath }
-                : result.Data
+            Data = data
         };
     }
 
-    private static ForgeResult WithUndoMark(Func<ForgeResult> action)
+    private sealed record UndoWarning(string Code, string Message);
+
+    private sealed record UndoScope(ForgeResult Result, UndoWarning[] Warnings);
+
+    /// <summary>
+    /// Opens a real AutoCAD undo group with <c>_.UNDO _BE</c> (Begin) and closes it with
+    /// <c>_.UNDO _E</c> (End). <c>_M</c>/<c>_E</c> is NOT a pair — Mark/Back is a different
+    /// pair — so the previous implementation never actually grouped anything.
+    /// A close failure is surfaced as an explicit <c>undo_group_close_failed</c> warning.
+    /// </summary>
+    private static async Task<UndoScope> WithUndoMarkAsync(Func<Task<ForgeResult>> action)
     {
-        // AutoCAD 2026 Document no longer exposes StartUndoMark/EndUndoMark on the managed Document type.
-        // Use a synchronous UNDO group so typed writes remain one Ctrl+Z unit when possible.
+        var warnings = new List<UndoWarning>();
+        var grouped = false;
         try
         {
-            ActiveEditor.Command("_.UNDO", "_M");
+            ActiveEditor.Command("_.UNDO", "_BE");
+            grouped = true;
         }
-        catch
+        catch (System.Exception ex)
         {
-            // Best effort — still execute the action if undo mark cannot be opened.
+            warnings.Add(new UndoWarning("undo_group_open_failed", ex.Message));
         }
 
+        ForgeResult result;
         try
         {
-            return action();
+            result = await action().ConfigureAwait(true);
         }
         finally
         {
-            try
+            if (grouped)
             {
-                ActiveEditor.Command("_.UNDO", "_E");
-            }
-            catch
-            {
-                // Best effort close.
+                try
+                {
+                    ActiveEditor.Command("_.UNDO", "_E");
+                }
+                catch (System.Exception ex)
+                {
+                    warnings.Add(new UndoWarning("undo_group_close_failed", ex.Message));
+                }
             }
         }
+
+        return new UndoScope(result, warnings.ToArray());
     }
 
     private static DocumentCollection Documents => Application.DocumentManager;
@@ -177,7 +271,7 @@ public sealed partial class PluginCommandProcessor
 
     private static T Args<T>(ForgeCommand command) where T : new()
     {
-        return ForgeJson.FromElement<T>(command.Args) ?? new T();
+        return ForgeJson.ArgsOrDefault<T>(command.Args);
     }
 
     private static string? ActiveDocumentPath()
@@ -204,12 +298,13 @@ public sealed partial class PluginCommandProcessor
 
     private static ForgeResult Version(ForgeCommand command)
     {
+        var autoCadVersion = Application.Version.ToString();
         return ForgeResult.Success(command.Id, new
         {
             forge = ForgeConstants.ProductVersion,
             envelope = ForgeConstants.EnvelopeVersion,
-            autocadTarget = ForgeConstants.AutoCadVersion,
-            autocadApplication = Application.Version.ToString(),
+            autocadTarget = autoCadVersion,
+            autocadApplication = autoCadVersion,
             dotnet = Environment.Version.ToString()
         });
     }
@@ -279,23 +374,26 @@ public sealed partial class PluginCommandProcessor
 
     private static ForgeResult ListLayouts(ForgeCommand command)
     {
-        var layouts = new List<object>();
+        var layouts = new List<LayoutInfo>();
         using var tr = ActiveDb.TransactionManager.StartTransaction();
         var layoutDict = (DBDictionary)tr.GetObject(ActiveDb.LayoutDictionaryId, OpenMode.ForRead);
         foreach (DBDictionaryEntry entry in layoutDict)
         {
             var layout = (Layout)tr.GetObject(entry.Value, OpenMode.ForRead);
-            layouts.Add(new
-            {
-                name = layout.LayoutName,
-                tabOrder = layout.TabOrder,
-                modelType = layout.ModelType
-            });
+            layouts.Add(new LayoutInfo(layout.LayoutName, layout.TabOrder, layout.ModelType));
         }
 
         tr.Commit();
-        return ForgeResult.Success(command.Id, new { layouts = layouts.OrderBy(x => x.GetType().GetProperty("tabOrder")?.GetValue(x)) });
+        return ForgeResult.Success(command.Id, new
+        {
+            layouts = layouts
+                .OrderBy(x => x.TabOrder)
+                .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+                .ToArray()
+        });
     }
+
+    private sealed record LayoutInfo(string Name, int TabOrder, bool ModelType);
 
     private static ForgeResult OpenDocument(ForgeCommand command)
     {
@@ -317,8 +415,15 @@ public sealed partial class PluginCommandProcessor
 
         var previousFileDia = Application.GetSystemVariable("FILEDIA");
         Application.SetSystemVariable("FILEDIA", 0);
-        Documents.Open(args.Path, false);
-        Application.SetSystemVariable("FILEDIA", previousFileDia);
+        try
+        {
+            Documents.Open(args.Path, false);
+        }
+        finally
+        {
+            Application.SetSystemVariable("FILEDIA", previousFileDia);
+        }
+
         return ForgeResult.Success(command.Id, new { opened = args.Path });
     }
 
@@ -364,9 +469,9 @@ public sealed partial class PluginCommandProcessor
         return ForgeResult.Success(command.Id, new { xrefs = ReadXrefs() });
     }
 
-    private static object[] ReadXrefs()
+    private static XrefNodeInfo[] ReadXrefs()
     {
-        var xrefs = new List<object>();
+        var xrefs = new List<XrefNodeInfo>();
         using var tr = ActiveDb.TransactionManager.StartTransaction();
         var blockTable = (BlockTable)tr.GetObject(ActiveDb.BlockTableId, OpenMode.ForRead);
         foreach (ObjectId id in blockTable)
@@ -377,19 +482,25 @@ public sealed partial class PluginCommandProcessor
                 continue;
             }
 
-            xrefs.Add(new
+            xrefs.Add(new XrefNodeInfo(
+                btr.Name,
+                btr.PathName ?? "",
+                btr.IsFromOverlayReference,
+                btr.IsUnloaded,
+                btr.XrefStatus.ToString(),
+                XrefNodeInfo.NoTabOrder,
+                1,
+                null)
             {
-                name = btr.Name,
-                path = btr.PathName,
-                isUnloaded = btr.IsUnloaded,
-                isOverlay = btr.IsFromOverlayReference,
-                status = btr.XrefStatus.ToString(),
-                pathExists = XrefPathExists(btr.PathName)
+                PathExists = XrefPathExists(btr.PathName)
             });
         }
 
         tr.Commit();
-        return xrefs.ToArray();
+        return xrefs
+            .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static bool XrefPathExists(string? pathName)
@@ -420,8 +531,9 @@ public sealed partial class PluginCommandProcessor
 
             return File.Exists(Path.GetFullPath(Path.Combine(hostDir, pathName)));
         }
-        catch
+        catch (System.Exception ex) when (ex is ArgumentException or PathTooLongException or NotSupportedException or System.Security.SecurityException)
         {
+            // An unresolvable path is treated as missing (fail closed), never as healthy.
             return false;
         }
     }
@@ -430,7 +542,7 @@ public sealed partial class PluginCommandProcessor
     {
         var args = Args<NameArgs>(command);
         using var tr = ActiveDb.TransactionManager.StartTransaction();
-        var ids = FindXrefIds(tr, args.Name);
+        using var ids = FindXrefIds(tr, args.Name);
         if (ids.Count == 0)
         {
             return ForgeResult.Failure(command.Id, "xref_not_found", string.IsNullOrWhiteSpace(args.Name) ? "No xrefs found." : $"Xref not found: {args.Name}");
@@ -460,7 +572,7 @@ public sealed partial class PluginCommandProcessor
         }
 
         using var tr = ActiveDb.TransactionManager.StartTransaction();
-        var ids = FindXrefIds(tr, args.Name);
+        using var ids = FindXrefIds(tr, args.Name);
         if (ids.Count == 0)
         {
             return ForgeResult.Failure(command.Id, "xref_not_found", $"Xref not found: {args.Name}");
@@ -503,32 +615,43 @@ public sealed partial class PluginCommandProcessor
 
     private static ForgeResult ListLayers(ForgeCommand command)
     {
-        var layers = new List<object>();
+        return ForgeResult.Success(command.Id, new { layers = ReadLayers() });
+    }
+
+    private static LayerInfo[] ReadLayers()
+    {
+        var layers = new List<LayerInfo>();
         using var tr = ActiveDb.TransactionManager.StartTransaction();
         var layerTable = (LayerTable)tr.GetObject(ActiveDb.LayerTableId, OpenMode.ForRead);
         foreach (ObjectId id in layerTable)
         {
             var layer = (LayerTableRecord)tr.GetObject(id, OpenMode.ForRead);
-            layers.Add(new
-            {
-                name = layer.Name,
-                color = layer.Color.ColorIndex,
-                isOff = layer.IsOff,
-                isFrozen = layer.IsFrozen,
-                isLocked = layer.IsLocked,
-                lineWeight = layer.LineWeight.ToString(),
-                isPlottable = layer.IsPlottable
-            });
+            layers.Add(new LayerInfo(
+                layer.Name,
+                layer.Color.ColorIndex,
+                layer.IsOff,
+                layer.IsFrozen,
+                layer.IsLocked,
+                layer.LineWeight.ToString(),
+                layer.IsPlottable));
         }
 
         tr.Commit();
-        return ForgeResult.Success(command.Id, new { layers });
+        return layers.ToArray();
     }
+
+    private sealed record LayerInfo(
+        string Name,
+        int Color,
+        bool IsOff,
+        bool IsFrozen,
+        bool IsLocked,
+        string LineWeight,
+        bool IsPlottable);
 
     private static ForgeResult ListLayerStates(ForgeCommand command)
     {
-        var result = InvokeLayerStateManager("GetLayerStateNames");
-        return ForgeResult.Success(command.Id, new { layerStates = result });
+        return ForgeResult.Success(command.Id, new { layerStates = GetLayerStateNames() });
     }
 
     private static ForgeResult RestoreLayerState(ForgeCommand command)
@@ -562,7 +685,7 @@ public sealed partial class PluginCommandProcessor
                     Attempted = true,
                     Passed = true,
                     Message = "Layer state restored synchronously via LayerStateManager.",
-                    ReadBack = InvokeLayerStateManager("GetLayerStateNames")
+                    ReadBack = GetLayerStateNames()
                 });
         }
         catch (System.Exception ex)
@@ -575,23 +698,18 @@ public sealed partial class PluginCommandProcessor
         }
     }
 
-    private static object InvokeLayerStateManager(string methodName)
+    /// <summary>
+    /// Typed readback of the exact <c>LayerStateManager.GetLayerStateNames</c> API. The previous
+    /// reflection lookup searched for a parameterless overload that does not exist, so the method
+    /// silently returned an empty string instead of the real names.
+    /// </summary>
+    private static string[] GetLayerStateNames()
     {
-        var prop = typeof(Database).GetProperty("LayerStateManager");
-        var manager = prop?.GetValue(ActiveDb);
-        if (manager is null)
-        {
-            return Array.Empty<string>();
-        }
-
-        var method = manager.GetType().GetMethod(methodName, Type.EmptyTypes);
-        var value = method?.Invoke(manager, null);
-        if (value is IEnumerable enumerable && value is not string)
-        {
-            return enumerable.Cast<object>().Select(x => x.ToString()).Where(x => !string.IsNullOrWhiteSpace(x)).ToArray();
-        }
-
-        return value?.ToString() ?? "";
+        var manager = ActiveDb.LayerStateManager;
+        return manager.GetLayerStateNames(bIncludeHidden: true, bIncludeXref: true)
+            .Cast<string>()
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToArray();
     }
 
     private static ForgeResult ListBlockAttributes(ForgeCommand command)
@@ -652,15 +770,25 @@ public sealed partial class PluginCommandProcessor
 
                 attr.TextString = args.Value ?? "";
                 updated++;
-                readBack.Add(new { blockHandle = br.Handle.Value.ToString("X"), blockName = br.Name, tag = attr.Tag, value = attr.TextString });
+                readBack.Add(new { blockHandle = br.Handle.Value.ToString("X", CultureInfo.InvariantCulture), blockName = br.Name, tag = attr.Tag, value = attr.TextString });
             }
+        }
+
+        if (updated == 0)
+        {
+            // A tag that matches nothing must not read as a successful write.
+            return ForgeResult.Failure(
+                command.Id,
+                "block_attribute_not_found",
+                $"No block attribute matched tag '{args.Tag}' (blockName='{args.BlockName ?? "*"}', handle='{args.Handle ?? "*"}').",
+                "Call forge_block_list_attributes to confirm the exact tag and block selection.");
         }
 
         tr.Commit();
         return ForgeResult.Success(
             command.Id,
             new { updated, readBack },
-            verification: new ForgeVerification { Attempted = true, Passed = updated > 0, ReadBack = readBack });
+            verification: new ForgeVerification { Attempted = true, Passed = true, ReadBack = readBack });
     }
 
     private static ForgeResult? AuthorizeAttributeWrite(ForgeCommand command, string tag, string? value)
@@ -684,18 +812,26 @@ public sealed partial class PluginCommandProcessor
     private static IEnumerable<BlockAttributeValue> FindBlockAttributes(string? blockName, string? handle, bool forWrite)
     {
         using var tr = ActiveDb.TransactionManager.StartTransaction();
+        foreach (var value in FindBlockAttributes(tr, blockName, handle, forWrite))
+        {
+            yield return value;
+        }
+
+        tr.Commit();
+    }
+
+    private static IEnumerable<BlockAttributeValue> FindBlockAttributes(Transaction tr, string? blockName, string? handle, bool forWrite)
+    {
         foreach (var br in FindBlockReferences(tr, blockName, handle))
         {
             foreach (ObjectId attrId in br.AttributeCollection)
             {
                 if (tr.GetObject(attrId, forWrite ? OpenMode.ForWrite : OpenMode.ForRead) is AttributeReference attr)
                 {
-                    yield return new BlockAttributeValue(br.Handle.Value.ToString("X"), br.Name, attr.Tag, attr.TextString);
+                    yield return new BlockAttributeValue(br.Handle.Value.ToString("X", CultureInfo.InvariantCulture), br.Name, attr.Tag, attr.TextString);
                 }
             }
         }
-
-        tr.Commit();
     }
 
     private static IEnumerable<BlockReference> FindBlockReferences(Transaction tr, string? blockName, string? handle)
@@ -753,8 +889,9 @@ public sealed partial class PluginCommandProcessor
             objectId = ActiveDb.GetObjectId(false, new Handle(Convert.ToInt64(handle, 16)), 0);
             return !objectId.IsNull;
         }
-        catch
+        catch (System.Exception ex) when (ex is FormatException or OverflowException or Autodesk.AutoCAD.Runtime.Exception)
         {
+            // An unparsable or unknown handle resolves to no object (fail closed).
             return false;
         }
     }
@@ -767,7 +904,9 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, "missing_page_setup_args", "templatePath and setupName are required.");
         }
 
-        if (RejectControlChars(command, ("templatePath", args.TemplatePath), ("setupName", args.SetupName)) is { } reject)
+        // These two values are interpolated into the -PSETUPIN command string below; a quote
+        // cannot be escaped on the AutoCAD command line, so reject rather than escape.
+        if (ValidateCommandTokens(command, ("templatePath", args.TemplatePath), ("setupName", args.SetupName)) is { } reject)
         {
             return reject;
         }
@@ -817,19 +956,22 @@ public sealed partial class PluginCommandProcessor
                 queued = false,
                 completed = true,
                 mode = "sync_copy",
+                undoGrouped = true,
                 args.TemplatePath,
                 args.SetupName
             });
         }
         catch (System.Exception ex)
         {
-            // Fall back to classic command queue — honesty flags required.
-            ActiveDoc.SendStringToExecute($"_.-PSETUPIN \"{EscapeCommand(args.TemplatePath)}\" \"{EscapeCommand(args.SetupName)}\" ", true, false, false);
+            // Fall back to classic command queue — honesty flags required. SendStringToExecute
+            // runs after the undo group is closed, so this result is NOT undo-grouped.
+            ActiveDoc.SendStringToExecute($"_.-PSETUPIN \"{args.TemplatePath}\" \"{args.SetupName}\" ", true, false, false);
             return ForgeResult.Success(command.Id, new
             {
                 queued = true,
                 completed = false,
                 mode = "queued_psetupin",
+                undoGrouped = false,
                 fallbackReason = ex.Message,
                 args.TemplatePath,
                 args.SetupName
@@ -912,9 +1054,28 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, "missing_output_path", "outputPath is required.");
         }
 
-        if (RejectControlChars(command, ("outputPath", args.OutputPath), ("layout", args.Layout), ("device", args.Device), ("paperSize", args.PaperSize), ("plotStyle", args.PlotStyle)) is { } reject)
+        if (ValidateCommandTokens(
+                command,
+                ("outputPath", args.OutputPath),
+                ("layout", args.Layout),
+                ("device", args.Device),
+                ("paperSize", args.PaperSize),
+                ("plotStyle", args.PlotStyle),
+                ("plotArea", args.PlotArea),
+                ("orientation", args.Orientation),
+                ("scale", args.Scale),
+                ("units", args.Units)) is { } reject)
         {
             return reject;
+        }
+
+        if (!ForgePlotUnits.TryNormalize(args.Units, out var requestedUnits))
+        {
+            return ForgeResult.Failure(
+                command.Id,
+                "invalid_plot_units",
+                "units must be exactly 'Inches', 'Millimeters', or 'Pixels'.",
+                "Pass a PlotPaperUnit name exactly, or omit units to read the layout's PlotSettings.");
         }
 
         var outputPath = Path.GetFullPath(args.OutputPath!);
@@ -923,7 +1084,16 @@ public sealed partial class PluginCommandProcessor
         var orientation = string.IsNullOrWhiteSpace(args.Orientation) ? "Landscape" : args.Orientation!;
         var scale = string.IsNullOrWhiteSpace(args.Scale) ? "Fit" : args.Scale!;
         var plotStyle = string.IsNullOrWhiteSpace(args.PlotStyle) ? "." : args.PlotStyle!;
-        var units = string.IsNullOrWhiteSpace(args.Units) ? (paperSize.Contains("MM", StringComparison.OrdinalIgnoreCase) ? "Millimeters" : "Inches") : args.Units!;
+
+        // Units come from the real PlotSettings API, never from the paper-size name.
+        var units = requestedUnits;
+        var unitsSource = requestedUnits is null ? "not_available" : "request";
+        string? unitsError = null;
+        if (units is null && TryReadPlotPaperUnits(args.Layout, out var apiUnits, out unitsError))
+        {
+            units = apiUnits;
+            unitsSource = "plot_settings";
+        }
 
         if (command.DryRun)
         {
@@ -937,6 +1107,8 @@ public sealed partial class PluginCommandProcessor
                 scale,
                 plotStyle,
                 units,
+                unitsSource,
+                unitsError,
                 args.PlotArea,
                 args.OverwriteAcknowledged,
                 pstyleMode = Application.GetSystemVariable("PSTYLEMODE")
@@ -969,6 +1141,36 @@ public sealed partial class PluginCommandProcessor
         var plotArea = string.IsNullOrWhiteSpace(args.PlotArea)
             ? (isModel ? "Extents" : "Layout")
             : args.PlotArea!;
+
+        if (units is null && TryReadPlotPaperUnits(layoutName, out var resolvedUnits, out unitsError))
+        {
+            units = resolvedUnits;
+            unitsSource = "plot_settings";
+        }
+
+        if (units is null)
+        {
+            return ForgeResult.Failure(
+                command.Id,
+                "plot_units_unavailable",
+                $"Could not read PlotSettings.PlotPaperUnits for layout '{layoutName}' and no units were supplied ({unitsError ?? "no PlotSettings available"}).",
+                "Pass units explicitly as 'Inches', 'Millimeters', or 'Pixels'.");
+        }
+
+        if (ValidateCommandTokens(
+                command,
+                ("layoutName", layoutName),
+                ("device", device),
+                ("paperSize", paperSize),
+                ("units", units),
+                ("orientation", orientation),
+                ("plotArea", plotArea),
+                ("scale", scale),
+                ("plotStyle", plotStyle),
+                ("outputPath", outputPath)) is { } tokenReject)
+        {
+            return tokenReject;
+        }
 
         var previousFileDia = Application.GetSystemVariable("FILEDIA");
         var previousBgPlot = Application.GetSystemVariable("BACKGROUNDPLOT");
@@ -1060,6 +1262,41 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, "missing_publish_args", "outputPath and at least one layout are required.");
         }
 
+        // Exact command/DSD token validation for every field that reaches -PLOT or the DSD file.
+        // DsdWriter additionally rejects the DSD structural separators [ ] = as defense in depth.
+        var publishInputs = new List<(string Field, string? Value)>
+        {
+            ("outputPath", args.OutputPath),
+            ("titleblockBlockName", args.TitleblockBlockName)
+        };
+        for (var i = 0; i < args.Layouts.Length; i++)
+        {
+            publishInputs.Add(($"layouts[{i}]", args.Layouts[i]));
+        }
+
+        if (ValidateCommandTokens(command, publishInputs.ToArray()) is { } publishReject)
+        {
+            return publishReject;
+        }
+
+        try
+        {
+            DsdWriter.ValidateField("outputPath", args.OutputPath);
+            DsdWriter.ValidateField("titleblockBlockName", args.TitleblockBlockName);
+            for (var i = 0; i < args.Layouts.Length; i++)
+            {
+                DsdWriter.ValidateField($"layouts[{i}]", args.Layouts[i]);
+            }
+        }
+        catch (ArgumentException ex)
+        {
+            return ForgeResult.Failure(
+                command.Id,
+                "illegal_dsd_character",
+                ex.Message,
+                "DSD fields must not contain [ ] = or control characters.");
+        }
+
         if (!ForcePublishGate.IsAllowed(args.Force, _environment.AllowForcePublish))
         {
             return ForgeResult.Failure(
@@ -1123,6 +1360,7 @@ public sealed partial class PluginCommandProcessor
         var previousBgPlot = Application.GetSystemVariable("BACKGROUNDPLOT");
         object? previousBgCore = null;
         var bgCoreRestored = false;
+        string? bgCoreRestoreError = null;
         Application.SetSystemVariable("BACKGROUNDPLOT", 0);
         try
         {
@@ -1131,6 +1369,7 @@ public sealed partial class PluginCommandProcessor
         }
         catch
         {
+            // BGCOREPUBLISH is absent in some builds; the response records that it was not forced.
             previousBgCore = null;
         }
 
@@ -1163,9 +1402,11 @@ public sealed partial class PluginCommandProcessor
                     Application.SetSystemVariable("BGCOREPUBLISH", previousBgCore);
                     bgCoreRestored = true;
                 }
-                catch
+                catch (System.Exception ex)
                 {
-                    // Best-effort restore.
+                    // Surface the failed restore instead of hiding it: later plots would
+                    // silently run with the forced BGCOREPUBLISH value.
+                    bgCoreRestoreError = ex.Message;
                 }
             }
 
@@ -1199,7 +1440,8 @@ public sealed partial class PluginCommandProcessor
                     dsdExceptionType,
                     dsdWritten,
                     bgCorePublishForced = previousBgCore is not null,
-                    bgCoreRestored
+                    bgCoreRestored,
+                    bgCoreRestoreError
                 });
             if (fallback is not null)
             {
@@ -1223,7 +1465,7 @@ public sealed partial class PluginCommandProcessor
             dsd: true,
             fallback: null,
             preflightReport,
-            extraData: new { dsdWritten, bgCorePublishForced = previousBgCore is not null, bgCoreRestored });
+            extraData: new { dsdWritten, bgCorePublishForced = previousBgCore is not null, bgCoreRestored, bgCoreRestoreError });
     }
 
     private static ForgeResult? TryPublishViaPlotFallback(
@@ -1321,7 +1563,12 @@ public sealed partial class PluginCommandProcessor
         orientation = string.IsNullOrWhiteSpace(orientation) ? "Landscape" : orientation!;
         scale = string.IsNullOrWhiteSpace(scale) ? "Fit" : scale!;
         plotStyle = string.IsNullOrWhiteSpace(plotStyle) ? "." : plotStyle!;
-        units ??= paperSize.Contains("MM", StringComparison.OrdinalIgnoreCase) ? "Millimeters" : "Inches";
+
+        if (!ForgePlotUnits.TryNormalize(units, out var requestedUnits))
+        {
+            error = "units must be exactly 'Inches', 'Millimeters', or 'Pixels'.";
+            return false;
+        }
 
         if (!string.IsNullOrWhiteSpace(layout))
         {
@@ -1342,6 +1589,33 @@ public sealed partial class PluginCommandProcessor
             ? (isModel ? "Extents" : "Layout")
             : plotArea!;
 
+        // Units come from the real PlotSettings API, never from the paper-size name.
+        if (requestedUnits is null &&
+            !TryReadPlotPaperUnits(layoutName, out requestedUnits, out error))
+        {
+            error = $"Could not read PlotSettings.PlotPaperUnits for layout '{layoutName}': {error}";
+            return false;
+        }
+
+        var resolvedUnits = requestedUnits!;
+        try
+        {
+            ForgeCommandTokenGuard.RequireCommandToken(layoutName, "layoutName");
+            ForgeCommandTokenGuard.RequireCommandToken(device, "device");
+            ForgeCommandTokenGuard.RequireCommandToken(paperSize, "paperSize");
+            ForgeCommandTokenGuard.RequireCommandToken(resolvedUnits, "units");
+            ForgeCommandTokenGuard.RequireCommandToken(orientation, "orientation");
+            ForgeCommandTokenGuard.RequireCommandToken(plotArea, "plotArea");
+            ForgeCommandTokenGuard.RequireCommandToken(scale, "scale");
+            ForgeCommandTokenGuard.RequireCommandToken(plotStyle, "plotStyle");
+            ForgeCommandTokenGuard.RequireCommandToken(outputPath, "outputPath");
+        }
+        catch (ArgumentException ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+
         var previousFileDia = Application.GetSystemVariable("FILEDIA");
         var previousBgPlot = Application.GetSystemVariable("BACKGROUNDPLOT");
         Application.SetSystemVariable("FILEDIA", 0);
@@ -1357,7 +1631,7 @@ public sealed partial class PluginCommandProcessor
                 layoutName,
                 device,
                 paperSize,
-                units,
+                resolvedUnits,
                 orientation,
                 "No",
                 plotArea,
@@ -1492,21 +1766,16 @@ public sealed partial class PluginCommandProcessor
     private static ForgeResult CheckXrefs(ForgeCommand command)
     {
         var xrefs = ReadXrefs();
-        var bad = xrefs.Where(x =>
-        {
-            var type = x.GetType();
-            return Equals(type.GetProperty("isUnloaded")?.GetValue(x), true) ||
-                   Equals(type.GetProperty("pathExists")?.GetValue(x), false);
-        }).ToArray();
+        var bad = xrefs.Where(x => x.IsUnloaded || !x.PathExists).ToArray();
         return ForgeResult.Success(command.Id, new { passed = bad.Length == 0, issues = bad, xrefs });
     }
 
     private static ForgeResult AuditLayers(ForgeCommand command)
     {
         var args = Args<AuditLayerArgs>(command);
-        var layersResult = ListLayers(command);
-        var layerJson = ForgeJson.ToElement(layersResult.Data);
-        var names = layerJson.GetProperty("layers").EnumerateArray().Select(x => x.GetProperty("name").GetString()).Where(x => x is not null).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var names = new HashSet<string>(
+            ReadLayers().Select(x => x.Name),
+            StringComparer.OrdinalIgnoreCase);
         var missing = args.ExpectedLayers.Where(x => !names.Contains(x)).ToArray();
         return ForgeResult.Success(command.Id, new { passed = missing.Length == 0, missing });
     }
@@ -1565,18 +1834,21 @@ public sealed partial class PluginCommandProcessor
                     queued = false,
                     completed = true,
                     mode = "editor_command",
+                    undoGrouped = true,
                     args.Command,
                     tokens
                 });
             }
             catch (System.Exception ex)
             {
+                // Queued execution happens after the undo group closes; never claim grouping.
                 ActiveDoc.SendStringToExecute(args.Command.TrimEnd() + " ", true, false, false);
                 return ForgeResult.Success(command.Id, new
                 {
                     queued = true,
                     completed = false,
                     mode = "queued_fallback",
+                    undoGrouped = false,
                     fallbackReason = ex.Message,
                     args.Command
                 });
@@ -1584,7 +1856,7 @@ public sealed partial class PluginCommandProcessor
         }
 
         ActiveDoc.SendStringToExecute(args.Command.TrimEnd() + " ", true, false, false);
-        return ForgeResult.Success(command.Id, new { queued = true, completed = false, mode = "queued", args.Command });
+        return ForgeResult.Success(command.Id, new { queued = true, completed = false, mode = "queued", undoGrouped = false, args.Command });
     }
 
     private static ForgeResult ExecLisp(ForgeCommand command)
@@ -1609,17 +1881,20 @@ public sealed partial class PluginCommandProcessor
             {
                 queued = false,
                 completed = true,
-                mode = "editor_command"
+                mode = "editor_command",
+                undoGrouped = true
             });
         }
         catch (System.Exception ex)
         {
+            // Queued execution happens after the undo group closes; never claim grouping.
             ActiveDoc.SendStringToExecute(lisp + " ", true, false, false);
             return ForgeResult.Success(command.Id, new
             {
                 queued = true,
                 completed = false,
                 mode = "queued_fallback",
+                undoGrouped = false,
                 fallbackReason = ex.Message
             });
         }
@@ -1660,7 +1935,18 @@ public sealed partial class PluginCommandProcessor
         return tokens.ToArray();
     }
 
-    private static ForgeResult ExecDotNet(ForgeCommand command)
+    /// <summary>
+    /// Runs a Roslyn C# script with full process trust (not sandboxed) behind the unsafe dual-gate.
+    /// The script is genuinely awaited — the named-pipe server dispatches inside
+    /// <c>ExecuteInCommandContextAsync</c>, whose callback returns <see cref="Task"/>, so there is
+    /// no sync-over-async deadlock.
+    /// <para>
+    /// The hard timeout bounds the WAITING, not the script: once a script is executing it cannot be
+    /// forcibly aborted (there is no <c>Thread.Abort</c> on modern .NET). On timeout this returns
+    /// <c>exec_dotnet_timeout</c> and the script may still be running inside AutoCAD.
+    /// </para>
+    /// </summary>
+    private static async Task<ForgeResult> ExecDotNetAsync(ForgeCommand command, CancellationToken cancellationToken)
     {
         var args = Args<ExecDotNetArgs>(command);
         if (string.IsNullOrWhiteSpace(args.Code))
@@ -1678,34 +1964,56 @@ public sealed partial class PluginCommandProcessor
             return DryRun(command, new { chars = args.Code.Length });
         }
 
-        if (ContainsAwait(args.Code))
-        {
-            return ForgeResult.Failure(
-                command.Id,
-                "dotnet_async_not_supported",
-                "forge_exec_dotnet currently rejects await/async scripts to avoid deadlocks inside AutoCAD's command context.",
-                "Use synchronous snippets only, or promote the workflow into a typed tool.");
-        }
-
+        // Explicit script surface: WithReferences/WithImports replace the host defaults, so the
+        // exact reference and import set is visible here instead of inherited implicitly.
         var options = ScriptOptions.Default
-            .AddReferences(typeof(Application).Assembly, typeof(Database).Assembly, typeof(Editor).Assembly)
-            .AddImports(
+            .WithReferences(
+                typeof(object).Assembly,
+                typeof(Enumerable).Assembly,
+                typeof(List<>).Assembly,
+                typeof(StringBuilder).Assembly,
+                typeof(Application).Assembly,
+                typeof(Database).Assembly,
+                typeof(Editor).Assembly)
+            .WithImports(
                 "System",
+                "System.Collections.Generic",
                 "System.Linq",
+                "System.Text",
                 "Autodesk.AutoCAD.ApplicationServices",
                 "Autodesk.AutoCAD.DatabaseServices",
                 "Autodesk.AutoCAD.EditorInput",
                 "Autodesk.AutoCAD.Geometry");
 
         var globals = new DotNetScriptGlobals(ActiveDoc, ActiveDb, ActiveEditor);
-        var result = CSharpScript.EvaluateAsync<object?>(args.Code, options, globals).GetAwaiter().GetResult();
+        var timeout = TimeSpan.FromSeconds(ForgeExecDotNetLimits.TimeoutSeconds);
+        var started = DateTimeOffset.UtcNow;
+        var runTask = CSharpScript.EvaluateAsync<object?>(args.Code, options, globals, typeof(DotNetScriptGlobals), cancellationToken);
+        var delayTask = Task.Delay(timeout, cancellationToken);
+        if (!ReferenceEquals(await Task.WhenAny(runTask, delayTask).ConfigureAwait(true), runTask))
+        {
+            // The abandoned script task is observed so a later fault cannot surface as an
+            // unobserved task exception inside AutoCAD.
+            ObserveAbandonedScript(runTask);
+            var elapsed = (DateTimeOffset.UtcNow - started).TotalSeconds;
+            return ForgeResult.Failure(
+                command.Id,
+                "exec_dotnet_timeout",
+                $"forge_exec_dotnet did not finish within {ForgeExecDotNetLimits.TimeoutSeconds} seconds (elapsed {elapsed:0.0}s). The script is NOT aborted and may still be running inside AutoCAD.",
+                "Make the script short and synchronous; there is no way to forcibly abort a running script.");
+        }
+
+        var result = await runTask.ConfigureAwait(true);
         return ForgeResult.Success(command.Id, new { result });
     }
 
-    private static bool ContainsAwait(string code)
+    private static void ObserveAbandonedScript(Task<object?> runTask)
     {
-        return code.Contains("await ", StringComparison.Ordinal) ||
-               code.Contains("async ", StringComparison.Ordinal);
+        _ = runTask.ContinueWith(
+            static completed => { _ = completed.Exception; },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     private static bool PathsEqual(string? left, string? right)
@@ -1725,18 +2033,41 @@ public sealed partial class PluginCommandProcessor
         }
     }
 
-        private static void WriteDsdFile(string dsdPath, string dwgPath, string outputPath, string[] layouts, bool singlePdf)
+    private static void WriteDsdFile(string dsdPath, string dwgPath, string outputPath, string[] layouts, bool singlePdf)
+    {
+        DsdWriter.WriteFile(dsdPath, dwgPath, outputPath, layouts, singlePdf);
+    }
+
+    /// <summary>
+    /// Exact validator for every value interpolated into an AutoCAD command string. There is no
+    /// backslash escape on the AutoCAD command line, so quotes and control characters (including
+    /// CR/LF) are rejected outright rather than escaped.
+    /// </summary>
+    private static ForgeResult? ValidateCommandTokens(ForgeCommand command, params (string Field, string? Value)[] inputs)
+    {
+        foreach (var (field, value) in inputs)
         {
-            DsdWriter.WriteFile(dsdPath, dwgPath, outputPath, layouts, singlePdf);
+            try
+            {
+                ForgeCommandTokenGuard.RequireCommandToken(value, field);
+            }
+            catch (ArgumentException ex)
+            {
+                return ForgeResult.Failure(
+                    command.Id,
+                    "illegal_command_character",
+                    ex.Message,
+                    "Remove quotes and control characters from the value.");
+            }
         }
 
-    private static string EscapeCommand(string value) => value.Replace("\"", "\\\"");
+        return null;
+    }
 
     private static readonly char[] CommandControlChars = { '\r', '\n' };
 
-    // Typed tools that dispatch a name/path through SendStringToExecute only escape quotes,
-    // so a newline in the value could smuggle a second command onto the AutoCAD command line.
-    // Since the OpenWorld denylist does not run on typed tools, reject control characters here.
+    // Values that are NOT interpolated into a command string (names passed to the managed API)
+    // only need the CR/LF guard.
     private static ForgeResult? RejectControlChars(ForgeCommand command, params (string Field, string? Value)[] inputs)
     {
         foreach (var (field, value) in inputs)
@@ -1753,6 +2084,56 @@ public sealed partial class PluginCommandProcessor
 
         return null;
     }
+
+    /// <summary>
+    /// Reads the exact <c>PlotSettings.PlotPaperUnits</c> value for a layout and maps the
+    /// <c>PlotPaperUnit</c> enum member to the token the -PLOT command expects. Never infers
+    /// units from the media name. Returns false and an explicit error when the API value is
+    /// unavailable or unmapped.
+    /// </summary>
+    private static bool TryReadPlotPaperUnits(string? layoutName, out string? units, out string? error)
+    {
+        units = null;
+        error = null;
+        try
+        {
+            var name = string.IsNullOrWhiteSpace(layoutName) ? LayoutManager.Current.CurrentLayout : layoutName!;
+            using var tr = ActiveDb.TransactionManager.StartTransaction();
+            var layoutId = LayoutManager.Current.GetLayoutId(name);
+            if (layoutId.IsNull)
+            {
+                error = $"Layout not found: {name}";
+                return false;
+            }
+
+            var layout = (Layout)tr.GetObject(layoutId, OpenMode.ForRead);
+            switch (layout.PlotPaperUnits)
+            {
+                case PlotPaperUnit.Inches:
+                    units = "Inches";
+                    break;
+                case PlotPaperUnit.Millimeters:
+                    units = "Millimeters";
+                    break;
+                case PlotPaperUnit.Pixels:
+                    units = "Pixels";
+                    break;
+                default:
+                    error = $"Unmapped PlotPaperUnit value: {layout.PlotPaperUnits}";
+                    return false;
+            }
+
+            tr.Commit();
+            return true;
+        }
+        catch (System.Exception ex)
+        {
+            error = $"{ex.GetType().Name}: {ex.Message}";
+            return false;
+        }
+    }
+
+
 
     private sealed record NameArgs { public string? Name { get; init; } }
     private sealed record SetVarArgs { public string? Name { get; init; } public string? Value { get; init; } }

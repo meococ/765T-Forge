@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/draft/server.schema.json",
   "name": "io.github.765T/765t-forge",
-  "description": "Agent-safe AutoCAD 2026 MCP for metro/AEC issue-set publish (inspect → gate → plot/publish → verify).",
+  "description": "Agent-safe AutoCAD MCP for metro/AEC issue-set publish (inspect → gate → plot/publish → verify).",
   "version": "0.3.0",
   "repository": {
     "url": "https://github.com/765T/765T-Forge",
@@ -29,8 +29,18 @@
           "is_required": false
         },
         {
+          "name": "FORGE_AUTOCAD_ROOT",
+          "description": "AutoCAD install root for AccoreConsole and plugin reference discovery.",
+          "is_required": false
+        },
+        {
           "name": "AUTOCAD_2026_ROOT",
-          "description": "AutoCAD 2026 install root for AccoreConsole / HintPath.",
+          "description": "Deprecated alias for FORGE_AUTOCAD_ROOT; still honored.",
+          "is_required": false
+        },
+        {
+          "name": "FORGE_ENABLE_UNSAFE_OPS",
+          "description": "Default false. The five free-text executors run only when this is true and the call passes unsafeAcknowledged=true; otherwise they return unsafe_not_acknowledged. No argument text is inspected.",
           "is_required": false
         },
         {

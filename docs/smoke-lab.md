@@ -1,4 +1,4 @@
-# Smoke lab checklist (AutoCAD 2026)
+# Smoke lab checklist (AutoCAD 2025/2026)
 
 Maintainer-only. Do **not** commit customer DWGs. Record pass/fail in the GitHub Release notes before announcing a public `v*` tag.
 
@@ -9,10 +9,17 @@ Automated helper: [`scripts/smoke-lab.ps1`](../scripts/smoke-lab.ps1) (Autoloade
 ## Preconditions
 
 - [x] Unpacked **Release** server zip contains `docs/capability-matrix.md` and `docs/safety.md` next to the exe
-- [x] Plugin installed via `install-plugin.ps1` + Autoloader Series **R25.1** under `%APPDATA%\Autodesk\ApplicationPlugins`
-- [x] AutoCAD 2026 running; `MCP_STATUS` shows product/pipe/token; named pipe responds
+- [x] Plugin installed via `install-plugin.ps1`; bundle ships two components: `Contents/2017` (Series R21.0–R24.3) and `Contents/2025` (Series R25.0–R26.0)
+- [x] AutoCAD running with the component that matches the host (`Contents/2025` for AutoCAD 2025/2026); `MCP_STATUS` shows product/pipe/token; named pipe responds
 - [x] Matching `FORGE_AUTOCAD_TOKEN` / `FORGE_PIPE_NAME` on AutoCAD process
 - [x] Lab / project DWG with ≥1 paper layout
+
+The `Contents/2017` component (AutoCAD 2017–2024) is prepared but **not yet compiled against AutoCAD 2017 reference assemblies**, so its runtime is unverified. Verify a series before claiming it:
+
+```powershell
+.\scripts\verify-plugin-series.ps1 -Series 2025
+.\scripts\verify-plugin-series.ps1 -Series 2017   # needs AutoCAD 2017 reference assemblies; exits non-zero naming the missing path
+```
 
 ## Steps
 
@@ -37,7 +44,7 @@ Operator: agent smoke-lab (local AutoCAD 2026 Education)
 Pass: yes (critical path) — with DSD publish caveat below
 Notes:
   - Active drawing during live checks: metro DWG "03. HO THU NUOC DVB.dwg" (Layout1)
-  - Autoloader R25.1 loaded; pipe 765T.Forge.AutoCAD
+  - Autoloader loaded (bundle series designation at the time: R25.x for 2025–2026; now split into R21.0–R24.3 and R25.0–R26.0 components); pipe 765T.Forge.AutoCAD
   - forge_plot_to_pdf -> forge-smoke-plot-to-pdf.pdf (1965 bytes, verification.passed)
   - forge_plot_publish (Publisher.PublishDsd) did not materialize PDF on this run (publish_no_output)
   - Results JSON: %LOCALAPPDATA%\765T-Forge\smoke-lab\smoke-results.json
@@ -53,7 +60,7 @@ Notes:
 - Unit tests: ServerOnly **57 passed**
 - Plugin: Release build succeeded with exclusive tools
 - Live DSD re-smoke: recommended after NETLOAD of new plugin (fallback path added)
-- Result: **READY TO TAG** when both zips attached to GitHub Release (draft until plugin zip present)
+- Result: **TAGGED v0.2.1** (2026-07-11) when both zips attached; **0.3.0** remains blocked until dual-seat DSD primary PASS (seat checklist below)
 
 ## Seat checklist for DSD primary path (0.3.0 evidence)
 
@@ -61,7 +68,7 @@ Use this before claiming dual-seat DSD PASS. Record two seats (A/B) with differe
 
 | Check | Seat A | Seat B | Notes |
 |-------|--------|--------|-------|
-| Product | AutoCAD 2026 full (not LT) | | Education may differ from commercial Publisher |
+| Product | AutoCAD 2025/2026 full (not LT) | | Education may differ from commercial Publisher |
 | `DWG To PDF.pc3` present | | | `forge_system_capabilities` |
 | Project CTB/STB paths resolve | | | pack v2 + `forge_qa_dependency_closure` |
 | Named media / page setups | | | Prefer sync page-setup apply |

@@ -5,7 +5,7 @@ namespace Forge.Tests;
 public sealed class DsdWriterTests
 {
     [Fact]
-    public void Build_EmitsMultiSheetTypeAndLayouts()
+    public void BuildEmitsMultiSheetTypeAndLayouts()
     {
         var text = DsdWriter.Build(@"C:\lab\host.dwg", @"C:\out\set.pdf", ["A101", "A102"], singlePdf: true);
 
@@ -17,13 +17,13 @@ public sealed class DsdWriterTests
     }
 
     [Fact]
-    public void Build_RequiresLayouts()
+    public void BuildRequiresLayouts()
     {
         Assert.Throws<ArgumentException>(() => DsdWriter.Build("a.dwg", "b.pdf", Array.Empty<string>(), true));
     }
 
     [Fact]
-    public void WriteFile_UsesUnicode()
+    public void WriteFileUsesUnicode()
     {
         var path = Path.Combine(Path.GetTempPath(), $"forge-dsd-{Guid.NewGuid():N}.dsd");
         try

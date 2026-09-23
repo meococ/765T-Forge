@@ -4,6 +4,9 @@ namespace Forge.Tests;
 
 public sealed class PublishAndContractTests
 {
+    private static readonly string[] FirstQuotedRecord = ["A,101", "MTR-001", "He said \"go\""];
+    private static readonly string[] SecondPlainRecord = ["A102", "MTR-002", "plain"];
+
     [Fact]
     public void PdfProbeFailsOnMissingFile()
     {
@@ -24,7 +27,27 @@ public sealed class PublishAndContractTests
             Assert.True(probe.Exists);
             Assert.True(probe.NonEmpty);
             Assert.True(probe.Passed);
-            Assert.Equal(1, probe.PageCount);
+            Assert.Null(probe.PageCount);
+            Assert.Equal("not_available", probe.PageCountSource);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void PdfProbeFailsOnMissingHeader()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"forge-probe-{Guid.NewGuid():N}.pdf");
+        File.WriteAllBytes(path, "NOTPDF-1.4"u8.ToArray());
+        try
+        {
+            var probe = PdfProbeResult.Probe(path);
+            Assert.True(probe.Exists);
+            Assert.True(probe.NonEmpty);
+            Assert.False(probe.Passed);
+            Assert.Null(probe.PageCount);
         }
         finally
         {
@@ -64,6 +87,48 @@ public sealed class PublishAndContractTests
         {
             File.Delete(path);
         }
+    }
+
+    [Fact]
+    public void SheetInventoryCsvHandlesQuotedFieldsWithCommasAndEscapedQuotes()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"forge-inv-{Guid.NewGuid():N}.csv");
+        File.WriteAllText(path, "layout,drawingNo,rev,title\n\"A,101\",MTR-001,A,\"He said \"\"go\"\"\"\n");
+        try
+        {
+            var inv = SheetInventory.LoadFromCsv(path);
+            var sheet = Assert.Single(inv.Sheets);
+            Assert.Equal("A,101", sheet.Layout);
+            Assert.Equal("MTR-001", sheet.DrawingNo);
+            Assert.Equal("He said \"go\"", sheet.Title);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData("a,b\nc,d\n", 2)]
+    [InlineData("a,b\r\nc,d\r\n", 2)]
+    [InlineData("a,b\rc,d\r", 2)]
+    [InlineData("\"multi\nline\",x\r\n", 1)]
+    [InlineData("a,,c", 1)]
+    public void CsvReaderParsesRfc4180RecordsDeterministically(string text, int expectedRecords)
+    {
+        var records = CsvReader.Parse(text);
+
+        Assert.Equal(expectedRecords, records.Count);
+    }
+
+    [Fact]
+    public void CsvReaderKeepsQuotedCommasAndEscapedQuotesExact()
+    {
+        var records = CsvReader.Parse("\"A,101\",MTR-001,\"He said \"\"go\"\"\"\r\nA102,MTR-002,plain\r\n");
+
+        Assert.Equal(2, records.Count);
+        Assert.Equal(FirstQuotedRecord, records[0]);
+        Assert.Equal(SecondPlainRecord, records[1]);
     }
 
     [Fact]

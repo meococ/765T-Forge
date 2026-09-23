@@ -33,7 +33,10 @@ public static class XrefClosureEval
     public const int AbsoluteMaxDepth = 8;
 
     public static int ClampMaxDepth(int? maxDepth)
-        => Math.Clamp(maxDepth ?? DefaultMaxDepth, MinMaxDepth, AbsoluteMaxDepth);
+    {
+        var value = maxDepth ?? DefaultMaxDepth;
+        return value < MinMaxDepth ? MinMaxDepth : (value > AbsoluteMaxDepth ? AbsoluteMaxDepth : value);
+    }
 
     public static IReadOnlyList<QaFinding> EvaluateFailClosed(IEnumerable<XrefClosureNode> nodes)
     {

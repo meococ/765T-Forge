@@ -1,0 +1,17 @@
+<Project>
+
+  <!--
+    Pure plugin helpers that have zero AutoCAD dependencies are compiled into Forge.Tests so they
+    can be unit tested without AutoCAD and without a Forge.Plugin project reference (the test
+    project deliberately never references Forge.Plugin). Keep this list limited to files that do
+    not reference any Autodesk.AutoCAD type; the plugin itself still compiles them through its
+    normal source glob.
+  -->
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'Forge.Tests'">
+    <Compile Include="$(MSBuildThisFileDirectory)src\Forge.Plugin\ForgeInputGuards.cs"
+             Link="PluginPureHelpers\ForgeInputGuards.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)src\Forge.Plugin\XrefNodeInfo.cs"
+             Link="PluginPureHelpers\XrefNodeInfo.cs" />
+  </ItemGroup>
+
+</Project>

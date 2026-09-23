@@ -4,7 +4,7 @@ Connect VS Code (GitHub Copilot MCP or compatible MCP extension) to 765T-Forge o
 
 ## Prerequisites
 
-Same as Cursor: Windows, .NET 8, AutoCAD 2026 + plugin loaded, shared `FORGE_AUTOCAD_TOKEN`. See [../getting-started.md](../getting-started.md).
+Same as Cursor: Windows, .NET 8, an AutoCAD 2025/2026 seat with the plugin loaded (the 2017–2024 component is prepared but not yet verified), shared `FORGE_AUTOCAD_TOKEN`. See [../getting-started.md](../getting-started.md).
 
 ## Config
 
@@ -20,7 +20,8 @@ Add a server entry to your MCP configuration (workspace `.vscode/mcp.json` or us
       "env": {
         "FORGE_AUTOCAD_TOKEN": "replace-with-a-long-random-secret",
         "FORGE_PIPE_NAME": "765T.Forge.AutoCAD",
-        "AUTOCAD_2026_ROOT": "C:\\Program Files\\Autodesk\\AutoCAD 2026"
+        "FORGE_AUTOCAD_ROOT": "C:\\Program Files\\Autodesk\\AutoCAD 2026",
+        "FORGE_ENABLE_UNSAFE_OPS": "false"
       }
     }
   }

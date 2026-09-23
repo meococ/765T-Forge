@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace Forge.Shared;
 
@@ -15,26 +16,29 @@ public sealed class SheetInventory
 
     public static SheetInventory LoadFromCsv(string path)
     {
-        var lines = File.ReadAllLines(path)
-            .Where(l => !string.IsNullOrWhiteSpace(l) && !l.TrimStart().StartsWith('#'))
+        var rows = CsvReader.Parse(File.ReadAllText(path))
+            .Where(r => r.Count > 0)
+            .Where(r => !r.All(string.IsNullOrWhiteSpace))
+            .Where(r => !r[0].TrimStart().StartsWith("#", StringComparison.Ordinal))
             .ToArray();
-        if (lines.Length == 0)
+        if (rows.Length == 0)
         {
             throw new InvalidOperationException("Sheet inventory CSV is empty.");
         }
 
         var start = 0;
-        if (lines[0].Contains("layout", StringComparison.OrdinalIgnoreCase)
-            && lines[0].Contains("drawing", StringComparison.OrdinalIgnoreCase))
+        var header = string.Join(",", rows[0]);
+        if (header.IndexOf("layout", StringComparison.OrdinalIgnoreCase) >= 0
+            && header.IndexOf("drawing", StringComparison.OrdinalIgnoreCase) >= 0)
         {
             start = 1;
         }
 
         var sheets = new List<IssueSetSheet>();
-        for (var i = start; i < lines.Length; i++)
+        for (var i = start; i < rows.Length; i++)
         {
-            var parts = lines[i].Split(',');
-            if (parts.Length < 2)
+            var parts = rows[i];
+            if (parts.Count < 2)
             {
                 throw new InvalidOperationException($"Invalid CSV row {i + 1}: need layout,drawingNo[,rev[,title]].");
             }
@@ -43,8 +47,8 @@ public sealed class SheetInventory
             {
                 Layout = parts[0].Trim(),
                 DrawingNo = parts[1].Trim(),
-                Rev = parts.Length > 2 ? parts[2].Trim() : null,
-                Title = parts.Length > 3 ? parts[3].Trim() : null
+                Rev = parts.Count > 2 ? parts[2].Trim() : null,
+                Title = parts.Count > 3 ? parts[3].Trim() : null
             });
         }
 
@@ -125,6 +129,12 @@ public sealed class IssueSetDiff
 /// </summary>
 public sealed class BatchResumeState
 {
+    /// <summary>Exact batch id shape accepted for file names: 1-64 chars of [A-Za-z0-9-].</summary>
+    private static readonly Regex BatchIdPattern = new(
+        "^[A-Za-z0-9-]{1,64}$",
+        RegexOptions.CultureInvariant,
+        ForgeConstants.RegexMatchTimeout);
+
     public string BatchId { get; init; } = Guid.NewGuid().ToString("N");
     public DateTimeOffset CreatedUtc { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
@@ -140,26 +150,50 @@ public sealed class BatchResumeState
             "765T-Forge",
             "batch");
 
+    public static void ValidateBatchId(string batchId)
+    {
+        if (string.IsNullOrWhiteSpace(batchId) || !BatchIdPattern.IsMatch(batchId))
+        {
+            throw new ArgumentException(
+                "BatchId must match ^[A-Za-z0-9-]{1,64}$.",
+                nameof(batchId));
+        }
+    }
+
     public void Save(string? dir = null)
     {
+        ValidateBatchId(BatchId);
         var root = dir ?? DefaultStoreDir();
         Directory.CreateDirectory(root);
         ArtifactPath = Path.Combine(root, $"batch-{BatchId}.json");
         UpdatedUtc = DateTimeOffset.UtcNow;
-        File.WriteAllText(ArtifactPath, JsonSerializer.Serialize(this, ForgeJson.Options));
+        AtomicFile.WriteAllText(ArtifactPath, JsonSerializer.Serialize(this, ForgeJson.Options));
     }
 
-    public static BatchResumeState? Load(string batchIdOrPath)
+    /// <summary>
+    /// Loads a batch by validated <paramref name="batchId"/> from the default store directory.
+    /// Paths are deliberately not accepted here — use <see cref="LoadFromPath"/>.
+    /// </summary>
+    public static BatchResumeState? Load(string batchId)
     {
-        var path = File.Exists(batchIdOrPath)
-            ? batchIdOrPath
-            : Path.Combine(DefaultStoreDir(), $"batch-{batchIdOrPath}.json");
-        if (!File.Exists(path))
+        ValidateBatchId(batchId);
+        var path = Path.Combine(DefaultStoreDir(), $"batch-{batchId}.json");
+        return File.Exists(path)
+            ? JsonSerializer.Deserialize<BatchResumeState>(File.ReadAllText(path), ForgeJson.Options)
+            : null;
+    }
+
+    /// <summary>Loads a batch from an explicitly supplied rooted path.</summary>
+    public static BatchResumeState? LoadFromPath(string absolutePath)
+    {
+        if (string.IsNullOrWhiteSpace(absolutePath) || !Path.IsPathRooted(absolutePath))
         {
-            return null;
+            throw new ArgumentException("absolutePath must be a rooted path.", nameof(absolutePath));
         }
 
-        return JsonSerializer.Deserialize<BatchResumeState>(File.ReadAllText(path), ForgeJson.Options);
+        return File.Exists(absolutePath)
+            ? JsonSerializer.Deserialize<BatchResumeState>(File.ReadAllText(absolutePath), ForgeJson.Options)
+            : null;
     }
 }
 

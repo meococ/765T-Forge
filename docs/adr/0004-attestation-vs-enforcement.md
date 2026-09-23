@@ -33,3 +33,15 @@ Marketing and skill language that implies these are hard controls creates false 
 - Technical Preview positioning stays honest.
 - Red-team kill criteria (no GA / no unattended / no CDE-complete claims) remain in force until CHANGELOG evidence.
 - Implementers must not “simplify” docs back into “ceremony = safety.”
+
+## Amendment 2026-09-22 — capability gate, measurement honesty, and prepared builds
+
+1. **Enforced class updated.** The first enforced row is now the deterministic **capability gate** (`SafetyPolicy.Evaluate`): the five free-text executors are `Unsafe` and require `FORGE_ENABLE_UNSAFE_OPS=true` plus per-call `unsafeAcknowledged=true`, else `unsafe_not_acknowledged`. The regex text denylist and its `deny_*` codes were deleted (see ADR 0002, Amendment 2026-09-22). There is no text inspection, so no claim may describe Forge as filtering or blocking command strings.
+2. **Measurement honesty.** A control that reports a number it did not verify is the same class of dishonesty as an attested boolean:
+   - Publish receipts set `pageCount = null` with `pageCountSource = "not_available"`; the verified fields are existence, length > 0, and an exact `%PDF-` header. The previous `/Type /Page` byte scan was removed.
+   - Paper units come from `PlotSettings.PlotPaperUnits`; when unreadable the tool returns `plot_units_unavailable` instead of inferring units from the paper name.
+   - Pack/caller regexes fail closed on the 250 ms match timeout (`regex_timeout`).
+   - DSD fields are validated against illegal characters (`[`, `]`, `=`, CR/LF, other control characters) and return `illegal_dsd_character`.
+   - `forge_block_set_attr` / `forge_block_campaign` return `block_attribute_not_found` instead of a silent `updated=0` success.
+3. **Prepared is not verified.** The AutoCAD 2017–2024 (`net462`) plugin assembly is prepared but not yet compiled against AutoCAD 2017 reference assemblies. No doc, release note, or capability claim may state that 2017–2024 runtime support is verified. The verification gate is `scripts/verify-plugin-series.ps1 -Series 2017`, run per series on a machine with those references.
+4. Point 4's future direction remains: project-root allowlist for Accore scripts is still future; optional env gate for `force` and optional ceremony evidence IDs have landed.

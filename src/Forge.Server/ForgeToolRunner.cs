@@ -42,7 +42,7 @@ public sealed class ForgeToolRunner
             UnsafeAcknowledged = unsafeAcknowledged && _environment.EnableUnsafeOps
         };
 
-        var decision = _safetyPolicy.Evaluate(command);
+        var decision = _safetyPolicy.Evaluate(command, _environment.EnableUnsafeOps);
         var auditId = await _auditSink.WriteAsync(new AuditRecord
         {
             Source = "server",
@@ -192,7 +192,7 @@ public sealed class ForgeToolRunner
 
     private static ForgeResult ResolveSheetInventoryImport(ForgeCommand command)
     {
-        var args = ForgeJson.FromElement<SheetInventoryArgs>(command.Args) ?? new SheetInventoryArgs();
+        var args = ForgeJson.ArgsOrDefault<SheetInventoryArgs>(command.Args);
         if (string.IsNullOrWhiteSpace(args.CsvPath))
         {
             return ForgeResult.Failure(command.Id, "missing_csv_path", "csvPath is required.");
@@ -236,7 +236,7 @@ public sealed class ForgeToolRunner
 
     private static ForgeResult ResolveIssueSetDiff(ForgeCommand command)
     {
-        var args = ForgeJson.FromElement<IssueSetDiffArgs>(command.Args) ?? new IssueSetDiffArgs();
+        var args = ForgeJson.ArgsOrDefault<IssueSetDiffArgs>(command.Args);
         if (string.IsNullOrWhiteSpace(args.CurrentReceiptPath))
         {
             return ForgeResult.Failure(command.Id, "missing_receipt", "currentReceiptPath is required.");
@@ -264,18 +264,29 @@ public sealed class ForgeToolRunner
 
     private static ForgeResult ResolveBatchStatus(ForgeCommand command)
     {
-        var path = command.Args.ValueKind == JsonValueKind.Object &&
-                   command.Args.TryGetProperty("batchIdOrPath", out var el)
+        var batchIdOrPath = command.Args.ValueKind == JsonValueKind.Object &&
+                            command.Args.TryGetProperty("batchIdOrPath", out var el)
             ? el.GetString()
             : null;
-        if (string.IsNullOrWhiteSpace(path))
+        if (string.IsNullOrWhiteSpace(batchIdOrPath))
         {
             return ForgeResult.Failure(command.Id, "missing_batch_id", "batchIdOrPath is required.");
         }
 
-        var state = BatchResumeState.Load(path);
+        BatchResumeState? state;
+        try
+        {
+            state = Path.IsPathRooted(batchIdOrPath)
+                ? BatchResumeState.LoadFromPath(batchIdOrPath)
+                : BatchResumeState.Load(batchIdOrPath);
+        }
+        catch (ArgumentException ex)
+        {
+            return ForgeResult.Failure(command.Id, "invalid_batch_id", ex.Message);
+        }
+
         return state is null
-            ? ForgeResult.Failure(command.Id, "batch_not_found", $"No batch state for '{path}'.")
+            ? ForgeResult.Failure(command.Id, "batch_not_found", $"No batch state for '{batchIdOrPath}'.")
             : ForgeResult.Success(command.Id, state);
     }
 
