@@ -47,13 +47,13 @@
       },
       "ModelContextProtocol": {
         "type": "Direct",
-        "requested": "[1.3.0, )",
-        "resolved": "1.3.0",
-        "contentHash": "WDaD6z9KkkCUHSo15xK7tYBERHy8uqP+cIUp8uIxhR0yrlpJLXTRcJcUUVqpXlBkV7MK9Eo3mTrAnctLnJuHDQ==",
+        "requested": "[1.4.1, )",
+        "resolved": "1.4.1",
+        "contentHash": "mP5hvBpoWe5EbWBqHWD09A4Dy6Pq+/vV2dumOV4uegCZcg+yqf8q8wrxtuZ3EQyXEJn9jzsnoiI/qyfJAihlZQ==",
         "dependencies": {
           "Microsoft.Extensions.Caching.Abstractions": "10.0.7",
           "Microsoft.Extensions.Hosting.Abstractions": "10.0.7",
-          "ModelContextProtocol.Core": "1.3.0"
+          "ModelContextProtocol.Core": "1.4.1"
         }
       },
       "Microsoft.Extensions.AI.Abstractions": {
@@ -313,8 +313,8 @@
       },
       "ModelContextProtocol.Core": {
         "type": "Transitive",
-        "resolved": "1.3.0",
-        "contentHash": "OWmdxDSwA7K9pNNg4t98MXNIssHG/wOQEr/G8pG5B7synDdw4MnmZ/IIVeb3yUdeznPqnDHvd3FBCK0jRk4IZQ==",
+        "resolved": "1.4.1",
+        "contentHash": "G/hOBZkJsvF3MSy0sOvXdxca5uRe2Sb4xk7xRuTWNZI45khVBjOLo6nSzGilctIICavNVxbxUF908fLYI9RxkQ==",
         "dependencies": {
           "Microsoft.Extensions.AI.Abstractions": "10.5.2",
           "Microsoft.Extensions.Logging.Abstractions": "10.0.7",
@@ -350,12 +350,12 @@
       "forge.shared": {
         "type": "Project",
         "dependencies": {
-          "System.Text.Json": "[8.0.5, )"
+          "System.Text.Json": "[8.0.6, )"
         }
       },
       "System.Text.Json": {
         "type": "CentralTransitive",
-        "requested": "[8.0.5, )",
+        "requested": "[8.0.6, )",
         "resolved": "10.0.6",
         "contentHash": "eU/JSsGWpQPE+rkBJjFjsmtaPsu1kCLqFYeW3NS715+z/dP2/BsCl6R7BFGcjhg+rm5WHblllC3p7QS+sS3HtA==",
         "dependencies": {
