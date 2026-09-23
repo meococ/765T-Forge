@@ -46,7 +46,10 @@ jobs:
           global-json-file: global.json
 
       - name: Build plugin
-        shell: pwsh
+        # Windows PowerShell 5.1, not pwsh: the self-hosted runner is a stock Windows
+        # box without PowerShell 7. The build scripts are 5.1-compatible and this is
+        # verified by running them under 5.1 before changing the workflow.
+        shell: powershell
         run: |
           if (-not ($env:FORGE_AUTOCAD_MODERN_ROOT -or $env:AUTOCAD_2025_ROOT -or $env:FORGE_AUTOCAD_ROOT)) {
             Write-Warning "No modern AutoCAD reference root is set; the build will fall back to discovery of the highest installed AutoCAD. Set FORGE_AUTOCAD_MODERN_ROOT to pin a specific series."
@@ -54,7 +57,7 @@ jobs:
           .\scripts\build-plugin.ps1 -Configuration Release -OutDir artifacts\Forge.Plugin\
 
       - name: Pack plugin zip
-        shell: pwsh
+        shell: powershell
         run: |
           .\scripts\pack-release.ps1 -Configuration Release
           # pack-release also publishes server; upload plugin zip only here

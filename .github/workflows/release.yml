@@ -67,7 +67,8 @@ jobs:
 
       - name: Pack plugin
         id: pack
-        shell: pwsh
+        # Windows PowerShell 5.1: the self-hosted runner has no PowerShell 7.
+        shell: powershell
         run: |
           if (-not ($env:FORGE_AUTOCAD_MODERN_ROOT -or $env:AUTOCAD_2025_ROOT -or $env:FORGE_AUTOCAD_ROOT)) {
             Write-Warning "No modern AutoCAD reference root is set; falling back to discovery of the highest installed AutoCAD."
