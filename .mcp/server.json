@@ -1,10 +1,10 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/draft/server.schema.json",
-  "name": "io.github.765T/765t-forge",
+  "name": "io.github.meococ/765t-forge",
   "description": "Agent-safe AutoCAD MCP for metro/AEC issue-set publish (inspect → gate → plot/publish → verify).",
   "version": "0.3.0",
   "repository": {
-    "url": "https://github.com/765T/765T-Forge",
+    "url": "https://github.com/meococ/765T-Forge",
     "source": "github"
   },
   "packages": [

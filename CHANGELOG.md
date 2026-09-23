@@ -117,7 +117,7 @@ See [docs/versioning.md](docs/versioning.md).
 - Typed hot-path tools and gated open-world executors
 - `765T-Forge.ServerOnly.slnf` and unit tests
 
-[0.3.0]: https://github.com/765T/765T-Forge/releases/tag/v0.3.0
-[0.2.1]: https://github.com/765T/765T-Forge/releases/tag/v0.2.1
-[0.2.0]: https://github.com/765T/765T-Forge/releases/tag/v0.2.0
-[0.1.0]: https://github.com/765T/765T-Forge/releases/tag/v0.1.0
+[0.3.0]: https://github.com/meococ/765T-Forge/releases/tag/v0.3.0
+[0.2.1]: https://github.com/meococ/765T-Forge/releases/tag/v0.2.1
+[0.2.0]: https://github.com/meococ/765T-Forge/releases/tag/v0.2.0
+[0.1.0]: https://github.com/meococ/765T-Forge/releases/tag/v0.1.0

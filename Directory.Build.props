@@ -51,7 +51,7 @@
     <Description>MCP server and AutoCAD plugin for metro/AEC drawing production workflows (AutoCAD 2017+).</Description>
     <Copyright>Copyright (c) 2026 765T</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <RepositoryUrl>https://github.com/765T/765T-Forge</RepositoryUrl>
+    <RepositoryUrl>https://github.com/meococ/765T-Forge</RepositoryUrl>
     <NeutralLanguage>en</NeutralLanguage>
   </PropertyGroup>
 </Project>

@@ -6,7 +6,7 @@
 
 ## 1. Get artifacts
 
-**Preferred:** download both zips from the [latest GitHub Release](https://github.com/765T/765T-Forge/releases):
+**Preferred:** download both zips from the [latest GitHub Release](https://github.com/meococ/765T-Forge/releases):
 
 - `765T-Forge.Server-win-x64.zip`
 - `765T-Forge.Plugin.zip`

@@ -127,7 +127,7 @@ jobs:
           generate_release_notes: true
           body: |
             ## Install
-            Download **both** zips. See [docs/getting-started.md](https://github.com/765T/765T-Forge/blob/main/docs/getting-started.md).
+            Download **both** zips. See [docs/getting-started.md](https://github.com/meococ/765T-Forge/blob/master/docs/getting-started.md).
 
             | Artifact | Required |
             |----------|----------|

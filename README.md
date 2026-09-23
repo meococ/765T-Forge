@@ -1,14 +1,14 @@
 # 765T-Forge
 
-[![CI Server](https://github.com/765T/765T-Forge/actions/workflows/ci-server.yml/badge.svg)](https://github.com/765T/765T-Forge/actions/workflows/ci-server.yml)
+[![CI Server](https://github.com/meococ/765T-Forge/actions/workflows/ci-server.yml/badge.svg)](https://github.com/meococ/765T-Forge/actions/workflows/ci-server.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/765T/765T-Forge?include_prereleases)](https://github.com/765T/765T-Forge/releases)
+[![Release](https://img.shields.io/github/v/release/meococ/765T-Forge?include_prereleases)](https://github.com/meococ/765T-Forge/releases)
 
 All-C# MCP server and AutoCAD plugin for **metro/AEC issue-set drawing production** — inspect → fix → fill → gate → publish → verify.
 
 **Technical Preview** — Windows. Not affiliated with Autodesk. See [NOTICE.md](NOTICE.md).
 
-**Download:** [Latest Release](https://github.com/765T/765T-Forge/releases) — you need **both** `765T-Forge.Server-win-x64.zip` and `765T-Forge.Plugin.zip`.
+**Download:** [Latest Release](https://github.com/meococ/765T-Forge/releases) — you need **both** `765T-Forge.Server-win-x64.zip` and `765T-Forge.Plugin.zip`.
 
 ## AutoCAD support
 

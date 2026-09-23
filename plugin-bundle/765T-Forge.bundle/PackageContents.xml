@@ -9,7 +9,7 @@
   Author="765T"
   ProductCode="{A7C3E9F1-B765-4F0A-9E00-000000000001}"
   UpgradeCode="{A7C3E9F1-B765-4F0A-9E00-000000000000}">
-  <CompanyDetails Name="765T" Url="https://github.com/765T/765T-Forge" />
+  <CompanyDetails Name="765T" Url="https://github.com/meococ/765T-Forge" />
   <Components>
     <!-- AutoCAD 2017-2024 = .NET Framework 4.6-4.8 (Series R21.0 - R24.3) -->
     <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R21.0" SeriesMax="R24.3" />
