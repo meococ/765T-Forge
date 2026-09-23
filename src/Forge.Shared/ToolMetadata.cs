@@ -13,6 +13,17 @@ public sealed record ToolMetadata(
 
 public static class ForgeToolRegistry
 {
+    /// <summary>
+    /// <see cref="ToolMetadata.ReadOnly"/> means the tool has no write path at all.
+    /// It is not "does not modify the drawing": a tool that writes a report, contract,
+    /// receipt, sidecar or batch-state file must be <c>ReadOnly = false</c>, because MCP
+    /// hosts commonly auto-approve tools annotated read-only. Three tools are deliberately
+    /// not built with <c>Read(...)</c> for that reason: <c>forge_qa_preflight</c> always
+    /// writes a QA artifact, <c>forge_sheet_inventory_import</c> writes the contract when
+    /// <c>outputContractPath</c> is set, and <c>forge_cde_gate_evaluate</c> writes a sidecar
+    /// when <c>writeSidecar</c> is set. The matching <c>[McpServerTool]</c> hints in
+    /// <c>ForgeMcpTools</c> must agree; ToolMetadataTests enforces that.
+    /// </summary>
     private static readonly Dictionary<string, ToolMetadata> Tools = new(StringComparer.OrdinalIgnoreCase)
     {
         ["forge_system_health"] = Read("forge_system_health", "system", requiresAutoCad: false),
@@ -43,11 +54,11 @@ public static class ForgeToolRegistry
         ["forge_qa_check_xrefs"] = Read("forge_qa_check_xrefs", "qa"),
         ["forge_qa_audit_layers"] = Read("forge_qa_audit_layers", "qa"),
         ["forge_qa_readback"] = Read("forge_qa_readback", "qa"),
-        ["forge_qa_preflight"] = Read("forge_qa_preflight", "qa"),
+        ["forge_qa_preflight"] = new ToolMetadata("forge_qa_preflight", "qa", false, false, true, false, false),
         ["forge_qa_readback_after_timeout"] = Read("forge_qa_readback_after_timeout", "qa"),
         ["forge_audit_summarize"] = Read("forge_audit_summarize", "qa", requiresAutoCad: false),
         ["forge_issue_set_validate"] = Read("forge_issue_set_validate", "recipe"),
-        ["forge_sheet_inventory_import"] = Read("forge_sheet_inventory_import", "recipe", requiresAutoCad: false),
+        ["forge_sheet_inventory_import"] = new ToolMetadata("forge_sheet_inventory_import", "recipe", false, false, false, false, false, RequiresAutoCad: false),
         ["forge_issue_set_diff"] = Read("forge_issue_set_diff", "recipe", requiresAutoCad: false),
         ["forge_recipe_issue_set"] = Write("forge_recipe_issue_set", "recipe"),
         ["forge_pack_and_go"] = Write("forge_pack_and_go", "pack"),
@@ -67,7 +78,7 @@ public static class ForgeToolRegistry
         ["forge_xref_pin_verify"] = Read("forge_xref_pin_verify", "xref"),
         ["forge_transmittal_seal"] = Write("forge_transmittal_seal", "pack", idempotent: false),
         ["forge_publish_ceremony_check"] = Read("forge_publish_ceremony_check", "qa"),
-        ["forge_cde_gate_evaluate"] = Read("forge_cde_gate_evaluate", "qa"),
+        ["forge_cde_gate_evaluate"] = new ToolMetadata("forge_cde_gate_evaluate", "qa", false, false, true, false, false),
         ["forge_batch_run"] = new ToolMetadata("forge_batch_run", "batch", false, true, false, false, true, RequiresAutoCad: false, Unsafe: true),
         ["forge_batch_status"] = Read("forge_batch_status", "batch", requiresAutoCad: false),
         ["forge_exec_command"] = Destructive("forge_exec_command", "exec", unsafeTool: true),

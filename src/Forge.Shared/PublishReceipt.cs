@@ -45,8 +45,15 @@ public sealed class PublishReceipt
         return Hex.Encode(bytes).Substring(0, 16);
     }
 
-    public static string? TryWriteArtifact(PublishReceipt receipt, string? auditDir = null)
+    /// <summary>
+    /// Writes the receipt artifact. On failure <paramref name="error"/> carries the exact
+    /// reason and the return value is null. The previous implementation swallowed the
+    /// exception and returned a bare null, so a publish could report success while its
+    /// receipt silently did not exist - which defeats the point of a receipt.
+    /// </summary>
+    public static string? TryWriteArtifact(PublishReceipt receipt, out string? error, string? auditDir = null)
     {
+        error = null;
         try
         {
             var root = auditDir
@@ -59,8 +66,9 @@ public sealed class PublishReceipt
             AtomicFile.WriteAllText(path, JsonSerializer.Serialize(receipt, ForgeJson.Options));
             return path;
         }
-        catch
+        catch (System.Exception ex)
         {
+            error = $"{ex.GetType().Name}: {ex.Message}";
             return null;
         }
     }

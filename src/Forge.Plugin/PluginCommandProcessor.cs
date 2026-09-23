@@ -1722,7 +1722,12 @@ public sealed partial class PluginCommandProcessor
             VerificationPassed = probe.Passed,
             Message = message
         };
-        receipt.ArtifactPath = PublishReceipt.TryWriteArtifact(receipt);
+        receipt.ArtifactPath = PublishReceipt.TryWriteArtifact(receipt, out var receiptError);
+
+        if (receiptError is not null)
+        {
+            message += $" Warning: the publish receipt could not be written ({receiptError}); the publish itself succeeded.";
+        }
 
         return ForgeResult.Success(
             command.Id,
@@ -1735,13 +1740,14 @@ public sealed partial class PluginCommandProcessor
                 dsd,
                 fallback,
                 receipt,
+                receiptError,
                 extra = extraData
             },
             verification: new ForgeVerification
             {
                 Attempted = true,
                 Passed = probe.Passed,
-                Message = receipt.Message,
+                Message = message,
                 ReadBack = receipt
             });
     }

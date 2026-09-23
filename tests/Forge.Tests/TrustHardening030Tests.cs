@@ -98,7 +98,8 @@ public sealed class TrustHardening030Tests
         {
             var auditId = Guid.NewGuid().ToString("N");
             var receipt = new PublishReceipt { AuditId = auditId, OutputPath = "x.pdf" };
-            var path = PublishReceipt.TryWriteArtifact(receipt, receipts);
+            var path = PublishReceipt.TryWriteArtifact(receipt, out var writeError, receipts);
+            Assert.Null(writeError);
             Assert.NotNull(path);
             Assert.True(CeremonyEvidence.TryFindReceiptByAuditId(receipts, auditId));
             var findings = CeremonyEvidence.Evaluate(auditDirectory: null, receiptAuditId: auditId, receiptsDirectory: receipts);

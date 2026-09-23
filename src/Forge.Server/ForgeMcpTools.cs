@@ -181,7 +181,7 @@ public sealed class ForgeMcpTools
     public static Task<ForgeResult> AuditSummarize(ForgeToolRunner runner, int limit = 20, CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_audit_summarize", new { limit }, cancellationToken: cancellationToken);
 
-    [McpServerTool(Name = "forge_qa_preflight", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "forge_qa_preflight", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Run the publish readiness gate and write a structured QaReport artifact (xrefs, titleblock tags, unresolved #### fields, layers, pack v2, issue-set contract).")]
     public static Task<ForgeResult> QaPreflight(
         ForgeToolRunner runner,
@@ -196,7 +196,7 @@ public sealed class ForgeMcpTools
     public static Task<ForgeResult> IssueSetValidate(ForgeToolRunner runner, string? contractPath = null, CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_issue_set_validate", new { contractPath }, cancellationToken: cancellationToken);
 
-    [McpServerTool(Name = "forge_sheet_inventory_import", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "forge_sheet_inventory_import", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
     [Description("Import a read-only CSV sheet inventory (layout,drawingNo,rev[,title]) into an IssueSetContract. Does not write DST/SSM.")]
     public static Task<ForgeResult> SheetInventoryImport(
         ForgeToolRunner runner,
@@ -392,7 +392,7 @@ public sealed class ForgeMcpTools
             pathRewritesUsed
         }, cancellationToken: cancellationToken);
 
-    [McpServerTool(Name = "forge_cde_gate_evaluate", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "forge_cde_gate_evaluate", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("CAD-side ISO 19650-lite CDE gate for status/rev/naming; optional sidecar JSON for upload metadata.")]
     public static Task<ForgeResult> CdeGateEvaluate(
         ForgeToolRunner runner,
