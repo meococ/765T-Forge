@@ -60,9 +60,27 @@ Honest status of MCP tools. AutoCAD target: plugin components for **2017–2024*
 |------|--------|-------|
 | `forge_registry_load` / `_lookup` | implemented | Fail-closed drawing numbers for titleblock tags (`deny_unknown_drawing_no`) |
 | `forge_pack_load` / `_status` | implemented | Declarative project standards pack (v2 plot bindings); caller/pack regexes fail closed on the 250 ms match timeout (`regex_timeout`) |
-| `forge_system_tool_profile` | implemented | Profiles `core` / `plot` / `qa` (server-side) |
+| `forge_system_tool_profile` | implemented | Profiles `core` / `plot` / `qa` / `linework` (server-side) |
 | `forge_viewport_list` | implemented | Paper-space viewports |
 | `forge_viewport_set_layer_freeze` | implemented | VP freeze/thaw by handle |
+
+## Linework (CAD ↔ model QA)
+
+Seven `forge_linework_*` tools ship **server-side** (`RequiresAutoCad=false`). All seven are writers, not read-only: six create the caller-supplied `outputPath` when set, `forge_linework_compare` also writes `overlayPath`, and `forge_linework_transform` writes the calibration JSON to `transformPath` while calibrating. None of them edits a drawing, so none requires a backup.
+
+Status is **partial** for the six drawing-reading tools: the `source=dumpFile` pipeline (a `pl_dump.txt`-format dump) is unit-tested, but **this port has not been exercised against a real drawing or a real Revit/pipe export** — the tests that would do so are gated on evidence files that are absent in this repo. Live-drawing extraction (`source=drawing`) needs the AutoCAD plugin, which this build does not dispatch linework to; it fails closed with `live_source_unavailable`.
+
+| Tool | Status | Notes |
+|------|--------|-------|
+| `forge_linework_dump` | partial | Entities (line/polyline/arc/circle) as ordered vertices; `source=dumpFile` only (no AutoCAD); xref-aware layer filter |
+| `forge_linework_trace` | partial | Point/handle → owning entity, nearest segment index, context neighbours |
+| `forge_linework_topology` | partial | Shared-vertex nodes, edges, T-junctions, X-crossings, runs, dead ends |
+| `forge_linework_coverage` | partial | CAD-vs-model coverage: missing / partial / extra + uncovered sub-ranges |
+| `forge_linework_segments` | partial | Flat segment rows (stable `seg` id, endpoints, layer, length); `units=meters`; optional transform → `sT`/`eT` |
+| `forge_linework_compare` | partial | Per-item marking `matched`/`partial`/`missing_in_revit`/`extra_off_cad` + nearest counterpart + `distanceM` + matched pairs; `minZ`/`maxZ` model filter; optional SVG overlay via `overlayPath` |
+| `forge_linework_transform` | implemented (server-only) | Calibrate/apply CAD↔Revit similarity/affine transform from anchor `pairs`; persists calibration JSON via `transformPath`; warns when residual > 0.5 m. Unit-tested only |
+
+Layer filtering on all `forge_linework_*`: `layerFilter` patterns match the full layer name **and** the bare tail after the last `$`/`|`, so `A-Drainage-Pipe` matches `XREF$0$A-Drainage-Pipe`. `layerSuffix` forces an explicit EndsWith on the bare name; `layerMatch` = `auto|exact|suffix|prefix|substring` controls plain-pattern semantics (`prefix` is the legacy startswith that drops xref content). Coverage sampling is driven by caller parameters (`toleranceMeters`, `stepMeters`, `minCoverageFraction`), not by a hidden threshold.
 
 ## Exclusive AEC gates (0.2.1+)
 

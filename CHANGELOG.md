@@ -16,6 +16,7 @@ See [docs/versioning.md](docs/versioning.md).
 - `forge_publish_ceremony_check` optional evidence: `dryRunAuditId`, `preflightAuditId`, `receiptAuditId`
 - Nested xref BFS depth report on `forge_xref_closure` / pin / dependency_closure (`maxDepth` default 4, optional `failClosed`)
 - DSD publish seat checklist in [docs/smoke-lab.md](docs/smoke-lab.md)
+- `forge_linework_*` tool family (`dump`, `trace`, `topology`, `coverage`, `segments`, `compare`, `transform`) — server-side, AutoCAD-free CAD linework extraction and CAD↔model QA from a `pl_dump.txt` dump, with xref-safe layer filtering, a flat segment feed, per-item `matched`/`partial`/`missing_in_revit`/`extra_off_cad` marking, an optional SVG overlay, and anchor-pair similarity/affine calibration. Unit-tested only; not yet exercised against a real drawing. Live-drawing extraction is not dispatched in this build (`live_source_unavailable`)
 
 ### Changed
 

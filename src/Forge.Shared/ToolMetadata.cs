@@ -21,7 +21,10 @@ public static class ForgeToolRegistry
     /// not built with <c>Read(...)</c> for that reason: <c>forge_qa_preflight</c> always
     /// writes a QA artifact, <c>forge_sheet_inventory_import</c> writes the contract when
     /// <c>outputContractPath</c> is set, and <c>forge_cde_gate_evaluate</c> writes a sidecar
-    /// when <c>writeSidecar</c> is set. The matching <c>[McpServerTool]</c> hints in
+    /// when <c>writeSidecar</c> is set. The seven <c>forge_linework_*</c> tools are built
+    /// with <c>Linework(...)</c> for the same reason: each has a caller-supplied write path
+    /// (<c>outputPath</c> on six of them, <c>overlayPath</c> on compare, <c>transformPath</c>
+    /// on transform while calibrating). The matching <c>[McpServerTool]</c> hints in
     /// <c>ForgeMcpTools</c> must agree; ToolMetadataTests enforces that.
     /// </summary>
     private static readonly Dictionary<string, ToolMetadata> Tools = new(StringComparer.OrdinalIgnoreCase)
@@ -69,6 +72,13 @@ public static class ForgeToolRegistry
         ["forge_system_tool_profile"] = Read("forge_system_tool_profile", "system", requiresAutoCad: false),
         ["forge_viewport_list"] = Read("forge_viewport_list", "viewport"),
         ["forge_viewport_set_layer_freeze"] = Write("forge_viewport_set_layer_freeze", "viewport", idempotent: true),
+        ["forge_linework_dump"] = Linework("forge_linework_dump"),
+        ["forge_linework_trace"] = Linework("forge_linework_trace"),
+        ["forge_linework_topology"] = Linework("forge_linework_topology"),
+        ["forge_linework_coverage"] = Linework("forge_linework_coverage"),
+        ["forge_linework_segments"] = Linework("forge_linework_segments"),
+        ["forge_linework_compare"] = Linework("forge_linework_compare"),
+        ["forge_linework_transform"] = Linework("forge_linework_transform"),
         ["forge_qa_plot_fingerprint"] = Read("forge_qa_plot_fingerprint", "qa"),
         ["forge_qa_dependency_closure"] = Read("forge_qa_dependency_closure", "qa"),
         ["forge_qa_dual_source"] = Read("forge_qa_dual_source", "qa"),
@@ -104,6 +114,18 @@ public static class ForgeToolRegistry
     private static ToolMetadata Write(string name, string group, bool idempotent = false)
     {
         return new ToolMetadata(name, group, false, false, idempotent, false, true);
+    }
+
+    /// <summary>
+    /// Linework tools are AutoCAD-free, write only caller-supplied artifact paths, and are
+    /// therefore not backup-requiring: <c>outputPath</c> (dump/trace/topology/coverage/
+    /// segments/compare), <c>overlayPath</c> (compare) and <c>transformPath</c> (transform,
+    /// while calibrating) are the only write sites, and they create new artifacts rather
+    /// than editing an existing drawing.
+    /// </summary>
+    private static ToolMetadata Linework(string name)
+    {
+        return new ToolMetadata(name, "linework", false, false, true, false, false, RequiresAutoCad: false);
     }
 
     private static ToolMetadata Destructive(string name, string group, bool requiresAutoCad = true, bool unsafeTool = false)

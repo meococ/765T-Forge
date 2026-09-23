@@ -17,6 +17,15 @@ public sealed class PluginDispatchSyncTests
         "forge_audit_summarize",
         "forge_sheet_inventory_import",
         "forge_issue_set_diff",
+        // The whole linework family is AutoCAD-free and resolves in ForgeToolRunner:
+        // dump-file queries via LineworkLocal, coordinate math via CoordTransformTool.
+        "forge_linework_dump",
+        "forge_linework_trace",
+        "forge_linework_topology",
+        "forge_linework_coverage",
+        "forge_linework_segments",
+        "forge_linework_compare",
+        "forge_linework_transform",
     };
 
     [Fact]

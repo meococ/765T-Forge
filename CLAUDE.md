@@ -76,7 +76,7 @@ Two sources of truth describe each tool and **both must be updated together**:
 
 **Adding a tool = three edits** (pipe-routed tools): register it in `ForgeMcpTools` (MCP method), add its `ToolMetadata` in `ForgeToolRegistry`, and add a `case` in the `PluginCommandProcessor.Process` switch. A tool missing from the registry defaults to `Destructive("…", "unknown")`, and a name with no plugin dispatch arm returns `unknown_tool` at execution. `ToolMetadataTests` guards MCP↔registry sync; `PluginDispatchSyncTests` guards plugin arms.
 
-**Server-only tools** (no plugin switch — handled in `ForgeToolRunner`): `forge_run_script`, `forge_batch_run`, `forge_batch_status`, `forge_system_tool_profile`, `forge_audit_summarize`, `forge_sheet_inventory_import`, `forge_issue_set_diff`. Also update `docs/capability-matrix.md`, skill/cheatsheet, and CHANGELOG.
+**Server-only tools** (no plugin switch — handled in `ForgeToolRunner`): `forge_run_script`, `forge_batch_run`, `forge_batch_status`, `forge_system_tool_profile`, `forge_audit_summarize`, `forge_sheet_inventory_import`, `forge_issue_set_diff`, and the seven `forge_linework_*` tools (`dump`/`trace`/`topology`/`coverage`/`segments`/`compare`/`transform`; `RequiresAutoCad=false`, no backup). The linework family reads a `pl_dump.txt` dump and does pure coordinate math; live-drawing extraction is not dispatched in this build, and the tools are writers (`ReadOnly=false`) because they create the caller's `outputPath`/`overlayPath`/`transformPath` artifacts. Also update `docs/capability-matrix.md`, skill/cheatsheet, and CHANGELOG.
 
 Tool naming convention: `forge_<group>_<action>` (e.g. `forge_layer_state_restore`, `forge_plot_publish`).
 

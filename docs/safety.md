@@ -30,7 +30,7 @@ Typed tools' business values (titleblock notes, folder names, attribute text) ar
 
 - **Named-pipe tools:** the gate runs on **both** the server (`ForgeToolRunner`) and the plugin (`PluginCommandProcessor`) using the same `SafetyPolicy` and each process's own `FORGE_ENABLE_UNSAFE_OPS`. The per-call `unsafeAcknowledged` flag is carried in the command over the pipe. See [adr/0002-dual-safety-evaluation.md](adr/0002-dual-safety-evaluation.md).
 - **Headless AccoreConsole** (`forge_run_script`, `forge_batch_run`): these tools are handled by `HeadlessAccoreConsoleRunner` on the **server** and never enter the plugin. Safety for them is the server-side capability gate only. Do not describe them as dual-eval. No script-file contents are scanned.
-- **Server-only tools** (`forge_batch_status`, `forge_system_tool_profile`, `forge_audit_summarize`, `forge_sheet_inventory_import`, `forge_issue_set_diff`) also never cross the pipe.
+- **Server-only tools** (`forge_batch_status`, `forge_system_tool_profile`, `forge_audit_summarize`, `forge_sheet_inventory_import`, `forge_issue_set_diff`, and the seven `forge_linework_*` tools) also never cross the pipe. The linework tools are AutoCAD-free and only write the caller-supplied `outputPath` / `overlayPath` / `transformPath` artifacts; live-drawing extraction is not dispatched in this build.
 
 ## Unsafe executor semantics (read this before enabling)
 

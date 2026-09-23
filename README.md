@@ -44,6 +44,7 @@ Forge competes on **reliable sheet-set publish**, not geometry tool count:
 - DSD multi-layout publish path + PDF verify (**partial** on some seats; fallback to per-layout plot)
 - Publish readiness gate (`forge_qa_preflight`)
 - Titleblock campaigns + issue-set recipe
+- Linework QA (`forge_linework_*`) — CAD linework vs model pipe segments from a `pl_dump.txt` dump; server-side and AutoCAD-free, **unit-tested only** (not yet exercised against a real drawing; live-drawing extraction is not dispatched in this build)
 - Audit, backup, dry-run, named-pipe ACL + required token
 
 Honest status: [docs/capability-matrix.md](docs/capability-matrix.md) · Start here: [docs/getting-started.md](docs/getting-started.md) · Roadmap: [docs/roadmap.md](docs/roadmap.md)

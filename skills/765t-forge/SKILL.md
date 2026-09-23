@@ -39,7 +39,7 @@ Use this skill when an agent drives AutoCAD through **765T-Forge** for metro/AEC
 
 ## Profiles
 
-Call `forge_system_tool_profile` (`core` | `plot` | `qa`) to shrink the tool surface for the current task. MCP resources: `forge://profiles/{name}`.
+Call `forge_system_tool_profile` (`core` | `plot` | `qa` | `linework`) to shrink the tool surface for the current task. MCP resources: `forge://profiles/{name}`.
 
 ## Exclusive AEC gates (0.2.1+)
 
@@ -54,6 +54,14 @@ Prefer these before publish when the project pack/register exists: `forge_qa_plo
 5. **`forge_qa_preflight`** before any real publish; do not force past a failed gate unless the human explicitly requests `force`.
 
 Prefer **`forge_recipe_issue_set`** for full issue-set runs. It reports `steps[]` with `status` exactly `completed` or `failed` and stops at the first failure — inspect the failing step, do not assume the rest ran.
+
+## Linework (CAD ↔ Revit model QA)
+
+- The `forge_linework_*` family is **server-side and AutoCAD-free** in this build: it reads a `pl_dump.txt` dump (`source=dumpFile` + `dumpPath`). `source=drawing` (live extraction) needs the AutoCAD plugin and is not dispatched here — it fails closed with `live_source_unavailable`.
+- Layer names may be xref-prefixed (`XREF$0$Layer`). `layerFilter` is prefix-aware, but prefer **`layerSuffix`** (EndsWith on the bare layer name) when targeting a specific layer; `prefix` matching silently drops xref content.
+- `forge_linework_transform` calibrates/persists/applies the CAD→Revit transform (anchor `pairs` → similarity or affine fit → `transformPath` file). Re-check `maxResidualM`; > 0.5 m means the anchors do not describe one transform.
+- `forge_linework_compare` marks every CAD segment and every Revit pipe segment (`modelSegments`/`modelSegmentsPath`) as `matched` / `partial` / `missing_in_revit` / `extra_off_cad` with distance; `overlayPath` writes a color-coded SVG for human review.
+- These tools write only caller-supplied artifact paths (`outputPath`, `overlayPath`, `transformPath`); they are **not** read-only and require no backup. Unit-tested only — do not claim a real drawing was QA'd from them.
 
 ## Metro hot path
 
