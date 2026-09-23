@@ -35,6 +35,13 @@ jobs:
 
       - name: Setup .NET
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        env:
+          # A self-hosted runner normally runs as a plain user that cannot write to the
+          # machine-wide dotnet root, so setup-dotnet fails with "doesn't have write
+          # access to the installation root 'C:\Program Files\dotnet'". Pointing the
+          # install at the runner's own tool cache keeps global.json's exact SDK pin
+          # while giving the runner a location it owns.
+          DOTNET_INSTALL_DIR: ${{ runner.tool_cache }}/dotnet
         with:
           global-json-file: global.json
 
