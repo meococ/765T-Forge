@@ -55,7 +55,7 @@ Write-Host "  1. Add this folder to AutoCAD TRUSTEDPATHS (OPTIONS > Files > Trus
 Write-Host "       $InstallDir"
 Write-Host "  2. Set user env FORGE_AUTOCAD_TOKEN (and optional FORGE_PIPE_NAME) for the AutoCAD process,"
 Write-Host "     matching the MCP server env. Restart AutoCAD after changing env."
-Write-Host "  3. In AutoCAD $Year: NETLOAD -> $installed"
+Write-Host "  3. In AutoCAD ${Year}: NETLOAD -> $installed"
 Write-Host "  4. Run MCP_STATUS and confirm the pipe name matches FORGE_PIPE_NAME."
 Write-Host "  5. Optional Autoloader: copy plugin-bundle\765T-Forge.bundle into an ApplicationPlugins folder."
 Write-Host "     See docs\install-plugin.md"

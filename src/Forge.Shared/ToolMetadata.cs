@@ -39,6 +39,10 @@ public static class ForgeToolRegistry
         ["forge_layout_page_setup_apply"] = Write("forge_layout_page_setup_apply", "layout", idempotent: true),
         ["forge_plot_to_pdf"] = Write("forge_plot_to_pdf", "plot", idempotent: false),
         ["forge_plot_publish"] = Write("forge_plot_publish", "plot", idempotent: false),
+        // C15: no active-document backup on the stated basis that the import runs in a fresh
+        // temporary document and the source DGN is never written; an existing target is
+        // backed up explicitly in the handler before SaveAs.
+        ["forge_dgn_import"] = new ToolMetadata("forge_dgn_import", "dgn", false, false, false, false, false),
         ["forge_qa_verify_titleblock"] = Read("forge_qa_verify_titleblock", "qa"),
         ["forge_qa_check_xrefs"] = Read("forge_qa_check_xrefs", "qa"),
         ["forge_qa_audit_layers"] = Read("forge_qa_audit_layers", "qa"),

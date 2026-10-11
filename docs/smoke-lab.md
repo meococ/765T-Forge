@@ -1,4 +1,4 @@
-# Smoke lab checklist (AutoCAD 2026)
+# Smoke lab checklist
 
 Maintainer-only. Do **not** commit customer DWGs. Record pass/fail in the GitHub Release notes before announcing a public `v*` tag.
 
@@ -10,7 +10,7 @@ Automated helper: [`scripts/smoke-lab.ps1`](../scripts/smoke-lab.ps1) (Autoloade
 
 - [x] Unpacked **Release** server zip contains `docs/capability-matrix.md` and `docs/safety.md` next to the exe
 - [x] Plugin installed via `install-plugin.ps1` + Autoloader Series **R25.1** under `%APPDATA%\Autodesk\ApplicationPlugins`
-- [x] AutoCAD 2026 running; `MCP_STATUS` shows product/pipe/token; named pipe responds
+- [x] AutoCAD 2025/2026 running; `MCP_STATUS` shows product/pipe/token; named pipe responds
 - [x] Matching `FORGE_AUTOCAD_TOKEN` / `FORGE_PIPE_NAME` on AutoCAD process
 - [x] Lab / project DWG with ≥1 paper layout
 

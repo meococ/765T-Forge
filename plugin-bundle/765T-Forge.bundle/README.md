@@ -1,6 +1,6 @@
 # Autoloader bundle skeleton
 
-Targets **AutoCAD 2026 (Series R25.1)** via `PackageContents.xml`.
+Targets **AutoCAD 2026 (Series R25.1)** via `PackageContents.xml`. 2025 builds autoload via Series R25.0; 2026 via R25.1 — build/bundle per year.
 
 1. Build/install the plugin (`scripts/install-plugin.ps1`).
 2. Copy `Forge.Plugin.dll` (+ deps except Autodesk `Ac*.dll`) into `Contents/Windows/` next to this package.

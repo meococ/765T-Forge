@@ -1,7 +1,11 @@
 # CAD job tools — design (cad-connector-1007, C1)
 
-Status: rev 2 after peer review (R1 facts/feasibility, R2 adversarial — findings closed in place,
-record in `var/flow/cad-connector-1007/verify/C1-1/`). Lead: the CAD development session (owner
+Status: rev 3 — market-informed engine architecture added 2026-10-07 (owner directive: research
+market features and mechanisms first; two independent peer studies, records in
+`var/flow/cad-connector-1007/research/`). Rev 2 content stands; the Rev 3 section at the end adds
+the multi-engine architecture (C10-C13) and amends C3/C5/C7/C9. Rev 2 was closed after peer
+review (R1 facts/feasibility, R2 adversarial — findings closed in place, record in
+`var/flow/cad-connector-1007/verify/C1-1/`). Lead: the CAD development session (owner
 assignment 2026-10-07).
 Goal: AI agents do CAD jobs end-to-end — extract quantities from CAD layers (bóc tách), prepare
 clean, rebased plan/section DWGs, and keep drawings clean — with the same typed, fail-closed style
@@ -25,7 +29,8 @@ Two drivers:
 - `forge_run_script` timeout is a named tool argument: default 300 s, clamped 5..3600
   (`HeadlessAccoreConsoleRunner.cs:239,244`, tool argument `ForgeMcpTools.cs:488`). No 60 s cap
   exists anywhere in the server request path (`ForgeToolRunner.cs`, `ForgePipeClient.cs` — 10 s
-  connect, 120 s default pipe response — and `Program.cs` checked). The customer's ~60 s is most
+  connect (now configurable via `FORGE_PLUGIN_CONNECT_TIMEOUT_SECONDS`), 120 s default pipe response —
+  and `Program.cs` checked). The customer's ~60 s is most
   likely the MCP client's own tool timeout (**unverified**); the tool `[Description]` never
   advertises `timeoutSeconds`, so a caller cannot discover it — that discoverability gap is real
   and fixed here.
@@ -37,9 +42,11 @@ Two drivers:
   tessellated away, `PluginCommandProcessor.Linework.cs:225,289`), hatch, text or blockref fields.
 - Plugin references per-root AutoCAD DLLs through `$(AutoCadRoot)` fed by `AUTOCAD_2026_ROOT`
   (`Forge.Plugin.csproj:6-7`); `ForgeConstants.AutoCadVersion` pins the string "2026"
-  (`ForgeConstants.cs:15`); `build-plugin.ps1:18-24` defaults that env and only warns when the
+  (`ForgeConstants.cs:15` — superseded by C2 — per-year ForgeTargetYear stamp + auto-detected
+  root); `build-plugin.ps1:18-24` defaults that env and only warns when the
   DLLs are missing; `ForgeEnvironment.DefaultAutoCadRoot()` returns the 2026 path
-  (`ForgeEnvironment.cs:16,26,57`).
+  (`ForgeEnvironment.cs:16,26,57` — superseded by C2 — per-year ForgeTargetYear stamp +
+  auto-detected root).
 - Measured on this machine (2026-10-07): the full solution builds green against
   `D:\AutoCAD 2025` (0 errors; 3 benign MSB3277 Microsoft.VisualBasic warnings) and the logic test
   suite passes 85/85 without AutoCAD.
@@ -97,9 +104,14 @@ Returns `CadEntityDump/1`:
 - every item carries its handle and layer; the dump header carries the DWG's `$INSUNITS`
   (refused as `UNITS_UNDECLARED` when 0) and the selection that produced it.
 
-**Answer-size contract:** the result carries `truncated` and, when truncated, a `continuation`
-token (last handle + selection hash); the caller re-calls with it to page. A cap hit is never a
-silent clip — the same honesty the linework family's `Truncated`/`TooLargeMessage` already ships.
+**Answer-size contract (amended by rev 3 → C10):** the result carries `truncated` and the named
+`maxEntities` cap; when the serialized answer exceeds the spill threshold the full dump is written
+to an artifact file and the MCP result carries summary + path + bytes + sha256 (mechanism already
+shipped as `WriteArtifactOrSuccess`, `LineworkLocal.cs:486-510`). The rev 2 continuation-token
+paging is dropped: the consumer is an agent that can read a local file, so spill needs no
+tool-stateful paging and the same contract uploads cleanly to a hosted artifact store at C9. A cap
+hit is never a silent clip — the same honesty the linework family's
+`Truncated`/`TooLargeMessage` already ships.
 Read-only tool. A filter matching zero entities is an honest empty answer, never an error. Unknown
 window/layout names are named errors (`WINDOW_NOT_FOUND`, `LAYOUT_NOT_FOUND`). Implementation lives
 in the plugin (live drawing), shared DTOs in `Forge.Shared` next to `Linework`; the existing
@@ -220,8 +232,9 @@ plus `docs/capability-matrix.md`, `skills/765t-forge/SKILL.md` and `CHANGELOG.md
 
 ## Explicitly out of scope this wave
 
-Civil 3D; SSM write; visual screenshots; LISP eval-with-capture channel; negative scale/mirror;
-any change to the denylist or to the `forge_linework_*` output shape.
+Civil 3D; SSM write; visual screenshots (proposed as C14 below — owner decision pending); LISP
+eval-with-capture channel; negative scale/mirror; any change to the denylist or to the
+`forge_linework_*` output shape.
 
 ## Decisions taken in review (closed — were open questions in rev 1)
 
@@ -231,3 +244,137 @@ any change to the denylist or to the `forge_linework_*` output shape.
    equality. A declared-tolerance mode stays out (was open question 2).
 3. `forge_dump_entities` default `include`: explicit opt-in per kind, with hatch loops and spline
    flats opt-in only — the answer-size cap plus the opt-in bound the answer (was open question 3).
+
+## Rev 3 — engine architecture from market research (2026-10-07)
+
+Owner directive: study market features and mechanisms and make the engine better before C3+
+implementation. Two independent read-only peer studies — market gap analysis (session
+`4dffa844`) and engine-mechanisms deep-dive (session `b9c64b7f`) — ground this section; raw
+market evidence downloaded to `var/flow/cad-connector-1007/research/` (readme-puran.md,
+readme-uc4n.md, acadsharp-readme.md, acadsharp-license.md) and read from files, per repo rules.
+
+**Market pattern (evidence):** the two top open-source AutoCAD MCP servers converged
+independently on "one typed contract, multiple engines": puran-water/autocad-mcp (File IPC
+needing AutoCAD LT vs ezdxf headless anywhere; 8 consolidated tools) and U-C4N/Autocad-MCP Pro
+(live COM vs headless ezdxf; 122 tools; per-engine capability keys; refusal-by-name where the
+headless path cannot be honest). ACadSharp v3.8.0 gives C# read/write of DWG+DXF with **no
+AutoCAD installed** — MIT licence verified (`acadsharp-license.md`). Forge rev 2 shipped exactly
+one engine (live plugin) plus untyped headless scripts.
+
+**Forge differentiators the market evidence does not show (keep and advertise):** the
+AccoreConsole headless path runs **real AutoCAD full-fidelity** (both competitors' headless paths
+are ezdxf-class and self-admit ACIS/REGION opacity); dual safety evaluation with a fail-safe
+registry default; dry-run default + pre-write backup + one undo mark per write; backup manifests,
+publish receipts, drawing registry and standards packs; the verified-readback contract.
+
+**Architecture: one typed contract, three engines.** The DTOs (`CadEntityDump/1`, the takeoff
+contract, the cleanup plan) live in `Forge.Shared` once; three engines implement them:
+
+- **live** — in-process plugin over the pipe, today's full-API path;
+- **headless** (C11) — the *same* plugin handlers inside `accoreconsole.exe` with no AutoCAD UI:
+  a registered `FORGE_HEADLESS` command reads a `ForgeCommand` JSON file, runs the existing
+  `PluginCommandProcessor.Process` verbatim (token → year gate → dual safety → backup → undo
+  mark → dispatch), writes the `ForgeResult` JSON to an output file. Server side, a
+  `HeadlessTypedRunner` reuses the proven spawn/timeout/kill pattern
+  (`HeadlessAccoreConsoleRunner.cs:221-272`) and the batch/resume state machine (200-job cap,
+  dedupe, `resumeBatchId`, per-job save, `:27-170`): `BatchJobArgs` gains a tool/args field and
+  typed jobs dispatch through it.
+- **offline** (C12) — a server-resident read engine on ACadSharp for `dump_entities` and
+  `cad_takeoff` with no AutoCAD on the machine. It lives in `Forge.Server` (the precedent is
+  `LineworkLocal.Execute`, already an offline engine routed server-side —
+  `ForgeToolRunner.cs:86-88`); the package is pinned in `Directory.Packages.props` and the MIT
+  notice added. Writes are refused offline **by name** — Forge never re-implements its write
+  doctrine (backup, undo mark, readback) on a third-party writer.
+
+**Routing rule:** the new tool contracts carry an explicit `engine` argument
+(`"live" | "headless" | "offline"`, default live). There is no automatic live→offline fallback: a
+silent fallback is banned doctrine, so an unsupported combination fails with a named error naming
+the engine that can do the job.
+
+**What offline cannot do (stated honestly in the contract):** plotting/publishing, paper-space
+layout/viewport rendering, dynamic-block effective geometry, proxy/custom objects, layer-state
+restore, anything touching `Editor` or `Application`; spline/ellipse curve parity is subject to
+the C12a spike.
+
+### New plan rows (rev 3)
+
+- **C10 — automatic artifact spill for oversized answers.** When a serialized answer exceeds the
+  spill threshold (explicit config, default 256 KB), the full payload is written to
+  `%LOCALAPPDATA%\765T-Forge\artifacts\<tool>-<id>.json` and the MCP result carries summary +
+  path + bytes + sha256; `maxEntities` + `truncated` remain the filter-level cap. Mechanism is
+  already shipped (`WriteArtifactOrSuccess`) — this only changes who triggers it. Retention is
+  explicit config, never a heuristic. Priority P0: highest value per unit risk, and C3/C6 depend
+  on it.
+- **C11 — headless typed runner**, preceded by **C11a spike**: one `.scr` doing `NETLOAD` of the
+  plugin DLL + `FORGE_HEADLESS` on a fixture DWG. The spike settles the load carrier (bundle
+  autoload vs explicit NETLOAD — accoreconsole behaviour unverified) and whether `Editor.Command`
+  undo marks behave headless. Everything else assembles from proven parts. Verdict LIKELY. This
+  is the foundation for folder-scale takeoff/cleanup without opening AutoCAD.
+- **C12 — offline read engine**, preceded by **C12a spike**: pinned-version target-framework
+  check plus an entity-parity table (Line/Polyline/Arc/Circle plus spline, hatch, text, blockref
+  reads) against a fixture DWG dumped live. Then `engine:"offline"` on the dump/takeoff
+  contracts, with per-kind parity declared in capability metadata. LIKELY for the four linework
+  kinds. This is also Flow's W2-T6 SP4 answer at uplift.
+- **C13 — native selection engine** (deferred until C4 lands): `Editor.SelectCrossingWindow` +
+  `SelectionFilter` (`TypedValue(8, layerFilter)`) as the candidate-set provider for windowed
+  dump/extract on drawings with 10^5-10^6 entities; `LineworkQuery.Apply` stays the second-stage
+  filter; the xref walk is unchanged (Editor selection never crosses xrefs). No `SelectionSet`
+  usage exists in `src` today — NEEDS-SPIKE for the perf claim.
+- **C14 — `forge_view_snapshot` (plot-to-PNG) — PROPOSED, owner decision pending.** Both market
+  leaders ship screenshots/previews and their agent loops depend on them; shape: plot a named
+  layout or window to PNG reusing the `forge_plot_publish` plotting path, read-only, one typed
+  tool. Rev 2 scoped it out; it needs the owner's yes to enter.
+- **C15 — `forge_dgn_import` (DGN → DWG typed conversion) — implemented 2026-10-09, live smoke
+  pending.** Owner ask (conversation 2026-10-09): convert MicroStation DGN drawings to DWG with
+  risk calculated before dispatch. Shape: `-DGNIMPORT` — prompt order per Autodesk Help
+  (filename → design model, Enter accepts the DGN default → conversion units Master/Sub →
+  mapping setup, Enter accepts the default; `Editor.Command` maps `""` to Enter) — executed in
+  a **fresh temporary document** (`Documents.Add("")`), so neither the source DGN nor the
+  user's active drawing is ever written; then `Database.SaveAs(target, DwgVersion.Current)`,
+  restore the previous active document, close the temp document best-effort
+  (`tempDocumentClosed` is in the answer). `RequiresBackup=false` in the registry on that
+  stated basis — an existing target is still backed up explicitly before SaveAs (same rule as
+  `forge_doc_save`). Guards, in order: `missing_dgn_args`; `dgn_not_found`;
+  `dgn_v7_not_supported` — V7 detected by the Intergraph TCB word `08 09`/`09 08` in the first
+  two bytes (V8 is a different container; AutoCAD imports V8 only; sniff is best-effort —
+  a non-V7 header is left to the importer plus post-import verification);
+  `dgn_target_document_open` — SaveAs over any open document is refused;
+  `illegal_control_character` on paths/model name; `dgn_units_invalid` — units is a typed
+  `master|sub` choice because the wrong one rescales the whole drawing (unit mapping per the
+  DGNIMPORT docs); `dgn_target_overwrite_not_acknowledged` (ack → destination backup →
+  proceed). dryRun returns the plan: canonical paths, source bytes, targetExists, units,
+  model, mapping=default. Post-import verification: model-space entity + layer counts — zero
+  entities refuses `dgn_import_empty` naming the model, never a fake success. Risk register:
+  (1) prompt-sequence variance across host years — the tokens are the documented 2026
+  sequence; a mismatch surfaces as `dgn_import_failed` with the exception text, and the C8
+  live smoke must confirm 2025+2026 before the matrix row moves to implemented;
+  (2) creating/activating a document inside another document's command context — the same
+  class of host behaviour the year gate defers to smoke; every cleanup path is best-effort
+  and reported honestly; (3) large DGN vs the 120 s default pipe response timeout — the
+  failure suggestion names `FORGE_PLUGIN_RESPONSE_TIMEOUT_SECONDS`, and the MCP
+  `[Description]` advertises it up front (C7); (4) font/level fidelity uses the importer's
+  default automatic mapping — substitution is possible and not measured here;
+  (5) headless batch conversion via accoreconsole is NOT claimed — `forge_run_script` +
+  `-DGNIMPORT` is untested and stays out of the matrix until someone proves it.
+
+### Amendments to rev 2 rows
+
+- **C3:** answer-size contract is now maxEntities + truncated + automatic spill (C10); the
+  continuation token is dropped. The dump header additionally states the selection semantics
+  actually applied (window vs layout vs viewport, per-layer counts before the cap) — selection
+  honesty per the U-C4N pattern.
+- **C5:** later extension candidates for the closed op set: audit-with-fix and overkill-style
+  dedup as typed, backup-wrapped ops (both are top QC asks; the safety policy blocks them as raw
+  commands and nothing typed offers them today). Not in v1.
+- **C7:** executor honesty extends to every tool: advertised default budget and max answer size
+  in the tool `[Description]`.
+- **C9:** the offline engine is Flow's W2-T6 SP4 mechanism; catalog token-budget profiles
+  (`ToolProfiles.cs` exists) are noted as uplift-time, P2.
+
+### Unverified (owned by the C11a/C12a/C8 spikes)
+
+accoreconsole bundle-autoload/NETLOAD behaviour and headless `Editor.Command` undo marks;
+ACadSharp pinned-version TFM and spline/ellipse parity; `Editor.Select*` behaviour inside
+accoreconsole; star counts and U-C4N's self-graded rubric are vendor claims, not reproduced;
+C15 `-DGNIMPORT` prompt behaviour on a live host (2025 and 2026) and the fresh-temp-document
+context — logic is unit-tested, the live smoke is not run yet.

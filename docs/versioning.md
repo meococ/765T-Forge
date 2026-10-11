@@ -28,7 +28,7 @@ Phase labels are **documentation milestones**, not NuGet or Git tag versions.
 
 ## 4. AutoCAD target
 
-- Current supported host: **AutoCAD 2026** (`net8.0-windows`, `AUTOCAD_2026_ROOT`).
+- Current supported hosts: **AutoCAD 2025 and 2026** via `build/AutoCadYears.props` (`AUTOCAD_2026_ROOT` override).
 - A future AutoCAD year is a **platform target**, documented explicitly (and may require a minor product bump plus matrix updates).
 - Plugin binaries are not interchangeable across AutoCAD major years without rebuild.
 
@@ -47,4 +47,4 @@ If the named-pipe JSON command/result shape breaks, document it as a breaking ch
 | What did we ship to GitHub? | Product SemVer + CHANGELOG |
 | How mature is the codebase vs brief? | Phase / Wave docs |
 | Which MCP SDK? | `Directory.Packages.props` |
-| Which CAD year? | README + this file (AutoCAD 2026) |
+| Which CAD year? | README + this file (AutoCAD 2025/2026) |

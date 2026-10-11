@@ -48,6 +48,11 @@ Three projects; the split is the thing to understand:
 
 They communicate over a **named pipe** (`765T.Forge.AutoCAD`), one JSON line each way. The plugin side (`NamedPipePluginServer`) creates the pipe with an ACL for the current Windows user + LocalSystem, `maxNumberOfServerInstances: 1` (calls are serialized). Token auth is checked as defense-in-depth on top of the ACL.
 
+Transport hardening (why a stuck AutoCAD can no longer take the plugin down):
+
+- **No-document state (Start tab):** `forge_system_health`, `forge_system_version`, `forge_doc_list_open` still answer via an `Application.Idle` marshal; every other tool fails fast with `no_command_context` when no documents are open at all (with documents open but none active, the request still tries the command context — the watchdog backstops a wedge).
+- **Per-request watchdog:** the plugin abandons a request after `FORGE_PLUGIN_RESPONSE_TIMEOUT_SECONDS - 5`s and answers `plugin_request_timeout`; the pipe keeps serving. Callbacks AutoCAD never started are refused as `plugin_request_stale` so an abandoned write cannot execute late; work already started still runs to completion (read-back-after-timeout protocol applies).
+
 ### Request lifecycle (follow it across files)
 
 `ForgeMcpTools.*` (MCP surface) → `ForgeToolRunner.InvokeAsync` (**server-side** safety eval + audit write, then routes) → for `forge_run_script` / `forge_batch_run`: `HeadlessAccoreConsoleRunner` (spawns `accoreconsole.exe`); everything else: `ForgePipeClient.SendAsync` → pipe → `NamedPipePluginServer.HandleRequestAsync` → `ExecuteOnMainThreadAsync` (marshals onto AutoCAD's command context, takes a document lock) → `PluginCommandProcessor.Process` (**token auth** + **plugin-side** safety eval + audit + pre-write backup, then a big `switch` on `command.Tool.ToLowerInvariant()`) → AutoCAD API.
@@ -82,9 +87,10 @@ Both processes call `ForgeEnvironment.FromProcess()` independently; they must re
 - `FORGE_PIPE_NAME` (default `765T.Forge.AutoCAD`)
 - `FORGE_AUTOCAD_TOKEN` (required) → falls back to `MCP_AUTOCAD_TOKEN`. No production default secret. For local/tests only: `FORGE_DEV_ALLOW_DEFAULT_TOKEN=true` uses `dev-only-insecure-token` and prints a warning.
 - `FORGE_BACKUP_DIR`, `FORGE_AUDIT_DIR` (default under `%LOCALAPPDATA%\765T-Forge\`)
-- `AUTOCAD_2026_ROOT` (default `C:\Program Files\Autodesk\AutoCAD 2026`) — used for plugin HintPath + `accoreconsole.exe`
+- `AUTOCAD_2026_ROOT` (optional override; default = newest installed `AutoCAD 20xx` found under Program Files\Autodesk and fixed-drive roots, fallback `C:\Program Files\Autodesk\AutoCAD 2026`) — used for plugin HintPath + `accoreconsole.exe`
 - `FORGE_ENABLE_UNSAFE_OPS` (default `false`)
-- `FORGE_PLUGIN_RESPONSE_TIMEOUT_SECONDS` (default `120`)
+- `FORGE_PLUGIN_RESPONSE_TIMEOUT_SECONDS` (default `120`) — also drives the plugin-side watchdog deadline (minus 5s, 5s floor)
+- `FORGE_PLUGIN_CONNECT_TIMEOUT_SECONDS` (default `10`, clamp 1–120)
 
 ## Running against AutoCAD
 

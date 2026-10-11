@@ -29,7 +29,7 @@ public sealed class ForgePipeClient
         try
         {
             using var connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            connectTimeout.CancelAfter(TimeSpan.FromSeconds(10));
+            connectTimeout.CancelAfter(TimeSpan.FromSeconds(_environment.PluginConnectTimeoutSeconds));
             await pipe.ConnectAsync(connectTimeout.Token).ConfigureAwait(false);
 
             await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), leaveOpen: true)
@@ -60,10 +60,10 @@ public sealed class ForgePipeClient
                 pipe.IsConnected ? "plugin_response_timeout" : "plugin_connect_timeout",
                 pipe.IsConnected
                     ? $"Timed out waiting for AutoCAD plugin response after {_environment.PluginResponseTimeoutSeconds}s."
-                    : $"Timed out connecting to named pipe '{_environment.PipeName}'.",
+                    : $"Timed out connecting to named pipe '{_environment.PipeName}' after {_environment.PluginConnectTimeoutSeconds}s.",
                 pipe.IsConnected
                     ? "Do not blindly retry non-idempotent writes. Check AutoCAD, then call a read-back/QA tool to see whether the operation committed."
-                    : "NETLOAD Forge.Plugin.dll in AutoCAD 2026, then call forge_system_health again.");
+                    : "Start AutoCAD and NETLOAD Forge.Plugin.dll built for the host year (scripts/build-plugin.ps1 -Year), then call forge_system_health again.");
         }
         catch (Exception ex)
         {
@@ -72,7 +72,7 @@ public sealed class ForgePipeClient
                 command.Id,
                 "plugin_unavailable",
                 $"Could not reach AutoCAD plugin over named pipe '{_environment.PipeName}'.",
-                "Open AutoCAD 2026, NETLOAD Forge.Plugin.dll, and verify the MCP_STATUS command.");
+                "Open AutoCAD, NETLOAD Forge.Plugin.dll, and verify the MCP_STATUS command.");
         }
     }
 }

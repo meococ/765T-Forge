@@ -121,6 +121,7 @@ public sealed partial class PluginCommandProcessor
             "forge_layout_page_setup_apply" => PageSetupApply(command),
             "forge_plot_to_pdf" => PlotToPdf(command),
             "forge_plot_publish" => PlotPublish(command),
+            "forge_dgn_import" => DgnImport(command),
             "forge_qa_verify_titleblock" => VerifyTitleblock(command),
             "forge_qa_check_xrefs" => CheckXrefs(command),
             "forge_qa_audit_layers" => AuditLayers(command),
@@ -382,9 +383,16 @@ public sealed partial class PluginCommandProcessor
         }
 
         var previousFileDia = Application.GetSystemVariable("FILEDIA");
-        Application.SetSystemVariable("FILEDIA", 0);
-        Documents.Open(args.Path, false);
-        Application.SetSystemVariable("FILEDIA", previousFileDia);
+        try
+        {
+            Application.SetSystemVariable("FILEDIA", 0);
+            Documents.Open(args.Path, false);
+        }
+        finally
+        {
+            Application.SetSystemVariable("FILEDIA", previousFileDia);
+        }
+
         return ForgeResult.Success(command.Id, new { opened = args.Path });
     }
 

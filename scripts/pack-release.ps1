@@ -1,6 +1,9 @@
 <#
 .SYNOPSIS
   Pack release artifacts: always publish Forge.Server; optionally pack plugin when AutoCAD refs exist.
+.PARAMETER Year
+  AutoCAD year the plugin zip is built for, via scripts/build-plugin.ps1 (ForgeTargetYear stamp).
+  AUTOCAD_2026_ROOT stays the manual root override for non-default installs.
 .PARAMETER SkipPlugin
   Skip plugin packaging (default for CI without AutoCAD).
 #>
@@ -8,6 +11,8 @@
 param(
     [ValidateSet("Debug", "Release")]
     [string] $Configuration = "Release",
+    [ValidateSet("2025", "2026")]
+    [string] $Year = "2026",
     [switch] $SkipPlugin
 )
 
@@ -47,38 +52,32 @@ Write-Host "Wrote $serverZip"
 
 $pluginPacked = $false
 if (-not $SkipPlugin) {
-    if (-not $env:AUTOCAD_2026_ROOT) {
-        $env:AUTOCAD_2026_ROOT = "C:\Program Files\Autodesk\AutoCAD 2026"
-    }
+    New-Item -ItemType Directory -Force -Path $pluginOut | Out-Null
 
-    $acadDll = Join-Path $env:AUTOCAD_2026_ROOT "AcCoreMgd.dll"
-    if (-not (Test-Path $acadDll)) {
-        Write-Warning "AutoCAD not found at AUTOCAD_2026_ROOT. Skipping plugin pack."
-    }
-    else {
-        New-Item -ItemType Directory -Force -Path $pluginOut | Out-Null
-        $pluginProj = Join-Path $root "src\Forge.Plugin\Forge.Plugin.csproj"
-        Write-Host "Building Forge.Plugin..."
-        dotnet build $pluginProj --configuration $Configuration -p:OutDir="$pluginOut\"
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    # Delegate to build-plugin.ps1 so the release zip carries the same ForgeTargetYear
+    # stamp (docs/cad-job-tools.md C2); a second build path here used to bypass the year table.
+    # Run as a child powershell process so build-plugin's exit codes reach $LASTEXITCODE.
+    Write-Host "Building Forge.Plugin (year $Year) via scripts\build-plugin.ps1..."
+    powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "build-plugin.ps1") `
+        -Configuration $Configuration -Year $Year -OutDir $pluginOut
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-        $pluginZip = Join-Path $releaseRoot "765T-Forge.Plugin.zip"
-        if (Test-Path $pluginZip) { Remove-Item $pluginZip -Force }
-        Compress-Archive -Path (Join-Path $pluginOut "*") -DestinationPath $pluginZip
+    $pluginZip = Join-Path $releaseRoot "765T-Forge.Plugin.zip"
+    if (Test-Path $pluginZip) { Remove-Item $pluginZip -Force }
+    Compress-Archive -Path (Join-Path $pluginOut "*") -DestinationPath $pluginZip
 
-        $tmp = Join-Path $releaseRoot "plugin-filtered"
-        if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
-        New-Item -ItemType Directory -Force -Path $tmp | Out-Null
-        Expand-Archive -Path $pluginZip -DestinationPath $tmp -Force
-        Get-ChildItem -Path $tmp -Recurse -File |
-            Where-Object { $_.Name -match '^(AcCoreMgd|AcDbMgd|AcMgd)\.dll$' } |
-            ForEach-Object { Remove-Item $_.FullName -Force }
-        Remove-Item $pluginZip -Force
-        Compress-Archive -Path (Join-Path $tmp "*") -DestinationPath $pluginZip
-        Remove-Item $tmp -Recurse -Force
-        Write-Host "Wrote $pluginZip (Autodesk Ac*.dll excluded)"
-        $pluginPacked = $true
-    }
+    $tmp = Join-Path $releaseRoot "plugin-filtered"
+    if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+    Expand-Archive -Path $pluginZip -DestinationPath $tmp -Force
+    Get-ChildItem -Path $tmp -Recurse -File |
+        Where-Object { $_.Name -match '^(AcCoreMgd|AcDbMgd|AcMgd)\.dll$' } |
+        ForEach-Object { Remove-Item $_.FullName -Force }
+    Remove-Item $pluginZip -Force
+    Compress-Archive -Path (Join-Path $tmp "*") -DestinationPath $pluginZip
+    Remove-Item $tmp -Recurse -Force
+    Write-Host "Wrote $pluginZip (Autodesk Ac*.dll excluded)"
+    $pluginPacked = $true
 }
 else {
     Write-Host "SkipPlugin set - server-only pack (CI default)."

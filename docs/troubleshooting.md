@@ -6,18 +6,18 @@
 
 **Checks:**
 
-1. AutoCAD 2026 is running.
+1. AutoCAD 2025 or 2026 is running.
 2. Plugin loaded: `NETLOAD` → `Forge.Plugin.dll`, then run `MCP_STATUS`.
 3. `FORGE_PIPE_NAME` matches on server and plugin (default `765T.Forge.AutoCAD`). Health reports the **configured** pipe name from the plugin environment — not a hardcoded default.
 4. `FORGE_AUTOCAD_TOKEN` matches on both processes.
-5. Only one plugin pipe instance is expected (`maxNumberOfServerInstances: 1`). Restart AutoCAD if a previous session left the pipe in a bad state.
+5. Only one plugin pipe instance is expected (`maxNumberOfServerInstances: 1`). Restart AutoCAD if a previous session left the pipe in a bad state. A hung request no longer wedges the pipe — `plugin_request_timeout` is answered and later calls keep working.
 
 ## NETLOAD blocked or fails
 
 - Place the DLL under a path listed in AutoCAD `TRUSTEDPATHS`, or adjust trust settings for your org policy.
 - Prefer `.\scripts\install-plugin.ps1` after `.\scripts\build-plugin.ps1` — it copies into `%LOCALAPPDATA%\765T-Forge\plugin` and prints the checklist.
 - Optional Autoloader bundle: `plugin-bundle/765T-Forge.bundle/` (see [install-plugin.md](install-plugin.md)).
-- Build for `net8.0-windows` and AutoCAD 2026 managed references from `AUTOCAD_2026_ROOT`.
+- Build for `net8.0-windows` against the year's AutoCAD managed references (`build-plugin.ps1 -Year`) from the resolved root.
 - Confirm you are loading the DLL you just built (install dir, `bin\Release\net8.0-windows\`, or `-OutDir`).
 
 ## Locked DLLs while AutoCAD is open
@@ -67,6 +67,8 @@ Optional fallback variable: `MCP_AUTOCAD_TOKEN` — prefer explicit `FORGE_AUTOC
 ## Timeout after a write
 
 Assume the drawing may already have changed. Call QA/list tools before retrying. See [safety.md](safety.md).
+
+The plugin watchdog now answers `plugin_request_timeout` (the pipe stays up — run diagnostics without restarting AutoCAD); call `forge_qa_readback_after_timeout` before retrying writes. `plugin_request_stale` means the callback was refused before AutoCAD started it, so nothing ran.
 
 ## Plot / publish surprises
 

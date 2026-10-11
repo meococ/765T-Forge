@@ -5,7 +5,7 @@ Connect Claude Desktop to 765T-Forge over MCP stdio.
 ## Prerequisites
 
 1. Build `Forge.Server` (see [CONTRIBUTING.md](../CONTRIBUTING.md) or `scripts/build-server.ps1`).
-2. For live drawing tools: AutoCAD 2026 with `Forge.Plugin` loaded (`NETLOAD`), then `MCP_STATUS`.
+2. For live drawing tools: AutoCAD 2025 or 2026 with `Forge.Plugin` loaded (`NETLOAD`), then `MCP_STATUS`.
 3. Set **`FORGE_AUTOCAD_TOKEN`** to a long random secret shared with the AutoCAD process. Do not use a default token.
 
 ## Claude Desktop config
@@ -32,7 +32,7 @@ Edit Claude Desktop’s MCP config (Windows typical path):
 }
 ```
 
-Template: [examples/mcp.claude-desktop.json](../examples/mcp.claude-desktop.json).
+Template: [examples/mcp.claude-desktop.json](../examples/mcp.claude-desktop.json). `AUTOCAD_2026_ROOT` is now optional — set it only to override the auto-detected newest installed AutoCAD.
 
 ## Token requirement
 

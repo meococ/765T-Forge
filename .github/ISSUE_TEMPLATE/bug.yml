@@ -33,7 +33,7 @@ body:
     attributes:
       label: AutoCAD version
       description: Leave blank if ServerOnly / no plugin involved
-      placeholder: AutoCAD 2026
+      placeholder: AutoCAD 2025 or 2026
   - type: textarea
     id: repro
     attributes:

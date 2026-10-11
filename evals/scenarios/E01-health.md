@@ -1,7 +1,7 @@
 # E01 — Health before work
 
 ## Setup
-- AutoCAD 2026 running with plugin loaded; MCP server configured.
+- AutoCAD 2025 or 2026 running with plugin loaded; MCP server configured.
 
 ## Call
 `forge_system_health`

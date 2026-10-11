@@ -12,7 +12,7 @@ Honest status of MCP tools. AutoCAD targets: **2025 and 2026** through the typed
 
 | Tool | Status | Notes |
 |------|--------|-------|
-| `forge_system_health` | implemented | |
+| `forge_system_health` | implemented | Also answers with no open document (Start tab), alongside `forge_system_version` / `forge_doc_list_open`; other tools fail `no_command_context` there |
 | `forge_system_version` | implemented | Product + envelope versions |
 | `forge_system_getvar` / `_setvar` | implemented | |
 | `forge_system_capabilities` | implemented | Devices, media, page setups, layouts, layer states, plot styles |
@@ -43,7 +43,7 @@ Honest status of MCP tools. AutoCAD targets: **2025 and 2026** through the typed
 | `forge_plot_to_pdf` | implemented | Configurable device/paper/CTB·STB/area; overwrite ack |
 | `forge_plot_publish` | implemented | DSD + `Publisher.PublishDsd`; **PublishReceipt** + PDF probe; preflight gate |
 | `forge_qa_*` (verify/check/audit/readback) | implemented | |
-| `forge_qa_readback_after_timeout` | implemented | Timeout recovery protocol — never retry write blind |
+| `forge_qa_readback_after_timeout` | implemented | Recovery for `plugin_request_timeout` (plugin watchdog) — never retry write blind; pipe stays up |
 | `forge_qa_preflight` | implemented | QaReport + pack v2 + foreground plot + issue-set contract findings |
 | `forge_audit_summarize` | implemented | Server-side last-N audit summary (no raw args) |
 | `forge_issue_set_validate` | implemented | IssueSetContract layouts↔drawingNos↔rev |
@@ -53,6 +53,12 @@ Honest status of MCP tools. AutoCAD targets: **2025 and 2026** through the typed
 | `forge_pack_and_go` | implemented | Host+xrefs+styles + `manifest.json` |
 | `forge_batch_run` | implemented | AccoreConsole queue + **resume** via `resumeBatchId` |
 | `forge_batch_status` | implemented | Load saved batch resume state |
+
+## Conversion
+
+| Tool | Status | Notes |
+|------|--------|-------|
+| `forge_dgn_import` | partial | DGN **V8** → new DWG via `-DGNIMPORT` in a fresh temp document; V7 refused by header sniff; overwrite ack + destination backup; model-space entity count verification. Logic unit-tested — **live AutoCAD smoke pending** (C15), incl. temp-document context behaviour |
 
 ## Registry / standards / viewport / profiles
 

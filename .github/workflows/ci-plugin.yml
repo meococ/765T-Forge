@@ -1,7 +1,8 @@
 name: CI Plugin (self-hosted)
 
-# Requires a self-hosted Windows runner with AutoCAD 2026 reference assemblies
-# and AUTOCAD_2026_ROOT set. Do not enable on GitHub-hosted runners.
+# Requires a self-hosted Windows runner with AutoCAD reference assemblies.
+# AUTOCAD_2026_ROOT is optional if the year's default root exists (build-plugin.ps1 -Year).
+# Do not enable on GitHub-hosted runners.
 
 on:
   workflow_dispatch:
@@ -31,7 +32,7 @@ jobs:
         shell: pwsh
         run: |
           if (-not $env:AUTOCAD_2026_ROOT) {
-            throw "AUTOCAD_2026_ROOT must be set on the self-hosted runner."
+            Write-Host "AUTOCAD_2026_ROOT not set - optional if the year's default root exists (build-plugin.ps1 -Year); build-plugin.ps1 falls back to the build/AutoCadYears.props root for the selected year."
           }
           .\scripts\build-plugin.ps1 -Configuration Release -OutDir artifacts\Forge.Plugin\
 

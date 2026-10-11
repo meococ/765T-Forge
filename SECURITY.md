@@ -51,6 +51,7 @@ We aim to acknowledge reports within **7 days** and to share a remediation plan 
 ### Timeout / write races
 
 - If a plugin call times out (`FORGE_PLUGIN_RESPONSE_TIMEOUT_SECONDS`), a write may **already have committed** inside AutoCAD.
+- The plugin watchdog (`plugin_request_timeout`) and stale-callback refusal (`plugin_request_stale`) bound this window; the pipe keeps serving without an AutoCAD restart.
 - Before retrying a write, perform a read-back / QA call (`forge_qa_*`, list tools) to avoid double application.
 - Open-world executors must expose `queued` / `completed` honestly when AutoCAD still queues work.
 

@@ -1,6 +1,6 @@
 # Architecture
 
-765T-Forge is a dual-process product: an MCP stdio server that agents talk to, and an AutoCAD 2026 plugin that executes drawing work. Shared types and safety policy live in `Forge.Shared`.
+765T-Forge is a dual-process product: an MCP stdio server that agents talk to, and an AutoCAD 2025/2026 plugin that executes drawing work. Shared types and safety policy live in `Forge.Shared`.
 
 ## Runtime flow
 
@@ -10,7 +10,7 @@ flowchart LR
   Server --> Safety[Safety_Audit_Backup]
   Safety -->|named_pipe| Plugin[Forge.Plugin]
   Safety -->|accoreconsole| Headless[AccoreConsole]
-  Plugin --> CAD[AutoCAD_2026]
+  Plugin --> CAD[AutoCAD_2025_2026]
   Headless --> CAD
 ```
 
@@ -23,7 +23,7 @@ flowchart LR
 | **Named pipe** | JSON line protocol to the in-process plugin (`FORGE_PIPE_NAME`, default `765T.Forge.AutoCAD`) |
 | **AccoreConsole** | Headless path for `forge_run_script` (and future multi-DWG job queue) via `AUTOCAD_2026_ROOT` |
 | **Forge.Plugin** | `NETLOAD`ed into AutoCAD; re-checks token + safety; backups; dispatches to ObjectARX/.NET API |
-| **AutoCAD 2026** | Source of truth for drawings, plotters, xrefs, and layouts |
+| **AutoCAD 2025/2026** | Source of truth for drawings, plotters, xrefs, and layouts |
 
 ### Request lifecycle
 

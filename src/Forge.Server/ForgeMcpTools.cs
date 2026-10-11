@@ -153,6 +153,19 @@ public sealed class ForgeMcpTools
         CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_plot_publish", new { outputPath, layouts, singlePdf, overwriteAcknowledged, requirePreflight, force, requiredTitleblockTags = requiredTitleblockTags ?? [], titleblockBlockName }, dryRun, cancellationToken: cancellationToken);
 
+    [McpServerTool(Name = "forge_dgn_import", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [Description("Convert a MicroStation DGN V8 drawing to a new DWG: -DGNIMPORT into a fresh temporary document, then SaveAs targetDwgPath. Source DGN and the active drawing are never modified. DGN V7 is refused by header sniff. dryRun returns the plan; a large DGN can exceed the default 120s plugin timeout (raise FORGE_PLUGIN_RESPONSE_TIMEOUT_SECONDS).")]
+    public static Task<ForgeResult> DgnImport(
+        ForgeToolRunner runner,
+        string dgnPath,
+        string targetDwgPath,
+        string? modelName = null,
+        string? units = null,
+        bool overwriteAcknowledged = false,
+        bool dryRun = false,
+        CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_dgn_import", new { dgnPath, targetDwgPath, modelName, units, overwriteAcknowledged }, dryRun, cancellationToken: cancellationToken);
+
     [McpServerTool(Name = "forge_qa_verify_titleblock", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Compare titleblock attributes against expected tag/value pairs.")]
     public static Task<ForgeResult> QaVerifyTitleblock(ForgeToolRunner runner, Dictionary<string, string> expected, string? blockName = null, CancellationToken cancellationToken = default)

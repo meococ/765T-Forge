@@ -41,9 +41,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Plugin build requires Autodesk AutoCAD 2026 reference assemblies.
+  # Plugin build requires Autodesk reference assemblies for the target year
+  # (`build-plugin.ps1`/`pack-release.ps1 -Year 2025|2026`; `AUTOCAD_2026_ROOT` overrides).
   # GitHub-hosted runners do not include AutoCAD. Maintainers should build
-  # the plugin locally (or on a self-hosted runner with AUTOCAD_2026_ROOT)
+  # the plugin locally (or on a self-hosted runner)
   # and attach Forge.Plugin.dll to the release, or run pack-release.ps1
   # without -SkipPlugin on a machine that has AutoCAD installed.
   pack-plugin-note:
@@ -59,7 +60,8 @@ jobs:
           A release without 765T-Forge.Plugin.zip is INCOMPLETE — server alone is insufficient.
           Do NOT announce the tag as a complete product until the plugin zip is attached.
           Maintainer steps:
-            1. Set AUTOCAD_2026_ROOT to the AutoCAD 2026 install.
+            1. Reference assemblies for the target year come from build-plugin.ps1 /
+               pack-release.ps1 -Year 2025|2026; AUTOCAD_2026_ROOT overrides the default root.
             2. Run: .\scripts\pack-release.ps1 -Configuration Release
             3. Attach artifacts/release/765T-Forge.Plugin.zip to the GitHub Release for tag $($env:GITHUB_REF_NAME).
             4. Confirm docs/smoke-lab.md has a maintainer pass (or note deferral in release notes).

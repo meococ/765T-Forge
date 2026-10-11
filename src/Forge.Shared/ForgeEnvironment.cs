@@ -14,12 +14,77 @@ public sealed record ForgeEnvironment
         "audit");
     public string AutoCadRoot { get; init; } = DefaultAutoCadRoot();
     public bool EnableUnsafeOps { get; init; }
+    public int PluginConnectTimeoutSeconds { get; init; } = 10;
     public int PluginResponseTimeoutSeconds { get; init; } = 120;
     public bool UsingDevDefaultToken { get; init; }
 
+    /// <summary>
+    /// Default accoreconsole root when AUTOCAD_2026_ROOT is unset: the newest installed plain
+    /// "AutoCAD 20xx" directory (Program Files\Autodesk, then fixed-drive roots for non-default
+    /// installs like D:\AutoCAD 2025), falling back to the documented 2026 path when nothing
+    /// matches. The env var stays the manual override for whichever year is being driven.
+    /// </summary>
     public static string DefaultAutoCadRoot()
     {
-        return @"C:\Program Files\Autodesk\AutoCAD 2026";
+        try
+        {
+            var candidates = new List<(string Dir, int Year)>();
+            CollectAutoCadRoots(
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Autodesk"),
+                candidates);
+            foreach (var drive in DriveInfo.GetDrives())
+            {
+                if (!drive.IsReady || drive.DriveType != DriveType.Fixed)
+                {
+                    continue;
+                }
+
+                CollectAutoCadRoots(drive.Name, candidates);
+            }
+
+            return candidates
+                .OrderByDescending(x => x.Year)
+                .Select(x => x.Dir)
+                .FirstOrDefault() ?? @"C:\Program Files\Autodesk\AutoCAD 2026";
+        }
+        catch
+        {
+            return @"C:\Program Files\Autodesk\AutoCAD 2026";
+        }
+    }
+
+    private static void CollectAutoCadRoots(string directory, List<(string Dir, int Year)> candidates)
+    {
+        try
+        {
+            foreach (var dir in Directory.GetDirectories(directory, "AutoCAD 20*"))
+            {
+                var year = ParseAutoCadYear(Path.GetFileName(dir));
+                // Only real installs count — an empty leftover "AutoCAD 20xx" folder must not
+                // beat an older but working install (AutoCadRoot feeds accoreconsole resolution).
+                if (year is not null && File.Exists(Path.Combine(dir, "accoreconsole.exe")))
+                {
+                    candidates.Add((dir, year.Value));
+                }
+            }
+        }
+        catch
+        {
+            // Unreadable drive or root — skip it.
+        }
+    }
+
+    private static int? ParseAutoCadYear(string name)
+    {
+        const string prefix = "AutoCAD ";
+        if (name.Length <= prefix.Length || !name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return int.TryParse(name[prefix.Length..], out var year) && year is >= 2004 and <= 2099
+            ? year
+            : null;
     }
 
     public static ForgeEnvironment FromProcess()
@@ -58,6 +123,9 @@ public sealed record ForgeEnvironment
                 "audit")),
             AutoCadRoot = Get("AUTOCAD_2026_ROOT", DefaultAutoCadRoot()),
             EnableUnsafeOps = bool.TryParse(Environment.GetEnvironmentVariable("FORGE_ENABLE_UNSAFE_OPS"), out var unsafeOps) && unsafeOps,
+            PluginConnectTimeoutSeconds = int.TryParse(Environment.GetEnvironmentVariable("FORGE_PLUGIN_CONNECT_TIMEOUT_SECONDS"), out var connectTimeout)
+                ? Math.Clamp(connectTimeout, 1, 120)
+                : 10,
             PluginResponseTimeoutSeconds = int.TryParse(Environment.GetEnvironmentVariable("FORGE_PLUGIN_RESPONSE_TIMEOUT_SECONDS"), out var timeout)
                 ? Math.Clamp(timeout, 5, 3600)
                 : 120

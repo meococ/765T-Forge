@@ -5,7 +5,7 @@ Connect Cursor to 765T-Forge over MCP stdio.
 ## Prerequisites
 
 1. Build `Forge.Server` (see [CONTRIBUTING.md](../CONTRIBUTING.md) or `scripts/build-server.ps1`).
-2. For live drawing tools: AutoCAD 2026 running with `Forge.Plugin` loaded (`NETLOAD`), then `MCP_STATUS`.
+2. For live drawing tools: AutoCAD 2025 or 2026 running with `Forge.Plugin` loaded (`NETLOAD`), then `MCP_STATUS`.
 3. A **strong** shared token in the environment — **required**. Do not rely on any default secret.
 
 ## `mcp.json` example
@@ -30,7 +30,7 @@ Place this in your Cursor MCP config (user or project). Adjust the `command` pat
 }
 ```
 
-A checked-in template with placeholders lives at [examples/mcp.cursor.json](../examples/mcp.cursor.json).
+A checked-in template with placeholders lives at [examples/mcp.cursor.json](../examples/mcp.cursor.json). `AUTOCAD_2026_ROOT` is now optional — set it only to override the auto-detected newest installed AutoCAD.
 
 ## Token requirement
 

@@ -5,7 +5,7 @@ Use this skill when an agent drives AutoCAD through **765T-Forge** for metro/AEC
 ## Hard rules
 
 - Prefer **typed tools** (`forge_<group>_<action>`) before generic executors.
-- Always call `forge_system_health` first (and again after AutoCAD restart / NETLOAD). Confirm `Data.pipe` matches `FORGE_PIPE_NAME`.
+- Always call `forge_system_health` first (and again after AutoCAD restart / NETLOAD). Confirm `Data.pipe` matches `FORGE_PIPE_NAME`. On the AutoCAD Start tab (no open drawing) health/version/`forge_doc_list_open` still answer and all other tools return `no_command_context` — open a drawing first.
 - Use `dryRun=true` before write, publish, script, or executor calls.
 - **Never invent drawing numbers** — call `forge_registry_load` / `forge_registry_lookup` when a register exists; otherwise read from the drawing or ask the human.
 - Load `forge_pack_load` for project standards when available; preflight merges pack rules.
@@ -13,7 +13,7 @@ Use this skill when an agent drives AutoCAD through **765T-Forge** for metro/AEC
 - Treat `forge_exec_dotnet` as disabled unless the human explicitly enabled unsafe ops for this session (`FORGE_ENABLE_UNSAFE_OPS` + `unsafeAcknowledged`).
 - Never use executors for broad selections such as `ERASE ALL` or `ERASE *` (harmless `ZOOM *` / layer filters are OK).
 - If `forge_exec_command` / `forge_exec_lisp` returns `queued=true` or `completed=false`, **do not** chain writes — read back first.
-- On plugin timeout, call **`forge_qa_readback_after_timeout`** — never retry the write blind.
+- On `plugin_request_timeout` (the plugin watchdog answers; the pipe keeps serving), call **`forge_qa_readback_after_timeout`** — never retry the write blind; `plugin_request_stale` means nothing executed.
 - Prefer `forge_issue_set_validate` when an IssueSetContract / sheet inventory exists; do not invent the sheet set.
 
 ## Profiles
@@ -50,7 +50,7 @@ Prefer **`forge_recipe_issue_set`** for full issue-set runs.
 
 ## Safety expectations
 
-Every write should produce an audit record and, when a DWG path is available, a backup. On plugin timeout, call `forge_qa_readback_after_timeout` before any retry. Use `forge_audit_summarize` for a redacted session overview.
+Every write should produce an audit record and, when a DWG path is available, a backup. On `plugin_request_timeout` (the plugin watchdog answers; the pipe keeps serving), call `forge_qa_readback_after_timeout` before any retry — `plugin_request_stale` means nothing executed. Use `forge_audit_summarize` for a redacted session overview.
 
 ## Linework (CAD ↔ Revit model QA)
 

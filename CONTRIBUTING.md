@@ -1,12 +1,12 @@
 # Contributing to 765T-Forge
 
-Thanks for helping improve Forge. This project is an all-C# MCP server plus an AutoCAD 2026 plugin for metro/AEC drawing-production workflows.
+Thanks for helping improve Forge. This project is an all-C# MCP server plus an AutoCAD 2025/2026 plugin for metro/AEC drawing-production workflows.
 
 ## Prerequisites
 
 - .NET SDK matching `global.json` (8.0.422, `rollForward: latestPatch`)
 - Windows (plugin and AccoreConsole paths are Windows-oriented)
-- AutoCAD 2026 **only if** you build or run `Forge.Plugin`
+- AutoCAD 2025 or 2026 **only if** you build or run `Forge.Plugin`
 
 Set `AUTOCAD_2026_ROOT` when AutoCAD is not installed at the default path:
 
@@ -49,7 +49,7 @@ A GitHub Release for `v*` is **incomplete** with server zip alone.
 1. Ensure [CHANGELOG.md](CHANGELOG.md) section for the version is accurate; move notes from Unreleased.
 2. Confirm [docs/smoke-lab.md](docs/smoke-lab.md) has a maintainer pass for this build (or document deferral).
 3. Tag `vX.Y.Z` — CI packs `765T-Forge.Server-win-x64.zip` via `pack-release.ps1 -SkipPlugin`.
-4. On a machine with AutoCAD 2026: `.\scripts\pack-release.ps1 -Configuration Release` (no `-SkipPlugin`).
+4. On a machine with AutoCAD 2025/2026: `.\scripts\pack-release.ps1 -Configuration Release [-Year 2025|2026]` (no `-SkipPlugin`).
 5. Attach **`765T-Forge.Plugin.zip`** to the same GitHub Release (Autodesk `Ac*.dll` must stay excluded).
 6. Verify the server zip contains `docs/capability-matrix.md` and `docs/safety.md` (embedded for `forge://` resources).
 7. Verify release notes state: server alone is insufficient; plugin zip required; smoke-lab status.

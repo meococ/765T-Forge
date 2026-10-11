@@ -70,6 +70,64 @@ public sealed class EnvironmentAndQaTests
         Assert.DoesNotContain("default-secret-token", constants);
     }
 
+    [Fact]
+    public void PipeConnectTimeoutIsConfigurableWithClampAndDefault()
+    {
+        Assert.Equal(10, ForgeEnvironmentFromProcessWith(
+            ("FORGE_PLUGIN_CONNECT_TIMEOUT_SECONDS", null)).PluginConnectTimeoutSeconds);
+        Assert.Equal(25, ForgeEnvironmentFromProcessWith(
+            ("FORGE_PLUGIN_CONNECT_TIMEOUT_SECONDS", "25")).PluginConnectTimeoutSeconds);
+        Assert.Equal(120, ForgeEnvironmentFromProcessWith(
+            ("FORGE_PLUGIN_CONNECT_TIMEOUT_SECONDS", "5000")).PluginConnectTimeoutSeconds);
+        Assert.Equal(1, ForgeEnvironmentFromProcessWith(
+            ("FORGE_PLUGIN_CONNECT_TIMEOUT_SECONDS", "0")).PluginConnectTimeoutSeconds);
+        Assert.Equal(10, ForgeEnvironmentFromProcessWith(
+            ("FORGE_PLUGIN_CONNECT_TIMEOUT_SECONDS", "abc")).PluginConnectTimeoutSeconds);
+    }
+
+    [Fact]
+    public void DefaultAutoCadRootReturnsInstalledOrFallbackPath()
+    {
+        var root = ForgeEnvironment.DefaultAutoCadRoot();
+        Assert.True(Path.IsPathRooted(root));
+        // Either a discovered install on this machine or the documented fallback when
+        // no plain "AutoCAD 20xx" directory exists (e.g. CI without AutoCAD).
+        Assert.True(
+            Directory.Exists(root) || root.EndsWith(@"AutoCAD 2026", StringComparison.Ordinal),
+            $"expected an installed AutoCAD root or the documented fallback, got: {root}");
+    }
+
+    private static ForgeEnvironment ForgeEnvironmentFromProcessWith(params (string Name, string? Value)[] variables)
+    {
+        // FromProcess fails closed without a token; the dev escape hatch keeps the test
+        // independent of machine configuration.
+        (string Name, string? Value)[] fallbacks =
+        {
+            ("FORGE_AUTOCAD_TOKEN", null),
+            ("MCP_AUTOCAD_TOKEN", null),
+            ("FORGE_DEV_ALLOW_DEFAULT_TOKEN", "true"),
+        };
+        var previous = variables.Concat(fallbacks)
+            .GroupBy(x => x.Name)
+            .ToDictionary(g => g.Key, g => g.First().Value);
+        try
+        {
+            foreach (var entry in previous)
+            {
+                Environment.SetEnvironmentVariable(entry.Key, entry.Value);
+            }
+
+            return ForgeEnvironment.FromProcess();
+        }
+        finally
+        {
+            foreach (var entry in previous)
+            {
+                Environment.SetEnvironmentVariable(entry.Key, entry.Value);
+            }
+        }
+    }
+
     private static string RepoRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

@@ -13,12 +13,22 @@ See [docs/versioning.md](docs/versioning.md).
 ### Added
 
 - Typed AutoCAD year table: `build/AutoCadYears.props` (2025 + 2026), `build-plugin.ps1 -Year` with per-year output and a `ForgeTargetYear` assembly stamp, `install-plugin.ps1 -Year`; the plugin refuses a host of another year with `HOST_YEAR_MISMATCH` until the year pair is proven by a live smoke (`docs/cad-job-tools.md`, cad-connector-1007)
+- `forge_dgn_import`: typed DGN V8 → new DWG conversion via `-DGNIMPORT` in a fresh temporary document (source DGN and active drawing never modified); V7 refused by header sniff, target-open and overwrite-ack guards, destination backup, dry-run plan, model-space entity-count verification (`docs/cad-job-tools.md` C15 — live AutoCAD smoke pending)
 - Publish-ready Wave 0: Autoloader R25.1 + valid GUIDs; `%APPDATA%` install guidance; NOTICE upstream attribution; `docs/history/build-brief.md`; embedded matrix/safety in server publish; `RELEASE_STATUS.txt` from pack script
 - PublishReceipt + PDF probes + actionable preflight findings + foreground plot policy
 - IssueSetContract lite, standards pack v2 plot bindings, field/rev gates, timeout read-back protocol
 - Differential issue-set receipts, read-only sheet inventory, batch resume metadata
 - Plugin-dispatch CI sync; Dependabot; scoped open-world `*` denylist; ADR honesty for headless AccoreConsole path
 - Linework QA wave: `forge_linework_segments` (flat segment feed, meters/transformed endpoints), `forge_linework_compare` (per-item CAD↔Revit marking `matched`/`partial`/`missing_in_revit`/`extra_off_cad` + matched pairs + Z filter + SVG overlay), `forge_linework_transform` (server-side similarity/affine calibration from anchor pairs with persisted calibration file and >0.5 m residual warning); explicit `layerSuffix`/`layerMatch` xref-safe layer filtering on all `forge_linework_*` tools
+
+### Fixed
+
+- Start-tab wedge: calling any tool on AutoCAD's Start tab (no open document) hung the first request inside `ExecuteInCommandContextAsync` — which never dispatches without a command context — and the single pipe instance then refused every later connection until AutoCAD restart (re-NETLOAD could not recover). The plugin now answers doc-free diagnostics (`forge_system_health`, `forge_system_version`, `forge_doc_list_open`) via an `Application.Idle` marshal and fast-fails document tools with a named `no_command_context` error
+- Per-request plugin watchdog: a request AutoCAD never returns is answered `plugin_request_timeout` and the pipe keeps serving instead of wedging permanently; not-yet-started callbacks past the deadline are refused as `plugin_request_stale` so abandoned writes cannot execute late, while already-started work still runs to completion (read-back-after-timeout protocol applies). Accept-loop failures back off 1s instead of tight-retry spinning
+- Error suggestions no longer hardcode "AutoCAD 2026"; `FORGE_PLUGIN_CONNECT_TIMEOUT_SECONDS` (default 10) makes the pipe connect timeout configurable
+- `ForgeEnvironment.DefaultAutoCadRoot()` resolves the newest installed plain "AutoCAD 20xx" directory (Program Files\Autodesk, then fixed-drive roots for non-default installs like `D:\AutoCAD 2025`) instead of always assuming the 2026 path, so headless accoreconsole resolution works on 2025-only machines
+- `scripts/pack-release.ps1` builds the plugin through `build-plugin.ps1 -Year` so release plugin zips carry the `ForgeTargetYear` stamp (the old second build path bypassed the year table and stamped 2026)
+- `forge_doc_open` restores FILEDIA in a `finally` (a failed `Documents.Open` used to leave FILEDIA=0)
 
 ### Changed
 

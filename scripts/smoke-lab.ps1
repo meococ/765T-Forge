@@ -1,11 +1,13 @@
 <#
 .SYNOPSIS
-  Open AutoCAD 2026 with Forge plugin, create a synthetic lab DWG, run smoke-lab pipe checks.
+  Open AutoCAD (2025/2026) with Forge plugin, create a synthetic lab DWG, run smoke-lab pipe checks.
 #>
 [CmdletBinding()]
 param(
     [string] $Token = "dev-only-insecure-token",
     [string] $PipeName = "765T.Forge.AutoCAD",
+    [ValidateSet("2025", "2026")]
+    [string] $Year = "2026",
     [int] $AcadWaitSeconds = 90,
     [switch] $SkipLaunchAcad,
     [switch] $KeepAcadOpen
@@ -16,10 +18,28 @@ $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
 $labRoot = Join-Path $env:LOCALAPPDATA "765T-Forge\smoke-lab"
-$pluginInstall = Join-Path $env:LOCALAPPDATA "765T-Forge\plugin"
 $bundleRoot = Join-Path $env:APPDATA "Autodesk\ApplicationPlugins\765T-Forge.bundle"
-$acad = "C:\Program Files\Autodesk\AutoCAD 2026\acad.exe"
-$accore = "C:\Program Files\Autodesk\AutoCAD 2026\accoreconsole.exe"
+
+# Resolve the AutoCAD root: AUTOCAD_2026_ROOT override, else the newest
+# "AutoCAD 20*" directory under C:\Program Files\Autodesk that has accoreconsole.exe.
+function Resolve-AcadRoot {
+    $candidates = @()
+    if ($env:AUTOCAD_2026_ROOT) { $candidates += $env:AUTOCAD_2026_ROOT }
+    $candidates += Get-ChildItem "C:\Program Files\Autodesk" -Directory -Filter "AutoCAD 20*" -ErrorAction SilentlyContinue |
+        Sort-Object Name -Descending | ForEach-Object { $_.FullName }
+    foreach ($c in $candidates) {
+        if ($c -and (Test-Path (Join-Path $c "accoreconsole.exe"))) { return $c }
+    }
+    throw "AutoCAD root not found (no accoreconsole.exe). Set AUTOCAD_2026_ROOT or install AutoCAD under C:\Program Files\Autodesk."
+}
+
+$acadRoot = Resolve-AcadRoot
+if (-not $PSBoundParameters.ContainsKey('Year') -and $acadRoot -match '\\AutoCAD (202[56])$') {
+    $Year = $Matches[1]
+}
+$pluginInstall = Join-Path $env:LOCALAPPDATA "765T-Forge\plugin\$Year"
+$acad = Join-Path $acadRoot "acad.exe"
+$accore = Join-Path $acadRoot "accoreconsole.exe"
 $resultsPath = Join-Path $labRoot "smoke-results.json"
 $dwgPath = Join-Path $labRoot "forge-smoke-lab.dwg"
 $pdfPath = Join-Path $labRoot "forge-smoke-publish.pdf"
@@ -87,7 +107,7 @@ function Send-ForgeTool {
 Write-Step "1) Ensure plugin installed"
 $dll = Join-Path $pluginInstall "Forge.Plugin.dll"
 if (-not (Test-Path $dll)) {
-    & (Join-Path $PSScriptRoot "install-plugin.ps1") -Configuration Release -SkipBuild:(Test-Path (Join-Path $root "src\Forge.Plugin\bin\Release\net8.0-windows\Forge.Plugin.dll"))
+    & (Join-Path $PSScriptRoot "install-plugin.ps1") -Configuration Release -Year $Year -SkipBuild:(Test-Path (Join-Path $root "src\Forge.Plugin\bin\Release\net8.0-windows\Forge.Plugin.dll"))
 }
 if (-not (Test-Path $dll)) { throw "Plugin DLL missing at $dll" }
 Write-Host "Plugin: $dll"
@@ -112,8 +132,8 @@ _QUIT
 if (Test-Path $dwgPath) { Remove-Item $dwgPath -Force }
 
 # Start from a blank drawing template if available
-$template = "C:\Program Files\Autodesk\AutoCAD 2026\Template\acad.dwt"
-if (-not (Test-Path $template)) { $template = "C:\Program Files\Autodesk\AutoCAD 2026\Template\acadiso.dwt" }
+$template = Join-Path $acadRoot "Template\acad.dwt"
+if (-not (Test-Path $template)) { $template = Join-Path $acadRoot "Template\acadiso.dwt" }
 
 # AccoreConsole: create new drawing, run script that creates layouts then saveas
 $createScr2 = Join-Path $labRoot "create-lab2.scr"
@@ -130,12 +150,12 @@ _QUIT
 # Use a seed DWG: copy template isn't a DWG. Create via acad - or use NEW in console.
 # AccoreConsole /i requires existing DWG. Create minimal via copying a system sample if any.
 $seedCandidates = @(
-    "C:\Program Files\Autodesk\AutoCAD 2026\Sample\Sheet Sets\Architectural\A-01.dwg",
-    "C:\Program Files\Autodesk\AutoCAD 2026\Sample\DesignCenter\Home - Space Planner.dwg",
+    (Join-Path $acadRoot "Sample\Sheet Sets\Architectural\A-01.dwg"),
+    (Join-Path $acadRoot "Sample\DesignCenter\Home - Space Planner.dwg"),
     "C:\Users\ADMIN\Documents\*.dwg"
 )
 $seed = $null
-Get-ChildItem "C:\Program Files\Autodesk\AutoCAD 2026\Sample" -Recurse -Filter "*.dwg" -ErrorAction SilentlyContinue |
+Get-ChildItem (Join-Path $acadRoot "Sample") -Recurse -Filter "*.dwg" -ErrorAction SilentlyContinue |
     Select-Object -First 5 |
     ForEach-Object { if (-not $seed) { $seed = $_.FullName } }
 

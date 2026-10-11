@@ -14,7 +14,7 @@ Do not commit, package, or publish Autodesk DLLs with Forge releases.
 
 ## Licensed AutoCAD required
 
-To run the AutoCAD plugin and live MCP tools that talk to a drawing session, you need a **licensed installation of AutoCAD 2026** (or a compatible Autodesk product that provides the referenced APIs) on Windows.
+To run the AutoCAD plugin and live MCP tools that talk to a drawing session, you need a **licensed installation of AutoCAD 2025 or 2026** (or a compatible Autodesk product that provides the referenced APIs) on Windows.
 
 The MCP server (`Forge.Server`) and unit tests can build and run without AutoCAD when using `765T-Forge.ServerOnly.slnf`. Headless script execution via AccoreConsole also requires a local AutoCAD install that provides `accoreconsole.exe`.
 

@@ -75,6 +75,8 @@ If the plugin response times out, a write may already have committed. **Read bac
 
 Open-world executors that still queue AutoCAD commands expose `queued` / `completed` flags — `Ok=true` alone is not completion.
 
+The plugin watchdog answers `plugin_request_timeout` while the pipe keeps serving; already-started work still completes (read-back applies), and callbacks not yet started are refused `plugin_request_stale`.
+
 ## Agent rules of thumb
 
 Prefer typed tools → health first → load registry/pack when available → inspect → dry-run → write → verify → preflight → publish. Never invent drawing numbers. Full agent guidance: [skills/765t-forge/SKILL.md](../skills/765t-forge/SKILL.md).

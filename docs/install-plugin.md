@@ -1,6 +1,6 @@
 # Install the AutoCAD plugin
 
-Requires AutoCAD 2026 and a build of `Forge.Plugin`.
+Requires AutoCAD 2025 or 2026 and a matching per-year build of `Forge.Plugin`.
 
 ## Quick path (recommended)
 
@@ -9,7 +9,7 @@ Requires AutoCAD 2026 and a build of `Forge.Plugin`.
 .\scripts\install-plugin.ps1 -Configuration Release -SkipBuild
 ```
 
-Default install directory: `%LOCALAPPDATA%\765T-Forge\plugin\Forge.Plugin.dll`.
+Default install directory: `%LOCALAPPDATA%\765T-Forge\plugin\<Year>\Forge.Plugin.dll`.
 
 ## TRUSTEDPATHS + NETLOAD
 
@@ -28,7 +28,7 @@ Copy [`plugin-bundle/765T-Forge.bundle`](../plugin-bundle/765T-Forge.bundle) int
 
 Place `Forge.Plugin.dll` at `Contents/Windows/Forge.Plugin.dll` relative to the bundle (see the bundle README), or edit `PackageContents.xml` `ModuleName` to match your layout.
 
-`PackageContents.xml` targets **Series R25.1** (AutoCAD 2026). Autoloader avoids manual `NETLOAD` after AutoCAD restart; token env vars are still required.
+`PackageContents.xml` targets **Series R25.1** (AutoCAD 2026). Autoloader avoids manual `NETLOAD` after AutoCAD restart; token env vars are still required. 2025 builds autoload via Series R25.0; 2026 via R25.1 — build/bundle per year.
 
 ## Releases
 

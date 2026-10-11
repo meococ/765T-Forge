@@ -32,7 +32,7 @@ The Vietnamese [docs/history/build-brief.md](docs/history/build-brief.md) is an 
 ## Requirements
 
 - Windows + .NET 8 SDK
-- AutoCAD 2026 (for plugin / live tools)
+- AutoCAD 2025 or 2026 (for plugin / live tools)
 - `FORGE_AUTOCAD_TOKEN` (or `MCP_AUTOCAD_TOKEN`) **required** — no production default secret
 
 ## Quick install (Cursor)
@@ -54,7 +54,7 @@ dotnet build .\765T-Forge.ServerOnly.slnf --no-restore
 dotnet test .\765T-Forge.ServerOnly.slnf --no-build
 ```
 
-Full solution (needs AutoCAD at `AUTOCAD_2026_ROOT`, default `C:\Program Files\Autodesk\AutoCAD 2026`):
+Full solution (needs AutoCAD 2025/2026; `AUTOCAD_2026_ROOT` overrides, else the newest installed AutoCAD is auto-detected):
 
 ```powershell
 dotnet build .\765T-Forge.sln
@@ -72,7 +72,8 @@ If AutoCAD has `NETLOAD`ed the plugin, use `765T-Forge.ServerOnly.slnf` or `-p:O
 | `FORGE_BACKUP_DIR` / `FORGE_AUDIT_DIR` | Under `%LOCALAPPDATA%\765T-Forge\` by default |
 | `AUTOCAD_2026_ROOT` | AutoCAD install root (HintPath + accoreconsole) |
 | `FORGE_ENABLE_UNSAFE_OPS` | Enables `forge_exec_dotnet` when also acknowledged |
-| `FORGE_PLUGIN_RESPONSE_TIMEOUT_SECONDS` | Default `120` |
+| `FORGE_PLUGIN_RESPONSE_TIMEOUT_SECONDS` | Default `120`; also drives the plugin watchdog (`plugin_request_timeout`) at timeout−5s |
+| `FORGE_PLUGIN_CONNECT_TIMEOUT_SECONDS` | Default `10` (clamp 1–120) |
 
 ## Safety
 
