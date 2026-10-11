@@ -76,4 +76,44 @@ public sealed class ToolMetadataTests
             Assert.Equal(meta.OpenWorld, attr.OpenWorld);
         }
     }
+
+    [Fact]
+    public void AuthoringWaveSafetyContract()
+    {
+        // docs/cad-authoring-tools.md C20–C23: draw tools and block_insert are additive-only
+        // (no pre-write DWG copy), every entity mutation is destructive with backup, and no
+        // authoring tool is OpenWorld (typed params only — SafetyPolicy allow-lists them).
+        foreach (var name in new[]
+                 {
+                     "forge_draw_line", "forge_draw_polyline", "forge_draw_circle", "forge_draw_arc",
+                     "forge_draw_text", "forge_draw_mtext", "forge_draw_hatch", "forge_draw_dimension",
+                     "forge_draw_batch", "forge_block_insert", "forge_layer_create"
+                 })
+        {
+            var tool = ForgeToolRegistry.Get(name);
+            Assert.False(tool.ReadOnly);
+            Assert.False(tool.Destructive);
+            Assert.False(tool.RequiresBackup);
+            Assert.False(tool.OpenWorld);
+        }
+
+        foreach (var name in new[]
+                 {
+                     "forge_entity_move", "forge_entity_copy", "forge_entity_rotate", "forge_entity_scale",
+                     "forge_entity_mirror", "forge_entity_offset", "forge_entity_erase", "forge_entity_set_props",
+                     "forge_block_create"
+                 })
+        {
+            var tool = ForgeToolRegistry.Get(name);
+            Assert.False(tool.ReadOnly);
+            Assert.True(tool.Destructive);
+            Assert.True(tool.RequiresBackup);
+            Assert.False(tool.OpenWorld);
+        }
+
+        Assert.True(ForgeToolRegistry.Get("forge_entity_get").ReadOnly);
+        Assert.True(ForgeToolRegistry.Get("forge_entity_list").ReadOnly);
+        Assert.True(ForgeToolRegistry.Get("forge_block_list").ReadOnly);
+        Assert.True(ForgeToolRegistry.Get("forge_layer_create").Idempotent);
+    }
 }

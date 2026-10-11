@@ -1,6 +1,6 @@
 # Capability matrix
 
-Honest status of MCP tools. AutoCAD targets: **2025 and 2026** through the typed year table `build/AutoCadYears.props` (`build-plugin.ps1 -Year`; 2026 is the default reference root — 2025 is qualified live on the dev machine, 2026 is not qualified live there). Civil 3D, full SSM **write**, and geometry megakits are out of scope.
+Honest status of MCP tools. AutoCAD targets: **2025 and 2026** through the typed year table `build/AutoCadYears.props` (`build-plugin.ps1 -Year`; 2026 is the default reference root — 2025 is qualified live on the dev machine, 2026 is not qualified live there). Civil 3D and full SSM **write** are out of scope; geometry authoring ships as typed tools (C20–C23, [docs/cad-authoring-tools.md](cad-authoring-tools.md)).
 
 | Status | Meaning |
 |--------|---------|
@@ -26,6 +26,25 @@ Honest status of MCP tools. AutoCAD targets: **2025 and 2026** through the typed
 | `forge_xref_normalize_relative` | implemented | Absolute → host-relative + optional reload |
 | `forge_layer_list` / `_state_list` | implemented | |
 | `forge_layer_state_restore` | implemented | Sync via `LayerStateManager` |
+
+## Authoring (C20–C23)
+
+| Tool | Status | Notes |
+|------|--------|-------|
+| `forge_draw_line` / `_polyline` / `_circle` / `_arc` | implemented | Typed WCS geometry; handle + entity read-back; polyline supports bulges/width/closed |
+| `forge_draw_text` / `_mtext` | implemented | DBText single-line (CR/LF refused); MText converts newlines to `\P`, 9-point attachment |
+| `forge_draw_hatch` | implemented | Associative hatch on a closed-curve handle or a freshly drawn boundary polyline; pattern/scale/angle |
+| `forge_draw_dimension` | implemented | linear / aligned / radius / diameter on the current dimstyle; angular is C24 |
+| `forge_draw_batch` | implemented | ≤500 steps in one call/transaction, per-step results, continues past failures |
+| `forge_entity_get` / `_list` | implemented | Handle read; list requires window or layer — no select-all |
+| `forge_entity_move` / `_copy` / `_rotate` / `_scale` / `_mirror` / `_offset` | implemented | Explicit handles, `TransformBy`; plane-normal offset for deterministic sides; backup + undo mark |
+| `forge_entity_erase` | implemented | Explicit handles only (≤1000; >100 needs `acknowledgeBulk`), dry-run |
+| `forge_entity_set_props` | implemented | Layer/color/linetype/lineweight by handle |
+| `forge_undo` | implemented | One Forge write = one undo group; pops exactly one |
+| `forge_block_create` / `_insert` / `_list` | implemented | Create consumes source entities (clone→transform→erase, one transaction); insert applies attribute values after binding |
+| `forge_layer_create` / `forge_layout_create` | implemented | Idempotent layer create; layout refuses duplicates |
+
+Authoring contract ([docs/cad-authoring-tools.md](cad-authoring-tools.md)): WCS + drawing units, degrees at the boundary, handles as the object currency, verification read-back on every write, dry-run everywhere, pure DB API (no dialogs). Live AutoCAD smoke for this wave is pending.
 
 ## Block / layout
 

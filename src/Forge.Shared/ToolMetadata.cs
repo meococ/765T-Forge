@@ -43,6 +43,36 @@ public static class ForgeToolRegistry
         // temporary document and the source DGN is never written; an existing target is
         // backed up explicitly in the handler before SaveAs.
         ["forge_dgn_import"] = new ToolMetadata("forge_dgn_import", "dgn", false, false, false, false, false),
+        // docs/cad-authoring-tools.md C20–C23. Draw tools and block_insert are additive-only
+        // (new entities from explicit typed params — no selection, no command strings), so
+        // they skip the pre-write DWG copy like C15. Entity mutations rewrite existing
+        // geometry by explicit handle: destructive with the standard backup.
+        ["forge_draw_line"] = new ToolMetadata("forge_draw_line", "draw", false, false, false, false, false),
+        ["forge_draw_polyline"] = new ToolMetadata("forge_draw_polyline", "draw", false, false, false, false, false),
+        ["forge_draw_circle"] = new ToolMetadata("forge_draw_circle", "draw", false, false, false, false, false),
+        ["forge_draw_arc"] = new ToolMetadata("forge_draw_arc", "draw", false, false, false, false, false),
+        ["forge_draw_text"] = new ToolMetadata("forge_draw_text", "draw", false, false, false, false, false),
+        ["forge_draw_mtext"] = new ToolMetadata("forge_draw_mtext", "draw", false, false, false, false, false),
+        ["forge_draw_hatch"] = new ToolMetadata("forge_draw_hatch", "draw", false, false, false, false, false),
+        ["forge_draw_dimension"] = new ToolMetadata("forge_draw_dimension", "draw", false, false, false, false, false),
+        ["forge_draw_batch"] = new ToolMetadata("forge_draw_batch", "draw", false, false, false, false, false),
+        ["forge_entity_get"] = Read("forge_entity_get", "entity"),
+        ["forge_entity_list"] = Read("forge_entity_list", "entity"),
+        ["forge_entity_move"] = new ToolMetadata("forge_entity_move", "entity", false, true, false, false, true),
+        ["forge_entity_copy"] = new ToolMetadata("forge_entity_copy", "entity", false, true, false, false, true),
+        ["forge_entity_rotate"] = new ToolMetadata("forge_entity_rotate", "entity", false, true, false, false, true),
+        ["forge_entity_scale"] = new ToolMetadata("forge_entity_scale", "entity", false, true, false, false, true),
+        ["forge_entity_mirror"] = new ToolMetadata("forge_entity_mirror", "entity", false, true, false, false, true),
+        ["forge_entity_offset"] = new ToolMetadata("forge_entity_offset", "entity", false, true, false, false, true),
+        ["forge_entity_erase"] = new ToolMetadata("forge_entity_erase", "entity", false, true, false, false, true),
+        ["forge_entity_set_props"] = new ToolMetadata("forge_entity_set_props", "entity", false, true, false, false, true),
+        // forge_undo is the recovery mechanism itself — a pre-write backup would be absurd.
+        ["forge_undo"] = new ToolMetadata("forge_undo", "entity", false, false, false, false, false),
+        ["forge_block_create"] = new ToolMetadata("forge_block_create", "block", false, true, false, false, true),
+        ["forge_block_insert"] = new ToolMetadata("forge_block_insert", "block", false, false, false, false, false),
+        ["forge_block_list"] = Read("forge_block_list", "block"),
+        ["forge_layer_create"] = new ToolMetadata("forge_layer_create", "layer", false, false, true, false, false),
+        ["forge_layout_create"] = new ToolMetadata("forge_layout_create", "layout", false, false, false, false, false),
         ["forge_qa_verify_titleblock"] = Read("forge_qa_verify_titleblock", "qa"),
         ["forge_qa_check_xrefs"] = Read("forge_qa_check_xrefs", "qa"),
         ["forge_qa_audit_layers"] = Read("forge_qa_audit_layers", "qa"),
