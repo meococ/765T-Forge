@@ -1,6 +1,6 @@
 # Capability matrix
 
-Honest status of MCP tools. AutoCAD target: **2026**. Civil 3D, full SSM **write**, and geometry megakits are out of scope.
+Honest status of MCP tools. AutoCAD targets: **2025 and 2026** through the typed year table `build/AutoCadYears.props` (`build-plugin.ps1 -Year`; 2026 is the default reference root — 2025 is qualified live on the dev machine, 2026 is not qualified live there). Civil 3D, full SSM **write**, and geometry megakits are out of scope.
 
 | Status | Meaning |
 |--------|---------|

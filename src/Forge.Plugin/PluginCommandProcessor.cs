@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Globalization;
+using System.Reflection;
 using System.Text;
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
@@ -19,6 +20,13 @@ public sealed partial class PluginCommandProcessor
     private readonly BackupPlanner _backupPlanner;
     private readonly FileAuditSink _auditSink;
 
+    /// <summary>docs/cad-job-tools.md C2 — the year this build targets, from the ForgeTargetYear assembly stamp.</summary>
+    private static readonly int? TargetYear = ReadTargetYear();
+
+    private static int? _hostYear;
+    private static string? _hostVersionRaw;
+    private static bool _hostMeasured;
+
     public PluginCommandProcessor(
         ForgeEnvironment environment,
         SafetyPolicy safetyPolicy,
@@ -36,6 +44,26 @@ public sealed partial class PluginCommandProcessor
         if (!string.Equals(command.AuthToken, _environment.Token, StringComparison.Ordinal))
         {
             return ForgeResult.Failure(command.Id, "unauthorized", "Invalid Forge named pipe token.");
+        }
+
+        // docs/cad-job-tools.md C2: the year gate runs before safety eval, backup, undo mark and
+        // dispatch; the two diagnostic tools still answer so the mismatch is visible by name.
+        MeasureHostYear();
+        var yearGate = HostYearPolicy.Check(TargetYear, _hostYear, _hostVersionRaw);
+        if (!yearGate.Allowed && !IsYearDiagnostic(command.Tool))
+        {
+            var gateAuditId = _auditSink.WriteBestEffort(new AuditRecord
+            {
+                Source = "plugin",
+                Tool = command.Tool,
+                CommandId = command.Id,
+                DryRun = command.DryRun,
+                Allowed = false,
+                DecisionCode = yearGate.Code,
+                Args = command.Args
+            });
+            // Refusal tuples always carry non-null code/message (HostYearPolicy.Check contract).
+            return ForgeResult.Failure(command.Id, yearGate.Code!, yearGate.Message!, null, gateAuditId);
         }
 
         var decision = _safetyPolicy.Evaluate(command);
@@ -174,6 +202,44 @@ public sealed partial class PluginCommandProcessor
         return ForgeJson.FromElement<T>(command.Args) ?? new T();
     }
 
+    private static bool IsYearDiagnostic(string tool)
+    {
+        return string.Equals(tool, "forge_system_health", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(tool, "forge_system_version", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int? ReadTargetYear()
+    {
+        var stamp = Assembly.GetExecutingAssembly()
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(attribute => string.Equals(attribute.Key, "ForgeTargetYear", StringComparison.Ordinal));
+        return stamp is not null
+            && int.TryParse(stamp.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var year)
+            ? year
+            : null;
+    }
+
+    private static void MeasureHostYear()
+    {
+        if (_hostMeasured)
+        {
+            return;
+        }
+
+        _hostMeasured = true;
+        try
+        {
+            _hostVersionRaw = Application.Version.ToString();
+        }
+        catch
+        {
+            // A host that cannot answer Version stays unmeasured; the gate refuses by name.
+            _hostVersionRaw = null;
+        }
+
+        _hostYear = HostYearPolicy.TryMapHostYear(_hostVersionRaw, out var year) ? year : null;
+    }
+
     private static string? ActiveDocumentPath()
     {
         var name = Documents.MdiActiveDocument?.Name;
@@ -187,23 +253,29 @@ public sealed partial class PluginCommandProcessor
 
     private ForgeResult Health(ForgeCommand command)
     {
+        MeasureHostYear();
         return ForgeResult.Success(command.Id, new
         {
             status = "ok",
             server = ForgeConstants.ServerName,
             pipe = _environment.PipeName,
+            targetYear = TargetYear,
+            hostYear = _hostYear,
             activeDocument = ActiveDocumentPath()
         });
     }
 
     private static ForgeResult Version(ForgeCommand command)
     {
+        MeasureHostYear();
         return ForgeResult.Success(command.Id, new
         {
             forge = ForgeConstants.ProductVersion,
             envelope = ForgeConstants.EnvelopeVersion,
-            autocadTarget = ForgeConstants.AutoCadVersion,
-            autocadApplication = Application.Version.ToString(),
+            targetYear = TargetYear,
+            hostYear = _hostYear,
+            yearMismatch = TargetYear is int target && _hostYear is int host && target != host,
+            autocadApplication = _hostVersionRaw,
             dotnet = Environment.Version.ToString()
         });
     }

@@ -1,0 +1,12 @@
+<Project>
+  <!-- docs/cad-job-tools.md C2 — typed AutoCAD year table.
+       One entry per supported year: the default reference root used when the
+       AUTOCAD_2026_ROOT env var is not set (the env stays the manual override for
+       whichever year is being built). A year missing from this table fails
+       build-plugin.ps1 by name. Default roots are the documented install paths;
+       non-default installs (e.g. D:\AutoCAD 2025) use the env override. -->
+  <PropertyGroup>
+    <AutoCadRoot2025>C:\Program Files\Autodesk\AutoCAD 2025</AutoCadRoot2025>
+    <AutoCadRoot2026>C:\Program Files\Autodesk\AutoCAD 2026</AutoCadRoot2026>
+  </PropertyGroup>
+</Project>

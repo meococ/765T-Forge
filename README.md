@@ -1,8 +1,8 @@
 # 765T-Forge
 
-All-C# MCP server and AutoCAD 2026 plugin for **metro/AEC issue-set drawing production** — inspect → fix → fill → gate → publish → verify.
+All-C# MCP server and AutoCAD 2025/2026 plugin (typed year table) for **metro/AEC issue-set drawing production** — inspect → fix → fill → gate → publish → verify.
 
-Not affiliated with Autodesk. Requires a licensed AutoCAD 2026 seat. See [NOTICE.md](NOTICE.md).
+Not affiliated with Autodesk. Requires a licensed AutoCAD 2025 or 2026 seat. See [NOTICE.md](NOTICE.md).
 
 ## Positioning
 
@@ -23,7 +23,7 @@ The Vietnamese [docs/history/build-brief.md](docs/history/build-brief.md) is an 
 ## Shape
 
 - `src/Forge.Server` — MCP stdio server (`ModelContextProtocol` 1.3.0)
-- `src/Forge.Plugin` — AutoCAD 2026 .NET plugin (named pipe)
+- `src/Forge.Plugin` — AutoCAD 2025/2026 .NET plugin (named pipe, per-year build via `scripts/build-plugin.ps1 -Year`)
 - `src/Forge.Shared` — envelope, safety, audit, backup, QA report
 - `tests/Forge.Tests` — unit tests (no AutoCAD required)
 - `skills/765t-forge` — companion agent skill

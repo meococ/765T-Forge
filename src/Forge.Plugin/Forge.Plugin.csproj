@@ -5,7 +5,15 @@
     <Nullable>enable</Nullable>
     <AutoCadRoot Condition="'$(AUTOCAD_2026_ROOT)' != ''">$(AUTOCAD_2026_ROOT)</AutoCadRoot>
     <AutoCadRoot Condition="'$(AutoCadRoot)' == ''">C:\Program Files\Autodesk\AutoCAD 2026</AutoCadRoot>
+    <!-- docs/cad-job-tools.md C2: the year this build targets, stamped as assembly
+         metadata; build-plugin.ps1 -Year feeds it. The plugin refuses dispatch on a
+         host of another year (HostYearPolicy) until that pair is proven. -->
+    <ForgeTargetYear Condition="'$(ForgeTargetYear)' == ''">2026</ForgeTargetYear>
   </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyMetadata Include="ForgeTargetYear" Value="$(ForgeTargetYear)" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Forge.Shared\Forge.Shared.csproj" />

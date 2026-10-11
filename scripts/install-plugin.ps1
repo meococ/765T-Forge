@@ -14,6 +14,8 @@
 param(
     [ValidateSet("Debug", "Release")]
     [string] $Configuration = "Release",
+    [ValidateSet("2025", "2026")]
+    [string] $Year = "2026",
     [string] $SourceDir = "",
     [string] $InstallDir = "",
     [switch] $SkipBuild
@@ -24,15 +26,15 @@ $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
 if (-not $SkipBuild) {
-    & (Join-Path $PSScriptRoot "build-plugin.ps1") -Configuration $Configuration
+    & (Join-Path $PSScriptRoot "build-plugin.ps1") -Configuration $Configuration -Year $Year
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
 if (-not $SourceDir) {
-    $SourceDir = Join-Path $root "src\Forge.Plugin\bin\$Configuration\net8.0-windows"
+    $SourceDir = Join-Path $root "artifacts\Forge.Plugin\$Year"
 }
 if (-not $InstallDir) {
-    $InstallDir = Join-Path $env:LOCALAPPDATA "765T-Forge\plugin"
+    $InstallDir = Join-Path $env:LOCALAPPDATA "765T-Forge\plugin\$Year"
 }
 
 $dll = Join-Path $SourceDir "Forge.Plugin.dll"
@@ -46,14 +48,14 @@ Copy-Item -Path (Join-Path $SourceDir "*") -Destination $InstallDir -Recurse -Fo
 $installed = Join-Path $InstallDir "Forge.Plugin.dll"
 
 Write-Host ""
-Write-Host "Installed plugin to: $installed"
+Write-Host "Installed plugin (year $Year) to: $installed"
 Write-Host ""
 Write-Host "Checklist:"
 Write-Host "  1. Add this folder to AutoCAD TRUSTEDPATHS (OPTIONS > Files > Trusted Locations):"
 Write-Host "       $InstallDir"
 Write-Host "  2. Set user env FORGE_AUTOCAD_TOKEN (and optional FORGE_PIPE_NAME) for the AutoCAD process,"
 Write-Host "     matching the MCP server env. Restart AutoCAD after changing env."
-Write-Host "  3. In AutoCAD 2026: NETLOAD -> $installed"
+Write-Host "  3. In AutoCAD $Year: NETLOAD -> $installed"
 Write-Host "  4. Run MCP_STATUS and confirm the pipe name matches FORGE_PIPE_NAME."
 Write-Host "  5. Optional Autoloader: copy plugin-bundle\765T-Forge.bundle into an ApplicationPlugins folder."
 Write-Host "     See docs\install-plugin.md"

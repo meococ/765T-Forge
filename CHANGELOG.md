@@ -12,6 +12,7 @@ See [docs/versioning.md](docs/versioning.md).
 
 ### Added
 
+- Typed AutoCAD year table: `build/AutoCadYears.props` (2025 + 2026), `build-plugin.ps1 -Year` with per-year output and a `ForgeTargetYear` assembly stamp, `install-plugin.ps1 -Year`; the plugin refuses a host of another year with `HOST_YEAR_MISMATCH` until the year pair is proven by a live smoke (`docs/cad-job-tools.md`, cad-connector-1007)
 - Publish-ready Wave 0: Autoloader R25.1 + valid GUIDs; `%APPDATA%` install guidance; NOTICE upstream attribution; `docs/history/build-brief.md`; embedded matrix/safety in server publish; `RELEASE_STATUS.txt` from pack script
 - PublishReceipt + PDF probes + actionable preflight findings + foreground plot policy
 - IssueSetContract lite, standards pack v2 plot bindings, field/rev gates, timeout read-back protocol

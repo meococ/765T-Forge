@@ -36,7 +36,7 @@ dotnet test .\765T-Forge.ServerOnly.slnf --filter "FullyQualifiedName~SafetyPoli
 dotnet test .\765T-Forge.ServerOnly.slnf --filter "DisplayName~DotnetExecutorRequiresUnsafeAcknowledgement"
 ```
 
-**AutoCAD dependency gotcha:** `src/Forge.Plugin/Forge.Plugin.csproj` references AutoCAD managed DLLs via `$(AutoCadRoot)` from `AUTOCAD_2026_ROOT` (default `C:\Program Files\Autodesk\AutoCAD 2026`). The **test project references only `Forge.Shared` and `Forge.Server`, never `Forge.Plugin`**, so all logic under test builds and runs without AutoCAD.
+**AutoCAD dependency gotcha:** `src/Forge.Plugin/Forge.Plugin.csproj` references AutoCAD managed DLLs via `$(AutoCadRoot)`, resolved per year by `scripts/build-plugin.ps1 -Year` from the typed table `build/AutoCadYears.props` (docs/cad-job-tools.md C2); `AUTOCAD_2026_ROOT` stays the manual override for whichever year is being built, and the build stamps `ForgeTargetYear` so the plugin refuses a host of another year (`HOST_YEAR_MISMATCH`) until that pair is proven by a live smoke. The **test project references only `Forge.Shared` and `Forge.Server`, never `Forge.Plugin`**, so all logic under test builds and runs without AutoCAD.
 
 ## Architecture — the two-process split
 
