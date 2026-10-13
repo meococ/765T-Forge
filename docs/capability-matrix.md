@@ -43,6 +43,13 @@ Honest status of MCP tools. AutoCAD targets: **2025 and 2026** through the typed
 | `forge_undo` | implemented | One Forge write = one undo group; pops exactly one |
 | `forge_block_create` / `_insert` / `_list` | implemented | Create consumes source entities (clone→transform→erase, one transaction); insert applies attribute values after binding |
 | `forge_layer_create` / `forge_layout_create` | implemented | Idempotent layer create; layout refuses duplicates |
+| `forge_view_capture` | implemented | PrintWindow PNG of the AutoCAD window (backgrounded OK, not minimized); `fit` zooms extents first — the agent's visual read-back |
+| `forge_measure_batch` | implemented | Engine-measured length/area/distance/bbox — never re-reads vertices |
+| `forge_entity_array` | implemented | Rectangular + polar clones by explicit handles; sources untouched |
+| `forge_layer_set` / `forge_doc_new` / `forge_doc_export_dxf` | implemented | Layer state (freeze refused on current), template document, 16-digit DXF out |
+| `forge_draw_polyline_from_csv` / `forge_viewport_add` | implemented | CSV point lists → one polyline; model-space viewport on a layout tab |
+
+Tool profile `authoring` bundles the whole authoring surface via `forge_system_tool_profile`.
 
 Authoring contract ([docs/cad-authoring-tools.md](cad-authoring-tools.md)): WCS + drawing units, degrees at the boundary, handles as the object currency, verification read-back on every write, dry-run everywhere, pure DB API (no dialogs). Live AutoCAD smoke for this wave is pending.
 

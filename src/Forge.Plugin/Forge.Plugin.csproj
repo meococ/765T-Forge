@@ -22,6 +22,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" />
     <PackageReference Include="System.IO.Pipes.AccessControl" />
+    <PackageReference Include="System.Drawing.Common" />
   </ItemGroup>
 
   <ItemGroup>

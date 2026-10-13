@@ -286,10 +286,50 @@ public sealed class ForgeMcpTools
     public static Task<ForgeResult> LayerCreate(ForgeToolRunner runner, string name, int? colorIndex = null, string? linetype = null, bool plottable = true, bool dryRun = false, CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_layer_create", new { name, colorIndex, linetype, plottable }, dryRun, cancellationToken: cancellationToken);
 
+    [McpServerTool(Name = "forge_layer_set", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("Set one layer's state: isOn, isFrozen (refused on the current layer), isLocked, isPlottable, colorIndex, and/or makeCurrent. Read-back echoes the resulting state.")]
+    public static Task<ForgeResult> LayerSet(ForgeToolRunner runner, string name, bool? isOn = null, bool? isFrozen = null, bool? isLocked = null, bool? isPlottable = null, int? colorIndex = null, bool makeCurrent = false, bool dryRun = false, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_layer_set", new { name, isOn, isFrozen, isLocked, isPlottable, colorIndex, makeCurrent }, dryRun, cancellationToken: cancellationToken);
+
     [McpServerTool(Name = "forge_layout_create", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
     [Description("Create a paper-space layout tab by name. Refuses an existing name with layout_not_unique.")]
     public static Task<ForgeResult> LayoutCreate(ForgeToolRunner runner, string name, bool dryRun = false, CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_layout_create", new { name }, dryRun, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_viewport_add", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [Description("Add a model-space viewport to a paper-space layout: layout, paper-space center [x,y], width, height. Read-back carries the viewport handle and number.")]
+    public static Task<ForgeResult> ViewportAdd(ForgeToolRunner runner, string layout, double[] center, double width, double height, bool dryRun = false, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_viewport_add", new { layout, center, width, height }, dryRun, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_doc_new", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [Description("Create a new document (optionally from a DWT/DWG templatePath); it becomes the active document. Call forge_doc_list_open afterwards to confirm.")]
+    public static Task<ForgeResult> DocNew(ForgeToolRunner runner, string? templatePath = null, bool dryRun = false, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_doc_new", new { templatePath }, dryRun, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_doc_export_dxf", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [Description("Export the in-memory drawing state (unsaved changes included) to a DXF file; overwrite acknowledgement + destination backup. Verification is a byte-count probe on the written file.")]
+    public static Task<ForgeResult> DocExportDxf(ForgeToolRunner runner, string outputPath, bool overwriteAcknowledged = false, bool dryRun = false, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_doc_export_dxf", new { outputPath, overwriteAcknowledged }, dryRun, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_draw_polyline_from_csv", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [Description("Draw one polyline from a CSV of coordinates (columns xColumn/yColumn, delimiter, hasHeader; '.' decimals) — large survey/centerline point lists without token cost. Reports dropped lines.")]
+    public static Task<ForgeResult> DrawPolylineFromCsv(ForgeToolRunner runner, string csvPath, bool hasHeader = false, string? delimiter = null, int xColumn = 0, int yColumn = 1, bool closed = false, double? constantWidth = null, string? layer = null, int? colorIndex = null, bool dryRun = false, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_draw_polyline_from_csv", new { csvPath, hasHeader, delimiter, xColumn, yColumn, closed, constantWidth, layer, colorIndex }, dryRun, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_measure_batch", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("True measurement from the geometry engine (never re-read vertices): per-handle length/area/type/layer, pointDistance for p1+p2, and the bbox union of the handles.")]
+    public static Task<ForgeResult> MeasureBatch(ForgeToolRunner runner, string[]? handles = null, double[]? p1 = null, double[]? p2 = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_measure_batch", new { handles, p1, p2 }, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_entity_array", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false)]
+    [Description("Array entities by explicit handles. kind=rectangular: rows, columns, rowSpacing, colSpacing. kind=polar: center, count (2..5000), angleTotalDeg (default 360), rotateItems (default true). Sources untouched; returns new handles.")]
+    public static Task<ForgeResult> EntityArray(ForgeToolRunner runner, string[] handles, string kind, int? rows = null, int? columns = null, double? rowSpacing = null, double? colSpacing = null, double[]? center = null, int? count = null, double? angleTotalDeg = null, bool rotateItems = true, bool dryRun = false, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_entity_array", new { handles, kind, rows, columns, rowSpacing, colSpacing, center, count, angleTotalDeg, rotateItems }, dryRun, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_view_capture", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [Description("Capture AutoCAD's main window to a PNG so the agent can LOOK at the drawing (PrintWindow works while the window is in the background, not minimized). fit=true zooms extents first. Read the returned PNG path to visually verify work.")]
+    public static Task<ForgeResult> ViewCapture(ForgeToolRunner runner, string outputPath, bool fit = false, bool overwriteAcknowledged = false, bool dryRun = false, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_view_capture", new { outputPath, fit, overwriteAcknowledged }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_qa_verify_titleblock", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Compare titleblock attributes against expected tag/value pairs.")]

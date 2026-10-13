@@ -115,5 +115,24 @@ public sealed class ToolMetadataTests
         Assert.True(ForgeToolRegistry.Get("forge_entity_list").ReadOnly);
         Assert.True(ForgeToolRegistry.Get("forge_block_list").ReadOnly);
         Assert.True(ForgeToolRegistry.Get("forge_layer_create").Idempotent);
+
+        // C24 — capture/measure/export never rewrite the drawing; array is a mutation with
+        // backup; the CSV importer is additive like the other draw tools.
+        Assert.True(ForgeToolRegistry.Get("forge_measure_batch").ReadOnly);
+        foreach (var name in new[] { "forge_view_capture", "forge_doc_export_dxf", "forge_doc_new" })
+        {
+            var tool = ForgeToolRegistry.Get(name);
+            Assert.False(tool.ReadOnly);
+            Assert.False(tool.Destructive);
+            Assert.False(tool.RequiresBackup);
+        }
+
+        var arrayTool = ForgeToolRegistry.Get("forge_entity_array");
+        Assert.True(arrayTool.Destructive);
+        Assert.True(arrayTool.RequiresBackup);
+        var csvTool = ForgeToolRegistry.Get("forge_draw_polyline_from_csv");
+        Assert.False(csvTool.Destructive);
+        Assert.False(csvTool.RequiresBackup);
+        Assert.True(ForgeToolRegistry.Get("forge_layer_set").Idempotent);
     }
 }

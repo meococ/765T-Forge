@@ -73,6 +73,17 @@ public static class ForgeToolRegistry
         ["forge_block_list"] = Read("forge_block_list", "block"),
         ["forge_layer_create"] = new ToolMetadata("forge_layer_create", "layer", false, false, true, false, false),
         ["forge_layout_create"] = new ToolMetadata("forge_layout_create", "layout", false, false, false, false, false),
+        // C24 — visual QA, measurement, document lifecycle. Capture/export/measure do not
+        // modify the drawing (the in-handler overwrite guard + destination backup cover their
+        // output files), so no pre-write DWG copy.
+        ["forge_view_capture"] = new ToolMetadata("forge_view_capture", "capture", false, false, false, false, false),
+        ["forge_measure_batch"] = Read("forge_measure_batch", "measure"),
+        ["forge_entity_array"] = new ToolMetadata("forge_entity_array", "entity", false, true, false, false, true),
+        ["forge_layer_set"] = Write("forge_layer_set", "layer", idempotent: true),
+        ["forge_doc_new"] = new ToolMetadata("forge_doc_new", "document", false, false, false, false, false),
+        ["forge_doc_export_dxf"] = new ToolMetadata("forge_doc_export_dxf", "document", false, false, false, false, false),
+        ["forge_draw_polyline_from_csv"] = new ToolMetadata("forge_draw_polyline_from_csv", "draw", false, false, false, false, false),
+        ["forge_viewport_add"] = new ToolMetadata("forge_viewport_add", "layout", false, false, false, false, false),
         ["forge_qa_verify_titleblock"] = Read("forge_qa_verify_titleblock", "qa"),
         ["forge_qa_check_xrefs"] = Read("forge_qa_check_xrefs", "qa"),
         ["forge_qa_audit_layers"] = Read("forge_qa_audit_layers", "qa"),

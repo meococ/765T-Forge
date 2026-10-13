@@ -17,6 +17,15 @@
           "System.Reflection.Metadata": "8.0.0"
         }
       },
+      "System.Drawing.Common": {
+        "type": "Direct",
+        "requested": "[8.0.8, )",
+        "resolved": "8.0.8",
+        "contentHash": "4ZM1wvLjz9nVVExsfPAaSl/qOvU+QNedJL5rQ+2Wbow+iGeyO0e7XN07707rMBgaffEeeLrCZBwC0oHUuvRdPw==",
+        "dependencies": {
+          "Microsoft.Win32.SystemEvents": "8.0.0"
+        }
+      },
       "System.IO.Pipes.AccessControl": {
         "type": "Direct",
         "requested": "[5.0.0, )",
@@ -73,6 +82,11 @@
         "type": "Transitive",
         "resolved": "5.0.0",
         "contentHash": "VyPlqzH2wavqquTcYpkIIAQ6WdenuKoFN0BdYBbCWsclXacSOHNQn66Gt4z5NBqEYW0FAPm5rlvki9ZiCij5xQ=="
+      },
+      "Microsoft.Win32.SystemEvents": {
+        "type": "Transitive",
+        "resolved": "8.0.0",
+        "contentHash": "9opKRyOKMCi2xJ7Bj7kxtZ1r9vbzosMvRrdEhVhDz8j8MoBGgB+WmC94yH839NPH+BclAjtQ/pyagvi/8gDLkw=="
       },
       "System.Collections.Immutable": {
         "type": "Transitive",

@@ -1,6 +1,6 @@
 # Authoring tools — draw, modify, blocks, sheets (C20–C24)
 
-docs/cad-job-tools.md sibling. Status: **C20–C23 shipped** (this change), C24+ roadmap.
+docs/cad-job-tools.md sibling. Status: **C20–C24 shipped** (two changes), C25+ roadmap below.
 Evidence base: competitor survey 2026-10-11 — puran-water/autocad-mcp (557★), U-C4N/Autocad-MCP
 (247 tools), LokmenoWer/best-cad-mcp (plan-execute-verify), thepiruthvirajan/autocad-mcp-server,
 plus Blender/Revit/Rhino/FreeCAD/OnShape MCPs. Consensus lessons adopted here: typed per-primitive
@@ -79,15 +79,29 @@ as every other Forge write). `forge_entity_get` / `forge_entity_list`: `ReadOnly
 | `forge_layer_create` | name, colorIndex? (default 7), linetype? (must already exist), plottable? (default true) | Idempotent — an existing layer returns `alreadyExists=true`; additive, no backup |
 | `forge_layout_create` | name | Idempotent refusal with `layout_not_unique` when taken; additive |
 
-## C24+ — roadmap (designed, not shipped)
+## C24 — visual QA, measurement, document lifecycle (shipped)
 
-Visual QA (`forge_view_capture` — PrintWindow works on background windows, plus
-geometry-health blocks per rhinomcp PR#36), `forge_measure_batch` (true measured area/length —
-never shoelace from vertices), `forge_doc_new` (from template), `forge_layer_set`
-(on/off/freeze/lock/current), `forge_viewport_add`, dimension styles (`forge_style_dim_*`),
-rectangular/polar array, trim/fillet/chamfer (selection semantics need a plan), `forge_draw_table`,
-`forge_draw_polyline_from_csv`, DXF export, capability declaration grown out of
-`forge_system_tool_profile`.
+| Tool | Params | Notes |
+|---|---|---|
+| `forge_view_capture` | outputPath, fit? (zoom extents first), overwriteAcknowledged? | The agent's eyes: PrintWindow renders AutoCAD's main window to a PNG even while backgrounded (not minimized); the client reads the PNG to visually verify work. Read-only on the drawing; `System.Drawing.Common` |
+| `forge_measure_batch` | handles[]?, p1+p2? | True engine measurement — per-handle length/area/type/layer, pointDistance, bbox union. Never re-read vertices (shoelace math silently loses area on curved segments) |
+| `forge_entity_array` | handles[], kind: `rectangular` (rows, columns, rowSpacing, colSpacing) \| `polar` (center, count 2..5000, angleTotalDeg default 360, rotateItems default true) | Clones + TransformBy placements, sources untouched; destructive + backup like copy |
+| `forge_layer_set` | name, isOn?, isFrozen? (refused on the current layer), isLocked?, isPlottable?, colorIndex?, makeCurrent? | Idempotent state write with full state read-back |
+| `forge_doc_new` | templatePath? | New document (blank or DWT/DWG); it becomes active |
+| `forge_doc_export_dxf` | outputPath, overwriteAcknowledged? | `DxfOut(path, 16, false)` — 16-digit precision; exports the in-memory state; destination backup + overwrite ack |
+| `forge_draw_polyline_from_csv` | csvPath, hasHeader?, delimiter?, xColumn?, yColumn?, closed?, constantWidth?, layer?, colorIndex? | Survey/centerline point lists from CSV without token cost; reports dropped lines |
+| `forge_viewport_add` | layout, center, width, height | Rectangular model-space viewport on a paper-space layout, read-back carries the viewport number |
+
+Tool profile `authoring` (`forge_system_tool_profile name=authoring`) lists the whole C20–C24
+surface for agents that want one allowlist instead of 60+ tools.
+
+## C25+ — roadmap (designed, not shipped)
+
+Fillet/chamfer/trim (selection semantics need a plan — command-based fillet fights the
+no-dialog contract), dimension styles (`forge_style_dim_*`), `forge_draw_table`,
+CSV-to-hatch or -block placements, image-to-CAD spec pipeline (best-cad-mcp pattern),
+capability declaration grown out of `forge_system_tool_profile`, screenshot diffing
+(capture → compare against a reference PNG).
 
 ## Implementation notes (API cookbook — 2025/2026 verified)
 

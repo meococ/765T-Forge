@@ -57,6 +57,47 @@ public static class ToolProfiles
             "forge_linework_transform",
             "forge_doc_list_open",
             "forge_layer_list"
+        ],
+        // Authoring wave C20–C24 (docs/cad-authoring-tools.md): the draw-and-modify surface.
+        ["authoring"] =
+        [
+            "forge_system_health",
+            "forge_doc_list_layouts",
+            "forge_doc_new",
+            "forge_doc_save",
+            "forge_doc_export_dxf",
+            "forge_layer_create",
+            "forge_layer_set",
+            "forge_layer_list",
+            "forge_draw_line",
+            "forge_draw_polyline",
+            "forge_draw_circle",
+            "forge_draw_arc",
+            "forge_draw_text",
+            "forge_draw_mtext",
+            "forge_draw_hatch",
+            "forge_draw_dimension",
+            "forge_draw_batch",
+            "forge_draw_polyline_from_csv",
+            "forge_entity_get",
+            "forge_entity_list",
+            "forge_entity_move",
+            "forge_entity_copy",
+            "forge_entity_rotate",
+            "forge_entity_scale",
+            "forge_entity_mirror",
+            "forge_entity_array",
+            "forge_entity_offset",
+            "forge_entity_erase",
+            "forge_entity_set_props",
+            "forge_measure_batch",
+            "forge_undo",
+            "forge_block_create",
+            "forge_block_insert",
+            "forge_block_list",
+            "forge_layout_create",
+            "forge_viewport_add",
+            "forge_view_capture"
         ]
     };
 

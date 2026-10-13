@@ -30,3 +30,7 @@ artifacts/
 # JetBrains
 .idea/
 *.sln.iml
+
+# mistyped build outputs (dotnet build "artifactsverify --nologo")
+artifactsverify*/
+**/artifactsverify*/
