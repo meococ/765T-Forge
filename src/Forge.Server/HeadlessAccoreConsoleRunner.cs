@@ -72,6 +72,7 @@ public sealed class HeadlessAccoreConsoleRunner
                 {
                     DwgPath = j.DwgPath ?? "",
                     ScriptPath = j.ScriptPath ?? "",
+                    TimeoutSeconds = j.TimeoutSeconds,
                     Status = "pending"
                 }).ToList()
             };
@@ -91,6 +92,7 @@ public sealed class HeadlessAccoreConsoleRunner
                 {
                     j.DwgPath,
                     j.ScriptPath,
+                    j.TimeoutSeconds,
                     j.Status,
                     dwgExists = !string.IsNullOrWhiteSpace(j.DwgPath) && File.Exists(j.DwgPath),
                     scriptExists = !string.IsNullOrWhiteSpace(j.ScriptPath) && File.Exists(j.ScriptPath),
@@ -112,7 +114,7 @@ public sealed class HeadlessAccoreConsoleRunner
             cancellationToken.ThrowIfCancellationRequested();
             job.Status = "running";
             state.Save();
-            var one = await RunOneAsync(command.Id, job.DwgPath, job.ScriptPath, null, dryRun: false, cancellationToken)
+            var one = await RunOneAsync(command.Id, job.DwgPath, job.ScriptPath, job.TimeoutSeconds, dryRun: false, cancellationToken)
                 .ConfigureAwait(false);
             if (one.Ok)
             {
@@ -195,7 +197,8 @@ public sealed class HeadlessAccoreConsoleRunner
             return ForgeResult.Failure(commandId, "script_not_found", $"Script file not found: {scriptPath}");
         }
 
-        var scriptText = await File.ReadAllTextAsync(scriptPath, cancellationToken).ConfigureAwait(false);
+        var scriptBytes = await File.ReadAllBytesAsync(scriptPath, cancellationToken).ConfigureAwait(false);
+        var scriptText = AccoreConsoleScriptCheck.DecodeOutput(scriptBytes);
         var scriptDecision = _safetyPolicy.EvaluateText("forge_run_script", scriptText);
         if (!scriptDecision.Allowed)
         {
@@ -220,54 +223,97 @@ public sealed class HeadlessAccoreConsoleRunner
         }
 
         var backupPath = _backupPlanner.TryBackup(dwgPath);
-        var psi = new ProcessStartInfo
-        {
-            FileName = accoreconsole,
-            ArgumentList = { "/i", dwgPath, "/s", scriptPath },
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-
-        using var process = Process.Start(psi);
-        if (process is null)
-        {
-            return ForgeResult.Failure(commandId, "accoreconsole_start_failed", "Failed to start accoreconsole.exe.");
-        }
-
-        var timeout = TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds ?? 300, 5, 3600));
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(timeout);
+        var ext = string.IsNullOrWhiteSpace(Path.GetExtension(scriptPath)) ? ".scr" : Path.GetExtension(scriptPath);
+        var tempScriptPath = Path.Combine(Path.GetTempPath(), $"forge-script-{commandId}-{Guid.NewGuid():N}{ext}");
+        await File.WriteAllBytesAsync(tempScriptPath, scriptBytes, cancellationToken).ConfigureAwait(false);
 
         try
         {
-            var stdoutTask = process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
-            var stderrTask = process.StandardError.ReadToEndAsync(timeoutCts.Token);
-            await process.WaitForExitAsync(timeoutCts.Token).ConfigureAwait(false);
-            var stdout = await stdoutTask.ConfigureAwait(false);
-            var stderr = await stderrTask.ConfigureAwait(false);
+            var psi = new ProcessStartInfo
+            {
+                FileName = accoreconsole,
+                ArgumentList = { "/i", dwgPath, "/s", tempScriptPath },
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
 
-            return process.ExitCode == 0
-                ? ForgeResult.Success(commandId, new { exitCode = process.ExitCode, stdout, stderr, backupPath })
-                : ForgeResult.Failure(commandId, "accoreconsole_failed", $"accoreconsole exited with code {process.ExitCode}.", stderr);
+            using var process = Process.Start(psi);
+            if (process is null)
+            {
+                return ForgeResult.Failure(commandId, "accoreconsole_start_failed", "Failed to start accoreconsole.exe.");
+            }
+
+            var timeout = TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds ?? 300, 5, 3600));
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(timeout);
+
+            try
+            {
+                // accoreconsole writes UTF-16LE when redirected; a StreamReader with the default
+                // UTF-8 encoding yields "U\0n\0k\0..." text. Read raw bytes and detect the encoding.
+                var stdoutTask = ReadAllBytesAsync(process.StandardOutput.BaseStream, timeoutCts.Token);
+                var stderrTask = ReadAllBytesAsync(process.StandardError.BaseStream, timeoutCts.Token);
+                await process.WaitForExitAsync(timeoutCts.Token).ConfigureAwait(false);
+                var stdout = AccoreConsoleScriptCheck.DecodeOutput(await stdoutTask.ConfigureAwait(false));
+                var stderr = AccoreConsoleScriptCheck.DecodeOutput(await stderrTask.ConfigureAwait(false));
+
+                if (process.ExitCode != 0)
+                {
+                    return ForgeResult.Failure(commandId, "accoreconsole_failed", $"accoreconsole exited with code {process.ExitCode}.", stderr);
+                }
+
+                if (AccoreConsoleScriptCheck.HasScriptError(stdout, stderr))
+                {
+                    return ForgeResult.Failure(
+                        commandId,
+                        AccoreConsoleScriptCheck.ErrorCode,
+                        "accoreconsole exited 0, but stdout/stderr reported a script error (*Cancel*, Unknown command, or *Invalid*).",
+                        "Inspect data.stdout / data.stderr and fix the script tokens.",
+                        data: new { exitCode = process.ExitCode, stdout, stderr, backupPath });
+                }
+
+                return ForgeResult.Success(commandId, new { exitCode = process.ExitCode, stdout, stderr, backupPath });
+            }
+            catch (OperationCanceledException)
+            {
+                try
+                {
+                    if (!process.HasExited)
+                    {
+                        process.Kill(entireProcessTree: true);
+                    }
+                }
+                catch
+                {
+                    // Best effort cleanup after timeout.
+                }
+
+                return ForgeResult.Failure(commandId, "accoreconsole_timeout", $"accoreconsole exceeded timeout {timeout.TotalSeconds:n0}s.");
+            }
         }
-        catch (OperationCanceledException)
+        finally
         {
             try
             {
-                if (!process.HasExited)
+                if (File.Exists(tempScriptPath))
                 {
-                    process.Kill(entireProcessTree: true);
+                    File.Delete(tempScriptPath);
                 }
             }
             catch
             {
-                // Best effort cleanup after timeout.
+                // Best effort temp file cleanup.
             }
-
-            return ForgeResult.Failure(commandId, "accoreconsole_timeout", $"accoreconsole exceeded timeout {timeout.TotalSeconds:n0}s.");
         }
+    }
+
+    private static async Task<byte[]> ReadAllBytesAsync(Stream stream, CancellationToken cancellationToken)
+    {
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
+        return buffer.ToArray();
     }
 
     private sealed record RunScriptArgs

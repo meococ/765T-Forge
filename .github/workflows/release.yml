@@ -21,10 +21,20 @@ jobs:
         with:
           global-json-file: global.json
 
-      - name: Pack server (win-x64)
+      - name: Restore and test (ServerOnly)
+        shell: pwsh
+        run: |
+          dotnet restore .\765T-Forge.ServerOnly.slnf --locked-mode
+          dotnet test .\765T-Forge.ServerOnly.slnf --configuration Release --no-restore
+
+      - name: Pack server (win-x64) and generate SHA-256 checksums
         shell: pwsh
         run: |
           .\scripts\pack-release.ps1 -Configuration Release -SkipPlugin
+          Get-ChildItem artifacts\release\*.zip | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          } | Set-Content -Encoding utf8 artifacts\release\SHA256SUMS.txt
 
       - name: Upload server artifact
         uses: actions/upload-artifact@v4
@@ -38,6 +48,7 @@ jobs:
           generate_release_notes: true
           files: |
             artifacts/release/*.zip
+            artifacts/release/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

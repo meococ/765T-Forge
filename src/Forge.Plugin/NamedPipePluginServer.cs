@@ -147,21 +147,30 @@ public sealed class NamedPipePluginServer : IDisposable
         };
 
         // A client that connects and never writes must not hold the single pipe instance
-        // forever — bound the request line like the work itself.
+        // forever — bound the request line like the work itself, and cap length at 16 MB.
         using var readDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         readDeadline.CancelAfter(RequestDeadline);
-        var line = await reader.ReadLineAsync(readDeadline.Token).ConfigureAwait(false);
+        string? line = null;
         ForgeCommand? command = null;
         ForgeResult? earlyFailure = null;
-        if (string.IsNullOrWhiteSpace(line))
+        try
+        {
+            line = await ReadBoundedLineAsync(reader, 16 * 1024 * 1024, readDeadline.Token).ConfigureAwait(false);
+        }
+        catch (InvalidDataException ex)
+        {
+            earlyFailure = ForgeResult.Failure("", "request_too_large", ex.Message);
+        }
+
+        if (earlyFailure is null && string.IsNullOrWhiteSpace(line))
         {
             earlyFailure = ForgeResult.Failure("", "empty_request", "No command was received over the named pipe.");
         }
-        else
+        else if (earlyFailure is null)
         {
             try
             {
-                command = JsonSerializer.Deserialize<ForgeCommand>(line, ForgeJson.Options);
+                command = JsonSerializer.Deserialize<ForgeCommand>(line!, ForgeJson.Options);
                 if (command is null)
                 {
                     earlyFailure = ForgeResult.Failure("", "invalid_request", "Command JSON could not be parsed.");
@@ -433,6 +442,40 @@ public sealed class NamedPipePluginServer : IDisposable
         catch
         {
             return null;
+        }
+    }
+
+    private static async Task<string?> ReadBoundedLineAsync(StreamReader reader, int maxChars, CancellationToken cancellationToken)
+    {
+        var sb = new StringBuilder();
+        var buf = new char[4096];
+        while (true)
+        {
+            var n = await reader.ReadAsync(buf.AsMemory(0, buf.Length), cancellationToken).ConfigureAwait(false);
+            if (n == 0)
+            {
+                return sb.Length == 0 ? null : sb.ToString();
+            }
+
+            for (var i = 0; i < n; i++)
+            {
+                var ch = buf[i];
+                if (ch == '\n')
+                {
+                    if (sb.Length > 0 && sb[^1] == '\r')
+                    {
+                        sb.Length--;
+                    }
+
+                    return sb.ToString();
+                }
+
+                sb.Append(ch);
+                if (sb.Length > maxChars)
+                {
+                    throw new InvalidDataException($"Pipe request line exceeded maximum length of {maxChars} characters.");
+                }
+            }
         }
     }
 }

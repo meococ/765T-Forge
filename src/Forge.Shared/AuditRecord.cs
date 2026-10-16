@@ -70,18 +70,46 @@ public sealed class FileAuditSink
         lock (Gate)
         {
             Directory.CreateDirectory(_directory);
-            for (var attempt = 0; attempt < 3; attempt++)
+            using var mutex = new Mutex(false, @"Local\765TForgeAuditMutex");
+            var acquired = false;
+            try
             {
                 try
                 {
-                    using var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
-                    using var writer = new StreamWriter(stream);
-                    writer.Write(json);
-                    return;
+                    acquired = mutex.WaitOne(TimeSpan.FromSeconds(2));
                 }
-                catch (IOException) when (attempt < 2)
+                catch (AbandonedMutexException)
                 {
-                    Thread.Sleep(25 * (attempt + 1));
+                    acquired = true;
+                }
+
+                for (var attempt = 0; attempt < 3; attempt++)
+                {
+                    try
+                    {
+                        using var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+                        using var writer = new StreamWriter(stream);
+                        writer.Write(json);
+                        return;
+                    }
+                    catch (IOException) when (attempt < 2)
+                    {
+                        Thread.Sleep(25 * (attempt + 1));
+                    }
+                }
+            }
+            finally
+            {
+                if (acquired)
+                {
+                    try
+                    {
+                        mutex.ReleaseMutex();
+                    }
+                    catch
+                    {
+                        // Ignore release failure.
+                    }
                 }
             }
         }

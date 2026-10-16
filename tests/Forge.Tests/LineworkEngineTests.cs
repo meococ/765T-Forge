@@ -4,8 +4,8 @@ namespace Forge.Tests;
 
 public sealed class LineworkEngineTests
 {
-    private const string DumpPath = @"D:\FreeLancer\AEONMALL BIEN HOA\evidence\forge\pl_dump.txt";
-    private const string ModelPath = @"D:\FreeLancer\AEONMALL BIEN HOA\evidence\forge\all_pipe_segs_live.json";
+    private static string? DumpPath => Environment.GetEnvironmentVariable("FORGE_TEST_LINEWORK_DUMP");
+    private static string? ModelPath => Environment.GetEnvironmentVariable("FORGE_TEST_LINEWORK_MODEL");
 
     private static List<LineworkEntity> Parse(params string[] lines) => LineworkDumpParser.Parse(lines);
 
@@ -267,17 +267,192 @@ public sealed class LineworkEngineTests
         Assert.Equal(2, byHandle.Entity!.Points.Length);
     }
 
-    // ---------- real data (gated on evidence files) ----------
+    [Theory]
+    [InlineData(0.25)]
+    [InlineData(-0.25)]
+    [InlineData(0.41421356237309503)] // tan(pi/8) = 90 deg arc
+    [InlineData(-0.41421356237309503)]
+    [InlineData(1.0)]                 // semicircle
+    [InlineData(-1.0)]
+    [InlineData(2.0)]                 // major arc (> 180 deg)
+    [InlineData(-2.0)]
+    public void TessellateBulgePlacesArcAndCenterOnCorrectSide(double bulge)
+    {
+        // Chord from (0,0) to (100,0) along +X.
+        // In AutoCAD LWPolyline, bulge = tan(theta/4), positive = CCW from A to B.
+        // Therefore, for bulge > 0, the arc bulges to the RIGHT of A->B (negative Y),
+        // with midpoint at (50, -50 * bulge).
+        var pts = LineworkGeometry.TessellateBulge(new Vec2(0, 0), new Vec2(100, 0), bulge);
+        Assert.True(pts.Length >= 3);
+        var mid = pts[pts.Length / 2];
+        var expectedMidY = -50.0 * bulge;
+        Assert.Equal(50.0, mid.X, 4);
+        Assert.Equal(expectedMidY, mid.Y, 4);
+
+        // All tessellated vertices must lie on the circle of radius R = (chord/4)*(b + 1/b).
+        var centerY = 25.0 * (1.0 - bulge * bulge) / bulge;
+        var radius = 25.0 * (Math.Abs(bulge) + 1.0 / Math.Abs(bulge));
+        foreach (var p in pts)
+        {
+            var d = Math.Sqrt((p.X - 50.0) * (p.X - 50.0) + (p.Y - centerY) * (p.Y - centerY));
+            Assert.Equal(radius, d, 5);
+        }
+    }
+
+    [Fact]
+    public void SegmentGridHandlesLongDiagonalWithTinyToleranceWithoutHanging()
+    {
+        // A 10,000-unit diagonal segment with cellSize = 0.1 has a 100,000 x 100,000 bounding box
+        // (10^10 cells). Exact slice traversal touches only the cells along the segment tube.
+        var grid = new SegmentGrid(0.1);
+        grid.Insert(0, 0, 0, 10000, 10000);
+
+        var hits = grid.Query(5000, 5000, 5000, 5000, 0.2);
+        Assert.Contains(0, hits);
+
+        var miss = grid.Query(5000, 5010, 5000, 5010, 0.2);
+        Assert.DoesNotContain(0, miss);
+    }
+
+    [Fact]
+    public void SegmentGridHandlesNegativeSlopeLongDiagonalLargePadAndVn2000Coordinates()
+    {
+        // 1. Negative-slope long diagonal: (0, 100) -> (100, 0) on a 0.5m grid (200x200 bbox = 40,000 cells > 256).
+        // Querying with a negative-slope segment (20, 80) -> (80, 20) or interior point (27.3, 72.7) must hit!
+        var grid = new SegmentGrid(0.5);
+        grid.Insert(0, 0, 100, 100, 0);
+        grid.Insert(1, 30, 70, 31, 69); // short segment along the negative diagonal
+
+        Assert.Contains(0, grid.Query(27.3, 72.7, 27.3, 72.7, 0.2));
+        // Querying with a long negative-slope segment (0, 100) -> (100, 0) must find the short segment 1 at (30, 70)
+        // (previously failed when NearestDist/NearestSeg passed Min/Max bbox corners instead of true endpoints!).
+        Assert.Contains(1, grid.Query(0, 100, 100, 0, 0.3));
+
+        // 2. Large pad (> 8 cells): segment at y = 25m on a 0.5m grid is 50 cells away from y = 0.
+        // Querying at (50, 0) with pad = 30m (60 cells) must find it (previously failed when padCells was clamped to 8).
+        var padGrid = new SegmentGrid(0.5);
+        padGrid.Insert(7, 45, 25, 55, 25);
+        Assert.Contains(7, padGrid.Query(50, 0, 50, 0, pad: 30.0));
+
+        // 3. VN2000 millimeter coordinates (~600,000,000 mm, 1,200,000,000 mm) with tiny cellSize = 0.1 mm
+        // exceed int.MaxValue cell index (1.2e10 > 2.14e9); (long, long) cell keys prevent overflow.
+        var vnGrid = new SegmentGrid(0.1);
+        const double vx = 600_000_000.0;
+        const double vy = 1_200_000_000.0;
+        vnGrid.Insert(42, vx, vy, vx + 10.0, vy - 10.0);
+        Assert.Contains(42, vnGrid.Query(vx + 5.0, vy - 5.0, vx + 5.0, vy - 5.0, 0.2));
+    }
+
+    [Fact]
+    public void CoverageMatchesNegativeSlopeLongDiagonalPipeRuns()
+    {
+        // 50 m negative-slope diagonal pipe from (0, 50000) to (50000, 0) in mm (bbox = 100x100m = 40,000 cells on 0.5m grid).
+        var ents = Parse("L|M-P-WD|0,50000,0|50000,0,0");
+        var segs = LineworkFlattener.Flatten(ents);
+        var model = new List<(double x1, double y1, double x2, double y2, string? id)>
+        {
+            (0, 50, 50, 0, "diag-neg-1")
+        };
+
+        var rep = CoverageEngine.Compare(
+            ents, segs, model,
+            unitsPerMeter: 1000, modelUnitsPerMeter: 1,
+            toleranceMeters: 0.3, stepMeters: 0.5, minCoverageFraction: 0.5);
+
+        Assert.Empty(rep.Missing);
+        Assert.Empty(rep.Partial);
+        Assert.Empty(rep.Extra);
+        Assert.InRange(rep.CadCoveragePct, 99.0, 100.0);
+    }
+
+    [Fact]
+    public void ParserIsCultureInvariantUnderViVn()
+    {
+        var prev = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("vi-VN");
+            var ents = Parse("L|M-P-WD|1234.56,7890.12,0|2234.56,7890.12,0");
+            var e = Assert.Single(ents);
+            Assert.Equal(1000.0, e.Length, 3);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = prev;
+        }
+    }
+
+    // ---------- real data (uses env fixture or deterministic synthetic metro dataset) ----------
+
+    internal static List<LineworkEntity> LoadRealOrSyntheticDump()
+    {
+        if (!string.IsNullOrWhiteSpace(DumpPath) && File.Exists(DumpPath))
+        {
+            return LineworkDumpParser.ParseFile(DumpPath);
+        }
+
+        var lines = new List<string>(2300);
+        for (var i = 0; i < 1100; i++)
+        {
+            var x0 = (i % 50) * 2000;
+            var y0 = (i / 50) * 2000;
+            lines.Add($"L|20260724_BF floor plans$0$A-Drainage-Pipe|{x0},{y0},0|{x0 + 1800},{y0},0");
+        }
+
+        for (var i = 0; i < 120; i++)
+        {
+            var x0 = i * 1000;
+            lines.Add($"L|M-P-WD|{x0},0,0|{x0 + 1000},0,0");
+            if (i % 3 == 0)
+            {
+                lines.Add($"L|M-P-WD|{x0 + 1000},0,0|{x0 + 1000},1500,0");
+            }
+        }
+
+        for (var i = 0; i < 800; i++)
+        {
+            var x0 = i * 500;
+            lines.Add($"L|A-WALL|{x0},10000,0|{x0 + 400},10000,0");
+        }
+
+        return LineworkDumpParser.Parse(lines);
+    }
+
+    internal static List<(double x1, double y1, double x2, double y2, string? id)> LoadRealOrSyntheticModel()
+    {
+        if (!string.IsNullOrWhiteSpace(ModelPath) && File.Exists(ModelPath))
+        {
+            var modelJson = File.ReadAllText(ModelPath);
+            var dtos = System.Text.Json.JsonSerializer.Deserialize<PipeSegmentDto[]>(modelJson, ForgeJson.Options)!;
+            return dtos.Where(d => d.TryGetSegment(out _, out _, out _, out _))
+                .Select(d =>
+                {
+                    d.TryGetSegment(out var x1, out var y1, out var x2, out var y2);
+                    return (x1, y1, x2, y2, id: d.Id?.ToString());
+                })
+                .ToList();
+        }
+
+        var model = new List<(double x1, double y1, double x2, double y2, string? id)>(1100);
+        for (var i = 0; i < 100; i++)
+        {
+            model.Add((i * 1.0, 0, (i + 1) * 1.0, 0, $"wd-{i}"));
+        }
+
+        for (var i = 0; i < 950; i++)
+        {
+            var x0 = (i % 50) * 2.0;
+            var y0 = (i / 50) * 2.0;
+            model.Add((x0, y0, x0 + 1.8, y0, $"dr-{i}"));
+        }
+
+        return model;
+    }
 
     [Fact]
     public void RealDumpParsesExpectedLayers()
     {
-        if (!File.Exists(DumpPath))
-        {
-            return; // evidence file absent on CI
-        }
-
-        var ents = LineworkDumpParser.ParseFile(DumpPath);
+        var ents = LoadRealOrSyntheticDump();
         Assert.True(ents.Count > 2000);
         var layers = ents.GroupBy(e => e.Layer).ToDictionary(g => g.Key, g => g.Count());
         Assert.True(layers["20260724_BF floor plans$0$A-Drainage-Pipe"] > 1000);
@@ -291,12 +466,7 @@ public sealed class LineworkEngineTests
     [Fact]
     public void RealDumpTopologyOnMpWd()
     {
-        if (!File.Exists(DumpPath))
-        {
-            return;
-        }
-
-        var ents = LineworkDumpParser.ParseFile(DumpPath);
+        var ents = LoadRealOrSyntheticDump();
         var filtered = LineworkQuery.Apply(ents, new LineworkQueryArgs { LayerFilter = "M-P-WD" });
         var segs = LineworkFlattener.Flatten(filtered.Entities);
         var rep = TopologyBuilder.Build(filtered.Entities, segs, vertexTolerance: 10, junctionTolerance: 50, includeCrossings: true);
@@ -312,20 +482,10 @@ public sealed class LineworkEngineTests
     [Fact]
     public void RealCoverageProducesReport()
     {
-        if (!File.Exists(DumpPath) || !File.Exists(ModelPath))
-        {
-            return;
-        }
-
-        var ents = LineworkDumpParser.ParseFile(DumpPath);
+        var ents = LoadRealOrSyntheticDump();
         var filtered = LineworkQuery.Apply(ents, new LineworkQueryArgs { LayerFilter = "M-P-*" });
         var segs = LineworkFlattener.Flatten(filtered.Entities);
-
-        var modelJson = File.ReadAllText(ModelPath);
-        var dtos = System.Text.Json.JsonSerializer.Deserialize<PipeSegmentDto[]>(modelJson, ForgeJson.Options)!;
-        var model = dtos.Where(d => d.TryGetSegment(out _, out _, out _, out _))
-            .Select(d => { d.TryGetSegment(out var x1, out var y1, out var x2, out var y2); return (x1, y1, x2, y2, id: d.Id?.ToString()); })
-            .ToList();
+        var model = LoadRealOrSyntheticModel();
 
         var rep = CoverageEngine.Compare(filtered.Entities, segs, model,
             unitsPerMeter: 1000, modelUnitsPerMeter: 1, toleranceMeters: 0.3, stepMeters: 0.5, minCoverageFraction: 0.5);

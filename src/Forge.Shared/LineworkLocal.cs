@@ -371,6 +371,11 @@ public static class LineworkLocal
         long? overlayBytes = null;
         if (!string.IsNullOrWhiteSpace(args.OverlayPath))
         {
+            if (!IsAllowedArtifactPath(args.OverlayPath, ".svg"))
+            {
+                return ForgeResult.Failure(command.Id, "invalid_output_path", "overlayPath must end with .svg.");
+            }
+
             try
             {
                 LineworkSvg.WriteCompareOverlay(
@@ -482,12 +487,28 @@ public static class LineworkLocal
         e.SegCount
     };
 
+    internal static bool IsAllowedArtifactPath(string path, params string[] allowedExtensions)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        var ext = Path.GetExtension(path);
+        return allowedExtensions.Any(a => string.Equals(ext, a, StringComparison.OrdinalIgnoreCase));
+    }
+
     /// <summary>Write the full payload to outputPath when requested; the response then carries a summary + path.</summary>
     private static ForgeResult WriteArtifactOrSuccess(ForgeCommand command, LineworkQueryArgs args, object data, string artifactName)
     {
         if (string.IsNullOrWhiteSpace(args.OutputPath))
         {
             return ForgeResult.Success(command.Id, data);
+        }
+
+        if (!IsAllowedArtifactPath(args.OutputPath, ".json"))
+        {
+            return ForgeResult.Failure(command.Id, "invalid_output_path", "outputPath must end with .json.");
         }
 
         try

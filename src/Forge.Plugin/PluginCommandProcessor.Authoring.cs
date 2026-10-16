@@ -78,39 +78,220 @@ public sealed partial class PluginCommandProcessor
         }
     }
 
-    internal static Entity? TryOpenEntityForWrite(Database db, Transaction tr, string handle)
-    {
-        var id = TryResolveHandle(db, handle);
-        return id is null ? null : tr.GetObject(id.Value, OpenMode.ForWrite) as Entity;
-    }
+    /// <summary>
+    /// Write-opens the entity for a handle, or null when the handle is unknown, erased, not an
+    /// entity, or the entity sits on a locked layer (never throws eWasErased / eOnLockedLayer).
+    /// Use the overload with <see cref="EntityOpenStatus"/> to report which of these applied.
+    /// </summary>
+    internal static Entity? TryOpenEntityForWrite(Database db, Transaction tr, string handle) =>
+        TryOpenEntityForWrite(db, tr, handle, out _);
+
+    internal static Entity? TryOpenEntityForWrite(Database db, Transaction tr, string handle, out EntityOpenStatus status) =>
+        TryOpenEntity(db, tr, handle, forWrite: true, out status);
 
     internal static Entity? TryOpenEntityForRead(Database db, Transaction tr, string handle)
     {
-        var id = TryResolveHandle(db, handle);
-        return id is null ? null : tr.GetObject(id.Value, OpenMode.ForRead) as Entity;
+        var entity = TryOpenEntity(db, tr, handle, forWrite: false, out _);
+        return entity is not null && IsInLayoutSpace(tr, entity) ? entity : null;
     }
+
+    /// <summary>
+    /// True when <paramref name="entity"/> is a top-level entity residing directly inside a layout
+    /// block (ModelSpace or PaperSpace), excluding sub-entities (<see cref="AttributeReference"/>,
+    /// <see cref="Vertex"/>), block-definition members, and the root paper-space viewport (#1).
+    /// </summary>
+    internal static bool IsInLayoutSpace(Transaction tr, Entity entity) =>
+        entity is not (AttributeReference or Vertex)
+        && !(entity is Viewport vp && vp.Number == 1)
+        && !entity.OwnerId.IsNull
+        && !entity.OwnerId.IsErased
+        && tr.GetObject(entity.OwnerId, OpenMode.ForRead) is BlockTableRecord { IsLayout: true };
 
     /// <summary>
     /// Resolves explicit handle strings to write-opened entities. Unknown handles are reported
     /// per handle and skipped — the caller surfaces them in the result; nothing is partially
-    /// modified silently.
+    /// modified silently. Erased handles count as unknown. Entities on a locked layer go to
+    /// <paramref name="locked"/> when supplied, otherwise to <paramref name="unknown"/>.
     /// </summary>
-    internal static List<Entity> OpenHandlesForWrite(Database db, Transaction tr, IEnumerable<string> handles, List<string> unknown)
+    internal static List<Entity> OpenHandlesForWrite(Database db, Transaction tr, IEnumerable<string> handles, List<string> unknown, List<string>? locked = null)
     {
         var opened = new List<Entity>();
+        var seen = new HashSet<ObjectId>();
         foreach (var handle in handles)
         {
-            var entity = TryOpenEntityForWrite(db, tr, handle);
+            var entity = TryOpenEntityForWrite(db, tr, handle, out var status);
             if (entity is null)
             {
-                unknown.Add(handle);
+                if (status == EntityOpenStatus.LayerLocked && locked is not null)
+                {
+                    locked.Add(handle);
+                }
+                else
+                {
+                    unknown.Add(handle);
+                }
+
                 continue;
             }
 
-            opened.Add(entity);
+            if (seen.Add(entity.ObjectId))
+            {
+                opened.Add(entity);
+            }
         }
 
         return opened;
+    }
+
+    /// <summary>Why <see cref="TryOpenEntity"/> returned (or did not return) an entity.</summary>
+    internal enum EntityOpenStatus
+    {
+        Ok,
+        NotFound,
+        Erased,
+        NotAnEntity,
+        LayerLocked,
+        NotInLayout
+    }
+
+    /// <summary>
+    /// Opens the entity for a handle without throwing: unknown/invalid handle → NotFound, erased
+    /// object → Erased, non-entity object → NotAnEntity. For write the entity is opened for read
+    /// first, verified to reside directly in a layout block (ModelSpace or PaperSpace — never inside
+    /// a block definition, AttributeReference, Vertex sub-entity, or root paper-space viewport #1),
+    /// and its layer checked; a locked layer → LayerLocked, otherwise it is upgraded to write.
+    /// </summary>
+    internal static Entity? TryOpenEntity(Database db, Transaction tr, string handle, bool forWrite, out EntityOpenStatus status)
+    {
+        var id = TryResolveHandle(db, handle);
+        if (id is null || id.Value.IsNull || !id.Value.IsValid)
+        {
+            status = EntityOpenStatus.NotFound;
+            return null;
+        }
+
+        if (id.Value.IsErased)
+        {
+            status = EntityOpenStatus.Erased;
+            return null;
+        }
+
+        DBObject obj;
+        try
+        {
+            obj = tr.GetObject(id.Value, OpenMode.ForRead, false);
+        }
+        catch (Autodesk.AutoCAD.Runtime.Exception)
+        {
+            status = EntityOpenStatus.NotFound;
+            return null;
+        }
+
+        if (obj is not Entity entity)
+        {
+            status = EntityOpenStatus.NotAnEntity;
+            return null;
+        }
+
+        if (forWrite)
+        {
+            if (!IsInLayoutSpace(tr, entity))
+            {
+                status = EntityOpenStatus.NotInLayout;
+                return null;
+            }
+
+            if (IsOnLockedLayer(tr, entity))
+            {
+                status = EntityOpenStatus.LayerLocked;
+                return null;
+            }
+
+            if (!entity.IsWriteEnabled)
+            {
+                entity.UpgradeOpen();
+            }
+        }
+
+        status = EntityOpenStatus.Ok;
+        return entity;
+    }
+
+    /// <summary>True when the entity's layer is locked (writes would throw eOnLockedLayer).</summary>
+    internal static bool IsOnLockedLayer(Transaction tr, Entity entity)
+    {
+        var layerId = entity.LayerId;
+        return !layerId.IsNull && tr.GetObject(layerId, OpenMode.ForRead) is LayerTableRecord { IsLocked: true };
+    }
+
+    /// <summary>Stable error code for a failed open: layer_locked, handle_erased, not_an_entity, not_in_layout, handle_not_found.</summary>
+    internal static string OpenStatusCode(EntityOpenStatus status) => status switch
+    {
+        EntityOpenStatus.LayerLocked => "layer_locked",
+        EntityOpenStatus.Erased => "handle_erased",
+        EntityOpenStatus.NotAnEntity => "not_an_entity",
+        EntityOpenStatus.NotInLayout => "not_in_layout",
+        _ => "handle_not_found"
+    };
+
+    /// <summary>
+    /// Appends an entity that already carries its properties to the block that owns its source
+    /// (model space, a paper-space layout or a block definition) instead of always model space.
+    /// Falls back to model space when the owner is null or not a block table record.
+    /// </summary>
+    internal static ObjectId AppendToOwner(Database db, Transaction tr, ObjectId ownerId, Entity entity)
+    {
+        BlockTableRecord owner;
+        if (!ownerId.IsNull && !ownerId.IsErased && tr.GetObject(ownerId, OpenMode.ForRead) is BlockTableRecord btr)
+        {
+            if (!btr.IsWriteEnabled)
+            {
+                btr.UpgradeOpen();
+            }
+
+            owner = btr;
+        }
+        else
+        {
+            owner = ModelSpaceForWrite(db, tr);
+        }
+
+        var id = owner.AppendEntity(entity);
+        tr.AddNewlyCreatedDBObject(entity, true);
+        return id;
+    }
+
+    /// <summary>
+    /// Deep-clones a database-resident entity (including owned sub-entities such as
+    /// <see cref="AttributeReference"/>s on a <see cref="BlockReference"/> or <see cref="Vertex2d"/>s
+    /// on a <see cref="Polyline2d"/>) into <paramref name="targetOwnerId"/> via
+    /// <see cref="Database.DeepCloneObjects"/> and returns the clone opened for write.
+    /// </summary>
+    internal static Entity CloneEntityToOwner(Database db, Transaction tr, Entity source, ObjectId targetOwnerId)
+    {
+        var ownerId = !targetOwnerId.IsNull && !targetOwnerId.IsErased
+                      && tr.GetObject(targetOwnerId, OpenMode.ForRead) is BlockTableRecord
+            ? targetOwnerId
+            : ((BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead))[BlockTableRecord.ModelSpace];
+
+        if (!source.ObjectId.IsNull)
+        {
+            var ids = new ObjectIdCollection { source.ObjectId };
+            var mapping = new IdMapping();
+            db.DeepCloneObjects(ids, ownerId, mapping, false);
+            if (mapping.Contains(source.ObjectId))
+            {
+                var pair = mapping[source.ObjectId];
+                if (pair.IsCloned && !pair.Value.IsNull)
+                {
+                    return (Entity)tr.GetObject(pair.Value, OpenMode.ForWrite);
+                }
+            }
+        }
+
+        var fallback = (Entity)source.Clone();
+        AppendToOwner(db, tr, ownerId, fallback);
+        return fallback;
     }
 
     /// <summary>[x, y] or [x, y, z] → Point3d. Anything else throws (surfaced as invalid_args).</summary>
@@ -125,6 +306,33 @@ public sealed partial class PluginCommandProcessor
     }
 
     internal static double DegreesToRadians(double degrees) => degrees * Math.PI / 180.0;
+
+    internal static double RadiansToDegrees(double radians) => radians * 180.0 / Math.PI;
+
+    internal static ForgeResult? ValidateColorIndex(ForgeCommand command, int? colorIndex)
+    {
+        if (colorIndex is null)
+        {
+            return null;
+        }
+
+        if (colorIndex is < 0 or > 256)
+        {
+            return ForgeResult.Failure(command.Id, "invalid_color", "colorIndex must be 0 (ByBlock), 1–255 (ACI), or 256 (ByLayer).");
+        }
+
+        return null;
+    }
+
+    internal static void ApplyLayerAndColor(Entity entity, string? layer, int? colorIndex)
+    {
+        if (!string.IsNullOrWhiteSpace(layer))
+        {
+            entity.Layer = layer!;
+        }
+
+        ApplyColor(entity, colorIndex);
+    }
 
     /// <summary>True when the layer table holds the exact name (case-insensitive per CAD rules).</summary>
     internal static bool LayerExists(Database db, Transaction tr, string layer)

@@ -370,7 +370,7 @@ public static class CompareEngine
     {
         var best = double.MaxValue;
         var bestIdx = -1;
-        foreach (var ri in grid.Query(Math.Min(q.x1, q.x2), Math.Min(q.y1, q.y2), Math.Max(q.x1, q.x2), Math.Max(q.y1, q.y2), pad))
+        foreach (var ri in grid.Query(q.x1, q.y1, q.x2, q.y2, pad))
         {
             var r = refSegs[ri];
             var d = LineworkGeometry.SegSegDist(q.x1, q.y1, q.x2, q.y2, r.x1, r.y1, r.x2, r.y2);

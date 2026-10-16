@@ -15,7 +15,7 @@ public sealed class ForgeMcpResources
            ?? "# Capability matrix\nSee repository docs/capability-matrix.md";
 
     [McpServerResource(UriTemplate = "forge://profiles/{name}", Name = "ToolProfile", MimeType = "application/json")]
-    [Description("JSON allowlist of tools for profile core|plot|qa.")]
+    [Description("JSON allowlist of tools for profile core|plot|qa|linework|authoring.")]
     public static string ToolProfile(string name)
     {
         if (!ToolProfiles.TryGet(name, out var tools))

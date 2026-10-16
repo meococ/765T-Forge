@@ -118,7 +118,7 @@ public sealed partial class PluginCommandProcessor
         {
             placements = kind == "rectangular"
                 ? BuildRectangularPlacements(args)
-                : BuildPolarPlacements(args, placementBases: null);
+                : BuildPolarPlacements(args, sourceBbox: null);
         }
         catch (ArgumentException ex)
         {
@@ -129,6 +129,15 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, ex.Code, ex.Message, "Reduce rows/columns/count or split into several array calls.");
         }
 
+        if ((long)placements.Count * args.Handles!.Length > ArrayMaxClones)
+        {
+            return ForgeResult.Failure(
+                command.Id,
+                "array_too_large",
+                $"Total array clones ({(long)placements.Count * args.Handles.Length}) exceeds maximum of {ArrayMaxClones}.",
+                "Reduce rows/columns/count or pass fewer source handles per call.");
+        }
+
         if (command.DryRun)
         {
             return DryRun(command, new { args.Kind, sources = args.Handles!.Length, placements, totalClones = placements.Count * args.Handles.Length });
@@ -136,22 +145,9 @@ public sealed partial class PluginCommandProcessor
 
         var db = ActiveDb;
         using var tr = db.TransactionManager.StartTransaction();
-        // Polar "keep orientation" needs each source's bbox center, available only inside the
-        // transaction — rebuild the placements now that we can read the entities.
-        if (kind == "polar")
-        {
-            var bases = new List<(double[]? Bbox, Point3d Center)>();
-            foreach (var handle in args.Handles!)
-            {
-                var source = TryOpenEntityForRead(db, tr, handle);
-                bases.Add((source is null ? null : TryExtents(source), ToPoint3d(args.Center)));
-            }
-
-            placements = BuildPolarPlacements(args, bases);
-        }
-
         var unknown = new List<string>();
         var created = new List<Entity>();
+        var seen = new HashSet<ObjectId>();
         foreach (var handle in args.Handles!)
         {
             var source = TryOpenEntityForRead(db, tr, handle);
@@ -161,13 +157,31 @@ public sealed partial class PluginCommandProcessor
                 continue;
             }
 
-            foreach (var placement in placements)
+            if (!seen.Add(source.ObjectId))
             {
-                var clone = (Entity)source.Clone();
+                continue;
+            }
+
+            // Polar "keep orientation" needs each source's own bbox center, available inside the transaction.
+            var entityPlacements = kind == "polar" && !args.RotateItems
+                ? BuildPolarPlacements(args, TryExtents(source))
+                : placements;
+
+            foreach (var placement in entityPlacements)
+            {
+                var clone = CloneEntityToOwner(db, tr, source, source.OwnerId);
                 clone.TransformBy(placement);
-                AppendExistingToModelSpace(db, tr, clone);
                 created.Add(clone);
             }
+        }
+
+        if (created.Count == 0)
+        {
+            return ForgeResult.Failure(
+                command.Id,
+                "handle_not_found",
+                "No valid layout entities found for the supplied handles.",
+                data: new { unknownHandles = unknown });
         }
 
         var newHandles = created.Select(HandleString).ToArray();
@@ -179,8 +193,8 @@ public sealed partial class PluginCommandProcessor
             verification: new ForgeVerification
             {
                 Attempted = true,
-                Passed = created.Count > 0,
-                Message = "Array placements applied to clones; sources untouched.",
+                Passed = created.Count > 0 && unknown.Count == 0,
+                Message = "Array placements applied to deep clones; sources untouched.",
                 ReadBack = readBack
             });
     }
@@ -194,9 +208,26 @@ public sealed partial class PluginCommandProcessor
             throw new DrawStepException("invalid_args", "rows and columns must be at least 1.");
         }
 
-        if (args.RowSpacing == 0 && args.ColSpacing == 0)
+        if (rows == 1 && columns == 1)
         {
-            throw new DrawStepException("invalid_args", "At least one of rowSpacing / colSpacing must be non-zero.");
+            throw new DrawStepException("invalid_args", "At least one of rows or columns must be greater than 1.");
+        }
+
+        var rowSpacing = args.RowSpacing ?? 0;
+        var colSpacing = args.ColSpacing ?? 0;
+        if (double.IsNaN(rowSpacing) || double.IsInfinity(rowSpacing) ||
+            double.IsNaN(colSpacing) || double.IsInfinity(colSpacing))
+        {
+            throw new DrawStepException("invalid_args", "rowSpacing and colSpacing must be finite numbers.");
+        }
+
+        if ((rowSpacing == 0 && colSpacing == 0) ||
+            (rows > 1 && rowSpacing == 0) ||
+            (columns > 1 && colSpacing == 0))
+        {
+            throw new DrawStepException(
+                "invalid_args",
+                "Non-zero rowSpacing is required when rows > 1, and non-zero colSpacing is required when columns > 1.");
         }
 
         if ((long)rows * columns - 1 > ArrayMaxClones)
@@ -214,14 +245,14 @@ public sealed partial class PluginCommandProcessor
                     continue; // the source occupies the origin placement
                 }
 
-                placements.Add(Matrix3d.Displacement(new Vector3d(c * (args.ColSpacing ?? 0), r * (args.RowSpacing ?? 0), 0)));
+                placements.Add(Matrix3d.Displacement(new Vector3d(c * colSpacing, r * rowSpacing, 0)));
             }
         }
 
         return placements;
     }
 
-    private static List<Matrix3d> BuildPolarPlacements(EntityArrayArgs args, List<(double[]? Bbox, Point3d Center)>? placementBases)
+    private static List<Matrix3d> BuildPolarPlacements(EntityArrayArgs args, double[]? sourceBbox)
     {
         if (args.Center is null)
         {
@@ -235,18 +266,22 @@ public sealed partial class PluginCommandProcessor
         }
 
         var totalDegrees = args.AngleTotalDeg ?? 360;
-        if (totalDegrees == 0)
+        if (totalDegrees == 0 || double.IsNaN(totalDegrees) || double.IsInfinity(totalDegrees) || Math.Abs(totalDegrees) > 360)
         {
-            throw new DrawStepException("invalid_args", "angleTotalDeg must not be 0.");
+            throw new DrawStepException("invalid_args", "angleTotalDeg must be non-zero and within [-360, 360].");
         }
 
         var center = ToPoint3d(args.Center);
-        var stepDegrees = totalDegrees / count;
+        // Full 360° circle spaces items evenly around the circle (360 / count) so the last item does not
+        // overlap the source; partial arcs (< 360°) span inclusive of both ends (totalDegrees / (count - 1)).
+        var stepDegrees = Math.Abs(Math.Abs(totalDegrees) - 360.0) <= 1e-6
+            ? totalDegrees / count
+            : totalDegrees / (count - 1);
         var placements = new List<Matrix3d>();
         for (var i = 1; i < count; i++)
         {
             var rotation = Matrix3d.Rotation(DegreesToRadians(stepDegrees * i), Vector3d.ZAxis, center);
-            if (args.RotateItems || placementBases is null)
+            if (args.RotateItems || sourceBbox is null)
             {
                 placements.Add(rotation);
                 continue;
@@ -254,14 +289,7 @@ public sealed partial class PluginCommandProcessor
 
             // Keep the item's orientation: rotate its bbox center around the array center,
             // then translate by the difference instead of spinning the geometry.
-            var baseBbox = placementBases[i - 1].Bbox;
-            if (baseBbox is null)
-            {
-                placements.Add(rotation);
-                continue;
-            }
-
-            var itemCenter = new Point3d((baseBbox[0] + baseBbox[3]) / 2, (baseBbox[1] + baseBbox[4]) / 2, (baseBbox[2] + baseBbox[5]) / 2);
+            var itemCenter = new Point3d((sourceBbox[0] + sourceBbox[3]) / 2, (sourceBbox[1] + sourceBbox[4]) / 2, (sourceBbox[2] + sourceBbox[5]) / 2);
             var rotatedCenter = itemCenter.TransformBy(rotation);
             placements.Add(Matrix3d.Displacement(rotatedCenter - itemCenter));
         }

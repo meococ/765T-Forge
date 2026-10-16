@@ -34,3 +34,7 @@ artifacts/
 # mistyped build outputs (dotnet build "artifactsverify --nologo")
 artifactsverify*/
 **/artifactsverify*/
+
+# Local LISP scratch / internal job scripts (never ship in product repo)
+lisp-lib/
+

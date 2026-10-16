@@ -167,6 +167,7 @@ public sealed class BatchJobState
 {
     public string DwgPath { get; init; } = "";
     public string ScriptPath { get; init; } = "";
+    public int? TimeoutSeconds { get; init; }
     public string Status { get; set; } = "pending"; // pending|running|ok|failed|skipped
     public string? ErrorCode { get; set; }
     public string? Message { get; set; }

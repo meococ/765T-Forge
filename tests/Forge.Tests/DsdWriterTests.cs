@@ -13,7 +13,12 @@ public sealed class DsdWriterTests
         Assert.Contains("[DWF6Sheet:A101]", text);
         Assert.Contains("[DWF6Sheet:A102]", text);
         Assert.Contains(@"Dwg=C:\lab\host.dwg", text);
-        Assert.Contains(@"Path=C:\out\set.pdf", text);
+        Assert.Contains(@"DWF=C:\out\set.pdf", text);
+        Assert.Contains(@"OUT=C:\out", text);
+        Assert.Contains("[SheetSet Properties]", text);
+
+        var multiFileText = DsdWriter.Build(@"C:\lab\host.dwg", @"C:\out\set.pdf", ["A101"], singlePdf: false);
+        Assert.Contains("Type=5", multiFileText);
     }
 
     [Fact]

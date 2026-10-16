@@ -68,6 +68,11 @@ public sealed record CadTransform
 
     public void SaveFile(string path)
     {
+        if (!LineworkLocal.IsAllowedArtifactPath(path, ".json"))
+        {
+            throw new ArgumentException("transformPath must end with .json.");
+        }
+
         var full = Path.GetFullPath(path);
         Directory.CreateDirectory(Path.GetDirectoryName(full)!);
         File.WriteAllText(full, JsonSerializer.Serialize(this, ForgeJson.Options));
@@ -238,7 +243,7 @@ public static class TransformFitter
         return Finish(xf, pairs);
     }
 
-    /// <summary>Full 6-parameter affine fit via normal equations. Least-squares, needs >=3 pairs.</summary>
+    /// <summary>Full 6-parameter affine fit via centered normal equations. Least-squares, needs >=3 non-collinear pairs.</summary>
     public static FitResult FitAffine(IReadOnlyList<(double cx, double cy, double rx, double ry)> pairs)
     {
         if (pairs.Count < 3)
@@ -246,42 +251,53 @@ public static class TransformFitter
             throw new ArgumentException("Affine fit needs at least 3 pairs.");
         }
 
-        // Solve [x' ; y'] = [m11 m12 tx ; m21 m22 ty] [x y 1] via two 3x3 normal systems.
-        double sxx = 0, sxy = 0, syy = 0, sx = 0, sy = 0;
-        double sxr = 0, syr = 0, sr = 0, sxs = 0, sys = 0, ss = 0;
+        var cbx = pairs.Average(p => p.cx);
+        var cby = pairs.Average(p => p.cy);
+        var rbx = pairs.Average(p => p.rx);
+        var rby = pairs.Average(p => p.ry);
+
+        double sxx = 0, sxy = 0, syy = 0;
+        double sxr = 0, syr = 0, sxs = 0, sys = 0;
         foreach (var p in pairs)
         {
-            sxx += p.cx * p.cx;
-            sxy += p.cx * p.cy;
-            syy += p.cy * p.cy;
-            sx += p.cx;
-            sy += p.cy;
-            sxr += p.cx * p.rx;
-            syr += p.cy * p.rx;
-            sr += p.rx;
-            sxs += p.cx * p.ry;
-            sys += p.cy * p.ry;
-            ss += p.ry;
+            var ux = p.cx - cbx;
+            var uy = p.cy - cby;
+            var vx = p.rx - rbx;
+            var vy = p.ry - rby;
+            sxx += ux * ux;
+            sxy += ux * uy;
+            syy += uy * uy;
+            sxr += ux * vx;
+            syr += uy * vx;
+            sxs += ux * vy;
+            sys += uy * vy;
         }
 
-        double[,] m =
+        var trace = sxx + syy;
+        var det2 = sxx * syy - sxy * sxy;
+        // Scale-invariant collinearity check: det(Cov) / trace(Cov)^2 == 0 when points lie on a line.
+        // Require the minor axis variance to be at least ~1e-5 of the major axis span.
+        if (trace <= 1e-18 || det2 <= 1e-10 * trace * trace)
         {
-            { sxx, sxy, sx },
-            { sxy, syy, sy },
-            { sx, sy, pairs.Count }
-        };
-        var row1 = Solve3(m, [sxr, syr, sr]);
-        var row2 = Solve3(m, [sxs, sys, ss]);
+            throw new ArgumentException("Calibration pairs are collinear or nearly collinear: affine fit requires non-collinear anchors spanning 2D.");
+        }
+
+        var m11 = (syy * sxr - sxy * syr) / det2;
+        var m12 = (-sxy * sxr + sxx * syr) / det2;
+        var m21 = (syy * sxs - sxy * sys) / det2;
+        var m22 = (-sxy * sxs + sxx * sys) / det2;
+        var tx = rbx - (m11 * cbx + m12 * cby);
+        var ty = rby - (m21 * cbx + m22 * cby);
 
         var xf = new CadTransform
         {
             Kind = "affine",
-            M11 = row1[0],
-            M12 = row1[1],
-            Tx = row1[2],
-            M21 = row2[0],
-            M22 = row2[1],
-            Ty = row2[2]
+            M11 = m11,
+            M12 = m12,
+            Tx = tx,
+            M21 = m21,
+            M22 = m22,
+            Ty = ty
         };
         return Finish(xf, pairs);
     }
@@ -483,6 +499,11 @@ public static class CoordTransformTool
 
             if (!string.IsNullOrWhiteSpace(args.TransformPath))
             {
+                if (!LineworkLocal.IsAllowedArtifactPath(args.TransformPath, ".json"))
+                {
+                    return ForgeResult.Failure(command.Id, "invalid_output_path", "transformPath must end with .json.");
+                }
+
                 try
                 {
                     xf.SaveFile(args.TransformPath);

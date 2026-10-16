@@ -2,6 +2,8 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using Autodesk.AutoCAD.ApplicationServices;
+using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.Geometry;
 using Forge.Shared;
 
 namespace Forge.Plugin;
@@ -9,7 +11,8 @@ namespace Forge.Plugin;
 // docs/cad-authoring-tools.md C24 — forge_view_capture. The agent's eyes: PrintWindow renders
 // AutoCAD's main window into a bitmap even while the window is in the background (U-C4N's
 // screenshot approach); the MCP client reads the PNG to visually verify what was drawn.
-// Read-only on the drawing — the only optional mutation is a ZOOM Extents when fit=true.
+// Read-only on the drawing — when fit=true, adjusts the active ViewTableRecord via SetCurrentView
+// (never invokes _.ZOOM, so AutoCAD's undo stack is untouched).
 public sealed partial class PluginCommandProcessor
 {
     // PW_RENDERFULLCONTENT: DWM-composited windows render black or stale frames without it.
@@ -48,8 +51,8 @@ public sealed partial class PluginCommandProcessor
         {
             try
             {
-                ActiveEditor.Command("_.ZOOM", "_E");
-                fitNote = "zoom extents applied before capture";
+                ZoomCurrentViewToExtents();
+                fitNote = "zoom extents applied via SetCurrentView before capture";
             }
             catch (System.Exception ex)
             {
@@ -126,6 +129,33 @@ public sealed partial class PluginCommandProcessor
                 $"Capture failed: {ex.Message}",
                 "Check the output directory is writable.");
         }
+    }
+
+    private static void ZoomCurrentViewToExtents()
+    {
+        var db = ActiveDb;
+        db.UpdateExt(false);
+        var inPaperSpace = !db.TileMode && db.PaperSpaceVportId == ActiveEditor.CurrentViewportObjectId;
+        var min = inPaperSpace ? db.Pextmin : db.Extmin;
+        var max = inPaperSpace ? db.Pextmax : db.Extmax;
+        if (max.X < min.X || max.Y < min.Y || double.IsInfinity(min.X) || double.IsInfinity(max.X))
+        {
+            return;
+        }
+
+        using var view = ActiveEditor.GetCurrentView();
+        var aspect = view.Height > 1e-9 && view.Width > 1e-9 ? view.Width / view.Height : 1.5;
+        var extW = Math.Max((max.X - min.X) * 1.05, 1e-3);
+        var extH = Math.Max((max.Y - min.Y) * 1.05, 1e-3);
+        var wcsToDcs = Matrix3d.WorldToPlane(view.ViewDirection)
+                       * Matrix3d.Displacement(Point3d.Origin - view.Target)
+                       * Matrix3d.Rotation(-view.ViewTwist, view.ViewDirection, view.Target);
+        var center3d = new Point3d(0.5 * (min.X + max.X), 0.5 * (min.Y + max.Y), 0.5 * (min.Z + max.Z)).TransformBy(wcsToDcs);
+        view.CenterPoint = new Point2d(center3d.X, center3d.Y);
+        view.Height = Math.Max(extH, extW / Math.Max(aspect, 1e-3));
+        view.Width = view.Height * aspect;
+        ActiveEditor.SetCurrentView(view);
+        ActiveEditor.UpdateScreen();
     }
 
     [DllImport("user32.dll")]

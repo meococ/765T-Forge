@@ -47,12 +47,45 @@ public sealed class SafetyPolicyTests
     [Theory]
     [InlineData("LAYDEL")]
     [InlineData("(ssget \"X\") (command \"ERASE\")")]
+    [InlineData("(command \"_.ERASE\" (ssget \"_X\") \"\")")]
+    [InlineData("(command \"_.ERASE\" (ssget \"_A\") \"\")")]
+    [InlineData("(setq s (ssget \"_X\")) (entdel (ssname s 0))")]
+    [InlineData("E\nALL\n")]
+    [InlineData("PU\nA\n*\nN\n")]
+    [InlineData("(setvar \"SECURELOAD\" 0)")]
+    [InlineData("(setvar \"TRUSTEDPATHS\" \"C:\\\\temp\")")]
+    [InlineData("(startapp \"cmd.exe\" \"/c whoami\")")]
+    [InlineData("(vlax-create-object \"WScript.Shell\")")]
+    [InlineData("SHELL whoami")]
+    [InlineData("(command \"_.SHELL\" \"whoami\")")]
+    [InlineData("NETLOAD C:\\x\\evil.dll")]
+    [InlineData("(command \"_.NETLOAD\" \"C:\\\\x\\\\evil.dll\")")]
+    [InlineData("(load \"C:\\\\temp\\\\x.lsp\")")]
+    [InlineData("(open \"...acaddoc.lsp\" \"w\") (write-line \"x\")")]
+    [InlineData("(vl-file-copy \"x.lsp\" \"...\\\\acaddoc.lsp\")")]
+    [InlineData("(command \"_.SAVEAS\" \"\" \"D:\\\\...\\\\A-101.dwg\")")]
+    [InlineData("(command \"_.QUIT\" \"_Y\")")]
+    [InlineData("(vlax-invoke o 'Delete)")]
+    [InlineData("(vla-getinterfaceobject acad \"WScript.Shell\")")]
+    [InlineData("(eval (read (strcat \"(st\" \"artapp ...\")))")]
+    [InlineData("(setvar (strcat \"SECURE\" \"LOAD\") 0)")]
     public void HighValueDestructivePatternsAreDenied(string commandText)
     {
         var decision = _policy.EvaluateText("forge_exec_lisp", commandText);
 
-        Assert.False(decision.Allowed);
+        Assert.False(decision.Allowed, $"Expected '{commandText}' to be denied, but it was allowed.");
         Assert.StartsWith("deny_", decision.Code);
+    }
+
+    [Theory]
+    [InlineData("-LAYER M PU")]
+    [InlineData("-INSERT PU-VALVE")]
+    [InlineData("text \"E ALL PIPES\"")]
+    public void AliasRegexDoesNotFalsePositiveOnLayerBlockOrText(string commandText)
+    {
+        var decision = _policy.EvaluateText("forge_exec_command", commandText);
+
+        Assert.True(decision.Allowed, $"Expected '{commandText}' to be allowed, but got {decision.Code}: {decision.Message}");
     }
 
     [Fact]
@@ -85,18 +118,25 @@ public sealed class SafetyPolicyTests
         Assert.True(decision.Allowed);
     }
 
-    [Fact]
-    public void DotnetExecutorRequiresUnsafeAcknowledgement()
+    [Theory]
+    [InlineData("forge_exec_dotnet", "1 + 1")]
+    [InlineData("forge_exec_command", "REGEN")]
+    [InlineData("forge_exec_lisp", "(+ 1 2)")]
+    public void AllGenericExecutorsRequireUnsafeAcknowledgement(string tool, string payload)
     {
-        var command = new ForgeCommand
+        var unacknowledged = new ForgeCommand
         {
-            Tool = "forge_exec_dotnet",
-            Args = ForgeJson.ToElement(new { code = "1 + 1" })
+            Tool = tool,
+            UnsafeAcknowledged = false,
+            Args = ForgeJson.ToElement(new { code = payload, command = payload })
         };
 
-        var decision = _policy.Evaluate(command);
+        var denied = _policy.Evaluate(unacknowledged);
+        Assert.False(denied.Allowed);
+        Assert.Equal("unsafe_not_acknowledged", denied.Code);
 
-        Assert.False(decision.Allowed);
-        Assert.Equal("unsafe_not_acknowledged", decision.Code);
+        var acknowledged = unacknowledged with { UnsafeAcknowledged = true };
+        var allowed = _policy.Evaluate(acknowledged);
+        Assert.True(allowed.Allowed, $"Expected acknowledged benign {tool} call to be allowed, got {allowed.Code}");
     }
 }

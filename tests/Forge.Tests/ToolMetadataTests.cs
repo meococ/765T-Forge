@@ -73,6 +73,7 @@ public sealed class ToolMetadataTests
             var meta = ForgeToolRegistry.Get(attr.Name!);
             Assert.Equal(meta.ReadOnly, attr.ReadOnly);
             Assert.Equal(meta.Destructive, attr.Destructive);
+            Assert.Equal(meta.Idempotent, attr.Idempotent);
             Assert.Equal(meta.OpenWorld, attr.OpenWorld);
         }
     }
@@ -87,7 +88,11 @@ public sealed class ToolMetadataTests
                  {
                      "forge_draw_line", "forge_draw_polyline", "forge_draw_circle", "forge_draw_arc",
                      "forge_draw_text", "forge_draw_mtext", "forge_draw_hatch", "forge_draw_dimension",
-                     "forge_draw_batch", "forge_block_insert", "forge_layer_create"
+                     "forge_draw_batch", "forge_block_insert", "forge_layer_create",
+                     "forge_draw_rectangle", "forge_draw_polygon", "forge_draw_ellipse", "forge_draw_spline",
+                     "forge_draw_revcloud", "forge_draw_leader", "forge_draw_table",
+                     "forge_linetype_load",
+                     "forge_draw_grid", "forge_draw_wall"
                  })
         {
             var tool = ForgeToolRegistry.Get(name);
@@ -101,7 +106,9 @@ public sealed class ToolMetadataTests
                  {
                      "forge_entity_move", "forge_entity_copy", "forge_entity_rotate", "forge_entity_scale",
                      "forge_entity_mirror", "forge_entity_offset", "forge_entity_erase", "forge_entity_set_props",
-                     "forge_block_create"
+                     "forge_block_create",
+                     "forge_entity_fillet", "forge_entity_chamfer", "forge_entity_trim",
+                     "forge_entity_extend", "forge_entity_join", "forge_entity_explode"
                  })
         {
             var tool = ForgeToolRegistry.Get(name);
@@ -114,7 +121,12 @@ public sealed class ToolMetadataTests
         Assert.True(ForgeToolRegistry.Get("forge_entity_get").ReadOnly);
         Assert.True(ForgeToolRegistry.Get("forge_entity_list").ReadOnly);
         Assert.True(ForgeToolRegistry.Get("forge_block_list").ReadOnly);
+        Assert.True(ForgeToolRegistry.Get("forge_entity_intersect").ReadOnly);
+        Assert.True(ForgeToolRegistry.Get("forge_drawing_summary").ReadOnly);
+        Assert.True(ForgeToolRegistry.Get("forge_entity_search_text").ReadOnly);
+        Assert.True(ForgeToolRegistry.Get("forge_entity_snap").ReadOnly);
         Assert.True(ForgeToolRegistry.Get("forge_layer_create").Idempotent);
+        Assert.True(ForgeToolRegistry.Get("forge_linetype_load").Idempotent);
 
         // C24 — capture/measure/export never rewrite the drawing; array is a mutation with
         // backup; the CSV importer is additive like the other draw tools.
@@ -135,4 +147,178 @@ public sealed class ToolMetadataTests
         Assert.False(csvTool.RequiresBackup);
         Assert.True(ForgeToolRegistry.Get("forge_layer_set").Idempotent);
     }
+
+    [Fact]
+    public void StyleToolsAreDestructiveWithBackupButNeedNoAcknowledgement()
+    {
+        // C27: style_text_create / style_dim_create refuse an existing style (style_exists) unless
+        // updateExisting=true; in update mode they restyle existing annotations, so they carry a
+        // pre-write backup. Same params → same style state (idempotent). Typed params only, so
+        // SafetyPolicy allows them without any extra acknowledgement.
+        var policy = new SafetyPolicy();
+        foreach (var name in new[] { "forge_style_text_create", "forge_style_dim_create" })
+        {
+            var tool = ForgeToolRegistry.Get(name);
+            Assert.Equal("style", tool.Group);
+            Assert.False(tool.ReadOnly);
+            Assert.True(tool.Destructive);
+            Assert.True(tool.RequiresBackup);
+            Assert.True(tool.Idempotent);
+            Assert.False(tool.OpenWorld);
+            Assert.False(tool.Unsafe);
+
+            var decision = policy.Evaluate(new ForgeCommand
+            {
+                Tool = name,
+                Args = ForgeJson.ToElement(new { name = "Standard", updateExisting = true })
+            });
+            Assert.True(decision.Allowed, $"{name}: {decision.Code}");
+        }
+    }
+
+    [Fact]
+    public void McpToolAnnotationsAreConsistent()
+    {
+        foreach (var meta in ForgeToolRegistry.All)
+        {
+            if (meta.ReadOnly)
+            {
+                Assert.False(meta.Destructive, $"{meta.Name} cannot be both ReadOnly and Destructive.");
+                Assert.True(meta.Idempotent, $"{meta.Name} is ReadOnly so it must be Idempotent.");
+                Assert.False(meta.RequiresBackup, $"{meta.Name} is ReadOnly so it must not require backup.");
+            }
+        }
+
+        // Artifact-writing tools must not advertise ReadOnly=true.
+        Assert.False(ForgeToolRegistry.Get("forge_qa_preflight").ReadOnly);
+        Assert.False(ForgeToolRegistry.Get("forge_sheet_inventory_import").ReadOnly);
+        foreach (var lw in new[]
+                 {
+                     "forge_linework_dump", "forge_linework_topology", "forge_linework_coverage",
+                     "forge_linework_trace", "forge_linework_segments", "forge_linework_transform",
+                     "forge_linework_compare"
+                 })
+        {
+            Assert.False(ForgeToolRegistry.Get(lw).ReadOnly, $"{lw} writes outputPath/overlayPath/transformPath and must not be ReadOnly.");
+        }
+    }
+
+    [Fact]
+    public void ServerOptionsExposeClearIdentityAndInstructions()
+    {
+        var mcp = new ModelContextProtocol.Server.McpServerOptions();
+        ForgeMcpHost.ApplyServerOptions(mcp);
+
+        Assert.Equal(ForgeConstants.ServerName, mcp.ServerInfo?.Name);
+        Assert.Equal(ForgeConstants.ProductVersion, mcp.ServerInfo?.Version);
+        Assert.Contains("forge_system_health", mcp.ServerInstructions);
+        Assert.Contains("dryRun", mcp.ServerInstructions);
+    }
+
+    [Fact]
+    public void BusinessFailuresBecomeMcpErrorResultsWithStructuredPayload()
+    {
+        var failure = ForgeResult.Failure("cmd-1", "dwg_not_found", "DWG missing.");
+        var callResult = new ModelContextProtocol.Protocol.CallToolResult
+        {
+            Content =
+            [
+                new ModelContextProtocol.Protocol.TextContentBlock
+                {
+                    Text = System.Text.Json.JsonSerializer.Serialize(failure, ForgeJson.Options)
+                }
+            ]
+        };
+
+        var filtered = ForgeCallToolResults.MarkBusinessFailure(callResult);
+        Assert.True(filtered.IsError);
+
+        var ok = ForgeResult.Success("cmd-2", new { status = "ok" });
+        var okCallResult = new ModelContextProtocol.Protocol.CallToolResult
+        {
+            Content =
+            [
+                new ModelContextProtocol.Protocol.TextContentBlock
+                {
+                    Text = System.Text.Json.JsonSerializer.Serialize(ok, ForgeJson.Options)
+                }
+            ]
+        };
+
+        var okFiltered = ForgeCallToolResults.MarkBusinessFailure(okCallResult);
+        Assert.NotEqual(true, okFiltered.IsError);
+    }
+
+    [Fact]
+    public void BusinessFailureKeepsSummaryAndFullEnvelopeForTextOnlyClients()
+    {
+        var failure = ForgeResult.Failure(
+            "cmd-3",
+            "linetype_not_found_in_file",
+            "Linetype(s) not defined in acadiso.lin: FOO",
+            "Use standard names.",
+            data: new { names = new[] { "FOO" }, loadedLinetypes = new[] { "Continuous" } });
+        var callResult = new ModelContextProtocol.Protocol.CallToolResult
+        {
+            Content =
+            [
+                new ModelContextProtocol.Protocol.TextContentBlock
+                {
+                    Text = System.Text.Json.JsonSerializer.Serialize(failure, ForgeJson.Options)
+                }
+            ]
+        };
+
+        var filtered = ForgeCallToolResults.MarkBusinessFailure(callResult);
+        Assert.True(filtered.IsError);
+        var texts = filtered.Content.OfType<ModelContextProtocol.Protocol.TextContentBlock>().Select(b => b.Text).ToArray();
+        Assert.Equal(2, texts.Length);
+
+        // Block 1: short human summary.
+        Assert.Contains("linetype_not_found_in_file", texts[0]);
+        Assert.Contains("Use standard names.", texts[0]);
+
+        // Block 2: the full envelope, data included.
+        using var envelope = System.Text.Json.JsonDocument.Parse(texts[1]);
+        var root = envelope.RootElement;
+        Assert.False(root.GetProperty("ok").GetBoolean());
+        Assert.Equal("linetype_not_found_in_file", root.GetProperty("error").GetProperty("code").GetString());
+        Assert.Equal("FOO", root.GetProperty("data").GetProperty("names")[0].GetString());
+        Assert.Equal("Continuous", root.GetProperty("data").GetProperty("loadedLinetypes")[0].GetString());
+    }
+
+    [Fact]
+    public void EveryProfileToolExistsInRegistry()
+    {
+        var registry = ForgeToolRegistry.All.Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Assert.NotEmpty(ToolProfiles.Names);
+        foreach (var profile in ToolProfiles.Names)
+        {
+            Assert.True(ToolProfiles.TryGet(profile, out var tools), $"Profile '{profile}' listed in Names but TryGet failed.");
+            Assert.NotEmpty(tools);
+            var unknown = tools.Where(t => !registry.Contains(t)).ToArray();
+            Assert.True(unknown.Length == 0, $"Profile '{profile}' references unregistered tools: {string.Join(", ", unknown)}");
+            var duplicates = tools.GroupBy(t => t, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1).Select(g => g.Key).ToArray();
+            Assert.True(duplicates.Length == 0, $"Profile '{profile}' lists tools twice: {string.Join(", ", duplicates)}");
+        }
+    }
+
+    [Fact]
+    public void RegistryCountEqualsMcpServerToolAttributesInSource()
+    {
+        var source = File.ReadAllText(Path.Combine(PluginDispatchSyncTests.RepoPath("src", "Forge.Server"), "ForgeMcpTools.cs"));
+        var names = System.Text.RegularExpressions.Regex
+            .Matches(source, @"\[McpServerTool\(\s*Name\s*=\s*""(forge_[a-z0-9_]+)""")
+            .Select(m => m.Groups[1].Value)
+            .ToArray();
+        var attributeCount = System.Text.RegularExpressions.Regex.Matches(source, @"\[McpServerTool\(").Count;
+
+        Assert.Equal(attributeCount, names.Length); // every attribute carries an explicit Name
+        Assert.Equal(names.Length, names.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Equal(ForgeToolRegistry.All.Count, names.Length);
+        var registry = ForgeToolRegistry.All.Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Assert.True(registry.SetEquals(names), "Registry and [McpServerTool] names differ.");
+    }
+
+    private sealed class MpcOptionsProbe;
 }

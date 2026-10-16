@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Globalization;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
@@ -19,6 +20,28 @@ public sealed partial class PluginCommandProcessor
     private readonly SafetyPolicy _safetyPolicy;
     private readonly BackupPlanner _backupPlanner;
     private readonly FileAuditSink _auditSink;
+
+    /// <summary>
+    /// Non-ReadOnly tools that write files, session state, or zoom the view without editing the
+    /// active drawing database — wrapping them in UNDO BE/E would cause forge_undo to pop a zoom
+    /// or no-op group instead of the user's previous geometry edit.
+    /// </summary>
+    private static readonly HashSet<string> SkipUndoMarkTools = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "forge_undo",
+        "forge_view_capture",
+        "forge_qa_preflight",
+        "forge_registry_load",
+        "forge_pack_load",
+        "forge_pack_and_go",
+        "forge_doc_open",
+        "forge_doc_new",
+        "forge_doc_save",
+        "forge_doc_export_dxf",
+        "forge_plot_to_pdf",
+        "forge_plot_publish",
+        "forge_sheet_inventory_import"
+    };
 
     /// <summary>docs/cad-job-tools.md C2 — the year this build targets, from the ForgeTargetYear assembly stamp.</summary>
     private static readonly int? TargetYear = ReadTargetYear();
@@ -41,7 +64,9 @@ public sealed partial class PluginCommandProcessor
 
     public ForgeResult Process(ForgeCommand command)
     {
-        if (!string.Equals(command.AuthToken, _environment.Token, StringComparison.Ordinal))
+        var tokenBytes = Encoding.UTF8.GetBytes(command.AuthToken ?? "");
+        var expectedBytes = Encoding.UTF8.GetBytes(_environment.Token ?? "");
+        if (!CryptographicOperations.FixedTimeEquals(tokenBytes, expectedBytes))
         {
             return ForgeResult.Failure(command.Id, "unauthorized", "Invalid Forge named pipe token.");
         }
@@ -152,8 +177,30 @@ public sealed partial class PluginCommandProcessor
             "forge_doc_new" => DocNew(command),
             "forge_doc_export_dxf" => ExportDxf(command),
             "forge_draw_polyline_from_csv" => DrawPolylineFromCsv(command),
+            "forge_draw_rectangle" => DrawRectangle(command),
+            "forge_draw_polygon" => DrawPolygon(command),
+            "forge_draw_ellipse" => DrawEllipse(command),
+            "forge_draw_spline" => DrawSpline(command),
+            "forge_draw_revcloud" => DrawRevCloud(command),
+            "forge_draw_leader" => DrawLeader(command),
+            "forge_draw_table" => DrawTable(command),
             "forge_measure_batch" => MeasureBatch(command),
             "forge_entity_array" => EntityArray(command),
+            "forge_entity_fillet" => EntityFillet(command),
+            "forge_entity_chamfer" => EntityChamfer(command),
+            "forge_entity_trim" => EntityTrim(command),
+            "forge_entity_extend" => EntityExtend(command),
+            "forge_entity_join" => EntityJoin(command),
+            "forge_entity_explode" => EntityExplode(command),
+            "forge_entity_intersect" => EntityIntersect(command),
+            "forge_linetype_load" => LinetypeLoad(command),
+            "forge_style_text_create" => StyleTextCreate(command),
+            "forge_style_dim_create" => StyleDimCreate(command),
+            "forge_drawing_summary" => DrawingSummary(command),
+            "forge_entity_search_text" => EntitySearchText(command),
+            "forge_entity_snap" => EntitySnap(command),
+            "forge_draw_grid" => DrawGrid(command),
+            "forge_draw_wall" => DrawWall(command),
             "forge_view_capture" => ViewCapture(command),
             "forge_qa_verify_titleblock" => VerifyTitleblock(command),
             "forge_qa_check_xrefs" => CheckXrefs(command),
@@ -183,7 +230,8 @@ public sealed partial class PluginCommandProcessor
             _ => ForgeResult.Failure(command.Id, "unknown_tool", $"Unknown Forge tool: {command.Tool}")
         };
 
-        var result = metadata.ReadOnly || command.DryRun
+        var skipUndo = metadata.ReadOnly || command.DryRun || SkipUndoMarkTools.Contains(command.Tool) || LineworkLocal.IsLineworkTool(command.Tool);
+        var result = skipUndo
             ? Dispatch()
             : WithUndoMark(Dispatch);
 
@@ -196,32 +244,84 @@ public sealed partial class PluginCommandProcessor
         };
     }
 
+    private static readonly Dictionary<IntPtr, int> UndoDepthByDb = new();
+
+    internal static int GetTrackedUndoDepth(Database db)
+    {
+        lock (UndoDepthByDb)
+        {
+            return UndoDepthByDb.TryGetValue(db.UnmanagedObject, out var depth) ? depth : 0;
+        }
+    }
+
+    internal static bool TryDecrementTrackedUndoDepth(Database db, out int remaining)
+    {
+        lock (UndoDepthByDb)
+        {
+            if (UndoDepthByDb.TryGetValue(db.UnmanagedObject, out var depth) && depth > 0)
+            {
+                remaining = depth - 1;
+                UndoDepthByDb[db.UnmanagedObject] = remaining;
+                return true;
+            }
+
+            remaining = 0;
+            return false;
+        }
+    }
+
+    private static void IncrementTrackedUndoDepth(Database db)
+    {
+        lock (UndoDepthByDb)
+        {
+            UndoDepthByDb.TryGetValue(db.UnmanagedObject, out var depth);
+            UndoDepthByDb[db.UnmanagedObject] = depth + 1;
+        }
+    }
+
     private static ForgeResult WithUndoMark(Func<ForgeResult> action)
     {
         // AutoCAD 2026 Document no longer exposes StartUndoMark/EndUndoMark on the managed Document type.
-        // Use a synchronous UNDO group so typed writes remain one Ctrl+Z unit when possible.
+        // Use a synchronous UNDO Begin/End group so typed writes remain one Ctrl+Z unit when possible.
+        var openedGroup = false;
         try
         {
-            ActiveEditor.Command("_.UNDO", "_M");
+            ActiveEditor.Command("_.UNDO", "_BE");
+            openedGroup = true;
         }
         catch
         {
-            // Best effort — still execute the action if undo mark cannot be opened.
+            // Best effort — still execute the action if undo group cannot be opened.
         }
 
+        ForgeResult? result = null;
         try
         {
-            return action();
+            result = action();
+            return result;
         }
         finally
         {
-            try
+            if (openedGroup)
             {
-                ActiveEditor.Command("_.UNDO", "_E");
-            }
-            catch
-            {
-                // Best effort close.
+                try
+                {
+                    ActiveEditor.Command("_.UNDO", "_E");
+                    if (result is { Ok: true })
+                    {
+                        IncrementTrackedUndoDepth(ActiveDb);
+                    }
+                    else
+                    {
+                        // Failed or exception-aborted write: pop the empty/aborted undo group
+                        // so a subsequent forge_undo reverts the previous valid write, not a no-op group.
+                        ActiveEditor.Command("_.U");
+                    }
+                }
+                catch
+                {
+                    // Best effort close/cleanup.
+                }
             }
         }
     }
@@ -332,6 +432,11 @@ public sealed partial class PluginCommandProcessor
         if (string.IsNullOrWhiteSpace(args.Name))
         {
             return ForgeResult.Failure(command.Id, "missing_var_name", "System variable name is required.");
+        }
+
+        if (SysvarPolicy.Reject(command.Id, args.Name) is { } denied)
+        {
+            return denied;
         }
 
         if (command.DryRun)
@@ -1077,6 +1182,7 @@ public sealed partial class PluginCommandProcessor
             ? (isModel ? "Extents" : "Layout")
             : args.PlotArea!;
 
+        var plotStartedUtc = DateTimeOffset.UtcNow;
         var previousFileDia = Application.GetSystemVariable("FILEDIA");
         var previousBgPlot = Application.GetSystemVariable("BACKGROUNDPLOT");
         Application.SetSystemVariable("FILEDIA", 0);
@@ -1139,8 +1245,10 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, "plot_no_output", $"Plot ran but no PDF was produced at {outputPath}.", "Check the output directory is writable and the layout has plottable content.");
         }
 
-        return ForgeResult.Success(
+        var probe = PdfProbeResult.Probe(outputPath, expectedPages: 1, notBeforeUtc: plotStartedUtc);
+        return PlotPdfGate.FromProbe(
             command.Id,
+            probe,
             new
             {
                 outputPath,
@@ -1148,14 +1256,8 @@ public sealed partial class PluginCommandProcessor
                 device,
                 paperSize,
                 plotStyle,
-                bytes = new FileInfo(outputPath).Length
-            },
-            verification: new ForgeVerification
-            {
-                Attempted = true,
-                Passed = true,
-                Message = "PDF file exists after plot.",
-                ReadBack = new { outputPath, exists = true }
+                bytes = probe.Bytes,
+                pdfProbe = probe
             });
     }
 
@@ -1187,12 +1289,14 @@ public sealed partial class PluginCommandProcessor
             });
         }
 
-        if (File.Exists(outputPath) && !args.OverwriteAcknowledged)
+        var candidateTargets = DsdWriter.GetCandidateOutputPaths(dwgPath!, outputPath, args.Layouts, args.SinglePdf);
+        var existingTarget = candidateTargets.FirstOrDefault(File.Exists);
+        if (existingTarget is not null && !args.OverwriteAcknowledged)
         {
             return ForgeResult.Failure(
                 command.Id,
                 "publish_overwrite_not_acknowledged",
-                $"Refusing to overwrite existing publish output: {outputPath}",
+                $"Refusing to overwrite existing publish output: {existingTarget}",
                 "Pass overwriteAcknowledged=true after confirming the previous issue set is archived.");
         }
 
@@ -1214,6 +1318,7 @@ public sealed partial class PluginCommandProcessor
             }
         }
 
+        var publishStartedUtc = DateTimeOffset.UtcNow;
         var dsdPath = Path.Combine(Path.GetTempPath(), $"forge-publish-{command.Id}.dsd");
         var previousBgPlot = Application.GetSystemVariable("BACKGROUNDPLOT");
         Application.SetSystemVariable("BACKGROUNDPLOT", 0);
@@ -1249,16 +1354,75 @@ public sealed partial class PluginCommandProcessor
             }
         }
 
-        if (!File.Exists(outputPath))
+        PdfProbeResult probe;
+        long totalBytes;
+        DateTimeOffset? mtimeUtc;
+        string[] producedFiles;
+
+        if (args.SinglePdf)
         {
-            return ForgeResult.Failure(
-                command.Id,
-                "publish_no_output",
-                $"Publisher finished but output was not found at {outputPath}.",
-                "Check plot log and that layouts contain plottable content.");
+            if (!File.Exists(outputPath))
+            {
+                return ForgeResult.Failure(
+                    command.Id,
+                    "publish_no_output",
+                    $"Publisher finished but output was not found at {outputPath}.",
+                    "Check plot log and that layouts contain plottable content.");
+            }
+
+            probe = PdfProbeResult.Probe(outputPath, expectedPages: args.Layouts.Length, notBeforeUtc: publishStartedUtc);
+            totalBytes = new FileInfo(outputPath).Length;
+            mtimeUtc = File.GetLastWriteTimeUtc(outputPath);
+            producedFiles = [outputPath];
+        }
+        else
+        {
+            var resolved = new List<string>(args.Layouts.Length);
+            var missingLayouts = new List<string>();
+            foreach (var layout in args.Layouts)
+            {
+                var sheetPath = DsdWriter.ResolveSheetOutputPath(dwgPath!, outputPath, layout, args.Layouts.Length);
+                if (sheetPath is null)
+                {
+                    missingLayouts.Add(layout);
+                }
+                else
+                {
+                    resolved.Add(sheetPath);
+                }
+            }
+
+            if (missingLayouts.Count > 0)
+            {
+                return ForgeResult.Failure(
+                    command.Id,
+                    "publish_no_output",
+                    $"Publisher finished (singlePdf=false) but per-sheet PDFs were not found for layouts: {string.Join(", ", missingLayouts)}.",
+                    "Check plot log and that layouts contain plottable content.");
+            }
+
+            producedFiles = resolved.ToArray();
+            var sheetProbes = producedFiles.Select(p => PdfProbeResult.Probe(p, expectedPages: 1, notBeforeUtc: publishStartedUtc)).ToArray();
+            totalBytes = sheetProbes.Sum(p => p.Bytes);
+            mtimeUtc = producedFiles.Select(File.GetLastWriteTimeUtc).Max();
+            var allPassed = sheetProbes.All(p => p.Passed);
+            var totalPages = sheetProbes.All(p => p.PageCount.HasValue) ? sheetProbes.Sum(p => p.PageCount!.Value) : (int?)null;
+            probe = new PdfProbeResult
+            {
+                Exists = sheetProbes.All(p => p.Exists),
+                Bytes = totalBytes,
+                NonEmpty = sheetProbes.All(p => p.NonEmpty),
+                PageCount = totalPages,
+                ExpectedPages = args.Layouts.Length,
+                PageCountMatches = totalPages == args.Layouts.Length,
+                Passed = allPassed,
+                Message = allPassed
+                    ? $"All {producedFiles.Length} per-layout PDFs passed probe."
+                    : string.Join("; ", sheetProbes.Where(p => !p.Passed).Select(p => p.Message)),
+                Warnings = sheetProbes.SelectMany(p => p.Warnings).ToArray()
+            };
         }
 
-        var probe = PdfProbeResult.Probe(outputPath, expectedPages: args.SinglePdf ? args.Layouts.Length : 1);
         var receipt = new PublishReceipt
         {
             DocumentPath = dwgPath,
@@ -1266,32 +1430,53 @@ public sealed partial class PluginCommandProcessor
             Layouts = args.Layouts,
             SinglePdf = args.SinglePdf,
             PreflightReportId = args.RequirePreflight ? "preflight" : null,
-            OutputBytes = new FileInfo(outputPath).Length,
-            OutputMtimeUtc = File.GetLastWriteTimeUtc(outputPath),
+            OutputBytes = totalBytes,
+            OutputMtimeUtc = mtimeUtc,
             PdfProbe = probe,
             VerificationPassed = probe.Passed,
-            Message = probe.Passed ? "Publish + PDF probe passed." : "Publish wrote a file but PDF probe failed."
+            Message = probe.Passed ? "Publish + PDF probe passed." : $"Publish wrote output but PDF probe failed: {probe.Message}"
         };
-        receipt.ArtifactPath = PublishReceipt.TryWriteArtifact(receipt);
+        receipt.ArtifactPath = PublishReceipt.TryWriteArtifact(receipt, out var receiptError);
+        if (receiptError is not null)
+        {
+            receipt.Message = $"{receipt.Message} (Receipt artifact not persisted: {receiptError})";
+        }
 
-        return ForgeResult.Success(
-            command.Id,
-            new
+        var payload = new
+        {
+            outputPath,
+            producedFiles,
+            layouts = args.Layouts,
+            singlePdf = args.SinglePdf,
+            bytes = receipt.OutputBytes,
+            dsd = true,
+            receipt,
+            receiptError
+        };
+        var verification = new ForgeVerification
+        {
+            Attempted = true,
+            Passed = probe.Passed,
+            Message = receipt.Message,
+            ReadBack = receipt
+        };
+
+        if (!probe.Passed)
+        {
+            return new ForgeResult
             {
-                outputPath,
-                layouts = args.Layouts,
-                singlePdf = args.SinglePdf,
-                bytes = receipt.OutputBytes,
-                dsd = true,
-                receipt
-            },
-            verification: new ForgeVerification
-            {
-                Attempted = true,
-                Passed = probe.Passed,
-                Message = receipt.Message,
-                ReadBack = receipt
-            });
+                Id = command.Id,
+                Ok = false,
+                Error = new ForgeError(
+                    PlotPdfGate.FailedCode,
+                    receipt.Message ?? "Publish output failed PDF probe verification.",
+                    "Inspect data.receipt.pdfProbe for details (header, %%EOF trailer, freshness, and page count)."),
+                Data = payload,
+                Verification = verification
+            };
+        }
+
+        return ForgeResult.Success(command.Id, payload, verification: verification);
     }
 
     private static ForgeResult VerifyTitleblock(ForgeCommand command)
@@ -1336,12 +1521,22 @@ public sealed partial class PluginCommandProcessor
     private static ForgeResult Readback(ForgeCommand command)
     {
         var args = Args<ReadbackArgs>(command);
+        if (args.Keys is not null && args.Keys.TryGetValue("handle", out var handle) && !string.IsNullOrWhiteSpace(handle))
+        {
+            return EntityGet(new ForgeCommand { Id = command.Id, Tool = "forge_entity_get", Args = ForgeJson.ToElement(new { handle }) });
+        }
+
+        if (args.TargetTool == "forge_system_setvar" && args.Keys is not null && args.Keys.TryGetValue("name", out var varName) && !string.IsNullOrWhiteSpace(varName))
+        {
+            return GetVar(new ForgeCommand { Id = command.Id, Tool = "forge_system_getvar", Args = ForgeJson.ToElement(new { name = varName }) });
+        }
+
         return args.TargetTool switch
         {
             "forge_xref_repath" or "forge_xref_reload" => ListXrefs(command),
             "forge_block_set_attr" => ListBlockAttributes(command),
-            "forge_system_setvar" => ForgeResult.Success(command.Id, new { message = "Call forge_system_getvar with the variable name for precise read-back." }),
-            _ => ForgeResult.Success(command.Id, new { message = $"No specialized read-back registered for {args.TargetTool}." })
+            "forge_system_setvar" => ForgeResult.Success(command.Id, new { message = "Call forge_system_getvar with the variable name (or pass keys.name) for precise read-back.", keys = args.Keys }),
+            _ => ForgeResult.Success(command.Id, new { message = $"No specialized read-back registered for {args.TargetTool}.", keys = args.Keys })
         };
     }
 
@@ -1369,6 +1564,11 @@ public sealed partial class PluginCommandProcessor
         if (string.IsNullOrWhiteSpace(args.Command))
         {
             return ForgeResult.Failure(command.Id, "missing_command", "command is required.");
+        }
+
+        if (!command.UnsafeAcknowledged)
+        {
+            return ForgeResult.Failure(command.Id, "unsafe_not_acknowledged", "forge_exec_command requires unsafeAcknowledged=true.");
         }
 
         if (command.DryRun)
@@ -1415,6 +1615,11 @@ public sealed partial class PluginCommandProcessor
         if (string.IsNullOrWhiteSpace(args.Lisp))
         {
             return ForgeResult.Failure(command.Id, "missing_lisp", "lisp is required.");
+        }
+
+        if (!command.UnsafeAcknowledged)
+        {
+            return ForgeResult.Failure(command.Id, "unsafe_not_acknowledged", "forge_exec_lisp requires unsafeAcknowledged=true.");
         }
 
         if (command.DryRun)
@@ -1609,7 +1814,7 @@ public sealed partial class PluginCommandProcessor
     }
     private sealed record VerifyTitleblockArgs { public Dictionary<string, string> Expected { get; init; } = []; public string? BlockName { get; init; } }
     private sealed record AuditLayerArgs { public string[] ExpectedLayers { get; init; } = []; }
-    private sealed record ReadbackArgs { public string TargetTool { get; init; } = ""; }
+    private sealed record ReadbackArgs { public string TargetTool { get; init; } = ""; public Dictionary<string, string>? Keys { get; init; } }
     private sealed record ExecCommandArgs { public string? Command { get; init; } }
     private sealed record ExecLispArgs { public string? Lisp { get; init; } }
     private sealed record ExecDotNetArgs { public string? Code { get; init; } }

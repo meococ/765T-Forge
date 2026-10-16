@@ -5,8 +5,8 @@ namespace Forge.Tests;
 
 public sealed class LineworkCompareTests
 {
-    private const string DumpPath = @"D:\FreeLancer\AEONMALL BIEN HOA\evidence\forge\pl_dump.txt";
-    private const string ModelPath = @"D:\FreeLancer\AEONMALL BIEN HOA\evidence\forge\all_pipe_segs_live.json";
+    private static string? DumpPath => Environment.GetEnvironmentVariable("FORGE_TEST_LINEWORK_DUMP");
+    private static string? ModelPath => Environment.GetEnvironmentVariable("FORGE_TEST_LINEWORK_MODEL");
 
     private static List<LineworkEntity> Parse(params string[] lines) => LineworkDumpParser.Parse(lines);
 
@@ -402,42 +402,142 @@ public sealed class LineworkCompareTests
         }
     }
 
-    // ---------- real data (gated on evidence files) ----------
+    [Fact]
+    public void AffineFitRejectsCollinearAnchors()
+    {
+        // Three collinear CAD points along Y = 2*X -> rank-deficient 2D affine system
+        var collinear = new[]
+        {
+            (cx: 0.0, cy: 0.0, rx: 10.0, ry: 20.0),
+            (cx: 1000.0, cy: 2000.0, rx: 11.0, ry: 22.0),
+            (cx: 5000.0, cy: 10000.0, rx: 15.0, ry: 30.0)
+        };
+        Assert.Throws<ArgumentException>(() => TransformFitter.FitAffine(collinear));
+    }
+
+    [Fact]
+    public void LineworkToolsRejectNonArtifactOutputPaths()
+    {
+        var dump = WriteTempDump("L|M-P-WD|0,0,0|1000,0,0");
+        try
+        {
+            var badJson = InvokeLocal("forge_linework_segments", new
+            {
+                source = "dumpFile",
+                dumpPath = dump,
+                outputPath = Path.Combine(Path.GetTempPath(), "important.dwg")
+            });
+            Assert.False(badJson.Ok);
+            Assert.Equal("invalid_output_path", badJson.Error!.Code);
+
+            var badSvg = InvokeLocal("forge_linework_compare", new
+            {
+                source = "dumpFile",
+                dumpPath = dump,
+                modelSegments = new[] { new { id = 1, x1 = 0.0, y1 = 0.0, x2 = 1.0, y2 = 0.0 } },
+                overlayPath = Path.Combine(Path.GetTempPath(), "important.dwg")
+            });
+            Assert.False(badSvg.Ok);
+            Assert.Equal("invalid_output_path", badSvg.Error!.Code);
+
+            var badTransform = CoordTransformTool.Execute(new ForgeCommand
+            {
+                Tool = "forge_linework_transform",
+                Args = ForgeJson.ToElement(new
+                {
+                    pairs = new[]
+                    {
+                        new { cad = new[] { 0.0, 0.0 }, revit = new[] { 0.0, 0.0 } },
+                        new { cad = new[] { 1000.0, 0.0 }, revit = new[] { 1.0, 0.0 } }
+                    },
+                    transformPath = Path.Combine(Path.GetTempPath(), "important.dwg")
+                })
+            });
+            Assert.False(badTransform.Ok);
+            Assert.Equal("invalid_output_path", badTransform.Error!.Code);
+        }
+        finally
+        {
+            File.Delete(dump);
+        }
+    }
+
+    [Fact]
+    public void CompareMatchesNegativeSlopeLongDiagonalAndFindsNearestWithinLargeRadius()
+    {
+        // 1. Long negative-slope CAD pipe (0, 50m) -> (50m, 0) in mm, matched against a short Revit segment
+        // at the midpoint (20, 30) -> (30, 20) plus a full matching diagonal.
+        // Previously NearestSeg passed (Math.Min, Math.Min, Math.Max, Math.Max) to SegmentGrid.Query,
+        // which ray-walked along the positive diagonal (0,0)->(50,50) and missed segments on the negative diagonal!
+        var ents = Parse(
+            "L|M-P-WD|0,50000,0|50000,0,0",
+            "L|M-P-WD|0,0,0|10000,0,0");
+        var model = new List<ModelSeg>
+        {
+            new(0, 50, 50, 0, null, null, "neg-diag"),
+            new(0, 20, 10, 20, null, null, "offset-20m") // 20m away from second CAD seg (> 8 grid cells!)
+        };
+
+        var rep = Compare(ents, model);
+        var diagItem = rep.CadItems.Single(i => i.RevitId == "neg-diag");
+        Assert.Equal("matched", diagItem.Classification);
+        Assert.True(diagItem.DistanceM < 0.01);
+
+        // Second CAD seg at y=0 has nearest model segment at y=20m (40 cells away on 0.5m grid).
+        // With searchRadiusMeters = 50, NearestSeg must find it at ~20m (not null from padCells=8 clamp!).
+        var missingItem = rep.CadItems.Single(i => i.Classification == "missing_in_revit");
+        Assert.NotNull(missingItem.DistanceM);
+        Assert.InRange(missingItem.DistanceM!.Value, 19.9, 20.1);
+        Assert.Equal("offset-20m", missingItem.RevitId);
+    }
+
+    // ---------- real data (uses env fixture or deterministic synthetic metro dataset) ----------
 
     [Fact]
     public void RealCompareProducesStableReport()
     {
-        if (!File.Exists(DumpPath) || !File.Exists(ModelPath))
+        if (!string.IsNullOrWhiteSpace(DumpPath) && !string.IsNullOrWhiteSpace(ModelPath) && File.Exists(DumpPath) && File.Exists(ModelPath))
         {
-            return; // evidence files absent on CI
+            var res = InvokeLocal("forge_linework_compare", new
+            {
+                source = "dumpFile",
+                dumpPath = DumpPath,
+                layerFilter = "M-P-*",
+                modelSegmentsPath = ModelPath,
+                toleranceMeters = 0.3
+            });
+            Assert.True(res.Ok, JsonSerializer.Serialize(res.Error));
+            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(res.Data, ForgeJson.Options));
+            var report = doc.RootElement.GetProperty("report");
+            Assert.True(report.GetProperty("cadSegCount").GetInt32() > 100);
+            Assert.True(report.GetProperty("modelSegCount").GetInt32() > 1000);
+            return;
         }
 
-        var res = InvokeLocal("forge_linework_compare", new
+        var ents = LineworkEngineTests.LoadRealOrSyntheticDump();
+        var filtered = LineworkQuery.Apply(ents, new LineworkQueryArgs { LayerFilter = "M-P-*" });
+        var segs = LineworkFlattener.Flatten(filtered.Entities);
+        var model = LineworkEngineTests.LoadRealOrSyntheticModel()
+            .Select(m => new ModelSeg(m.x1, m.y1, m.x2, m.y2, null, null, m.id))
+            .ToList();
+
+        var syntheticReport = CompareEngine.Compare(
+            filtered.Entities, segs, model, null,
+            unitsPerMeter: 1000, modelUnitsPerMeter: 1,
+            toleranceMeters: 0.3, stepMeters: 0.5, minCoverageFraction: 0.5,
+            minZ: null, maxZ: null, searchRadiusMeters: 50);
+
+        Assert.True(syntheticReport.CadSegCount > 100);
+        Assert.True(syntheticReport.ModelSegCount > 1000);
+        Assert.True(syntheticReport.CadItems.Length > 100);
+        foreach (var item in syntheticReport.CadItems)
         {
-            source = "dumpFile",
-            dumpPath = DumpPath,
-            layerFilter = "M-P-*",
-            modelSegmentsPath = ModelPath,
-            toleranceMeters = 0.3
-        });
-        Assert.True(res.Ok, JsonSerializer.Serialize(res.Error));
-        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(res.Data, ForgeJson.Options));
-        var report = doc.RootElement.GetProperty("report");
-        Assert.True(report.GetProperty("cadSegCount").GetInt32() > 100);
-        Assert.True(report.GetProperty("modelSegCount").GetInt32() > 1000);
-        var items = report.GetProperty("cadItems");
-        Assert.True(items.GetArrayLength() > 100);
-        // classifications are one of the stable enum values
-        foreach (var item in items.EnumerateArray())
-        {
-            Assert.Contains(item.GetProperty("classification").GetString(),
-                new[] { "matched", "partial", "missing_in_revit" });
+            Assert.Contains(item.Classification, new[] { "matched", "partial", "missing_in_revit" });
         }
 
-        foreach (var item in report.GetProperty("modelItems").EnumerateArray())
+        foreach (var item in syntheticReport.ModelItems)
         {
-            Assert.Contains(item.GetProperty("classification").GetString(),
-                new[] { "matched", "partial", "extra_off_cad" });
+            Assert.Contains(item.Classification, new[] { "matched", "partial", "extra_off_cad" });
         }
     }
 }

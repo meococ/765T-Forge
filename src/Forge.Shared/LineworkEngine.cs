@@ -103,51 +103,41 @@ public static class LineworkGeometry
             return [a, b];
         }
 
-        var included = 4 * Math.Atan(bulge);
         var chord = a.DistanceTo(b);
         if (chord <= 0)
         {
             return [a, b];
         }
 
-        // sagitta-based arc: radius = chord/2 * (1+b^2)/(2b); center on perpendicular.
-        var radius = chord * (1 + bulge * bulge) / (4 * Math.Abs(bulge));
-        var mx = (a.X + b.X) / 2;
-        var my = (a.Y + b.Y) / 2;
-        var d = Math.Sqrt(Math.Max(0, radius * radius - chord * chord / 4));
-        var ux = -(b.Y - a.Y) / chord; // unit perpendicular
+        // Exact signed geometry:
+        // included angle theta = 4 * atan(bulge) (positive = CCW from a to b, negative = CW).
+        // Left unit normal of chord a->b: u = (-(by - ay)/chord, (bx - ax)/chord).
+        // Signed offset from chord midpoint M to center C along u:
+        //   signedD = (chord / 2) * cot(theta / 2) = chord * (1 - bulge^2) / (4 * bulge).
+        // When 0 < bulge < 1 (minor CCW arc), signedD > 0 (center is on the LEFT of a->b).
+        // When bulge > 1 (major CCW arc), signedD < 0 (center is on the RIGHT of a->b).
+        // When -1 < bulge < 0 (minor CW arc), signedD < 0 (center is on the RIGHT of a->b).
+        var included = 4.0 * Math.Atan(bulge);
+        var radius = chord * (1.0 + bulge * bulge) / (4.0 * Math.Abs(bulge));
+        var mx = (a.X + b.X) * 0.5;
+        var my = (a.Y + b.Y) * 0.5;
+        var ux = -(b.Y - a.Y) / chord;
         var uy = (b.X - a.X) / chord;
-        // bulge>0 => counter-clockwise bulge: center sits on the left of a->b? Empirically
-        // center offset sign: for CCW arcs the center is on the right side of the chord.
-        var sign = bulge > 0 ? -1 : 1;
-        var cx = mx + sign * ux * d;
-        var cy = my + sign * uy * d;
-        var a1 = Math.Atan2(a.Y - cy, a.X - cx);
-        var a2 = Math.Atan2(b.Y - cy, b.X - cx);
-        var sweep = a2 - a1;
-        // normalize sweep to match bulge sign/magnitude
-        while (sweep <= 0) sweep += Math.PI * 2;
-        if (bulge < 0)
-        {
-            // clockwise — walk backwards
-            var pts = new List<Vec2> { a };
-            var cw = Math.PI * 2 - sweep;
-            var n = Math.Max(2, (int)Math.Ceiling(cw / (Math.PI / 12)));
-            for (var i = 1; i < n; i++)
-            {
-                var ang = a1 - cw * i / n;
-                pts.Add(new Vec2(cx + radius * Math.Cos(ang), cy + radius * Math.Sin(ang)));
-            }
+        var signedD = chord * (1.0 - bulge * bulge) / (4.0 * bulge);
+        var cx = mx + ux * signedD;
+        var cy = my + uy * signedD;
 
-            pts.Add(b);
-            return pts.ToArray();
+        var a1 = Math.Atan2(a.Y - cy, a.X - cx);
+        var n = Math.Max(2, (int)Math.Ceiling(Math.Abs(included) / (Math.PI / 12.0)));
+        if ((n & 1) != 0)
+        {
+            n++;
         }
 
-        var nn = Math.Max(2, (int)Math.Ceiling(sweep / (Math.PI / 12)));
-        var list = new List<Vec2> { a };
-        for (var i = 1; i < nn; i++)
+        var list = new List<Vec2>(n + 1) { a };
+        for (var i = 1; i < n; i++)
         {
-            var ang = a1 + sweep * i / nn;
+            var ang = a1 + included * i / n;
             list.Add(new Vec2(cx + radius * Math.Cos(ang), cy + radius * Math.Sin(ang)));
         }
 
@@ -159,7 +149,9 @@ public static class LineworkGeometry
 /// <summary>Uniform grid index over 2D segments for fast proximity queries.</summary>
 public sealed class SegmentGrid
 {
-    private readonly Dictionary<(int, int), List<int>> _cells = new();
+    private const long MaxBboxCells = 256;
+    private const long MaxInsertSlices = 131072;
+    private readonly Dictionary<(long, long), List<int>> _cells = new();
     private readonly double _cellSize;
 
     public SegmentGrid(double cellSize)
@@ -171,31 +163,140 @@ public sealed class SegmentGrid
     {
         var (cx0, cy0) = Cell(Math.Min(x1, x2), Math.Min(y1, y2));
         var (cx1, cy1) = Cell(Math.Max(x1, x2), Math.Max(y1, y2));
-        for (var cx = cx0; cx <= cx1; cx++)
+        var spanX = cx1 - cx0 + 1;
+        var spanY = cy1 - cy0 + 1;
+        if (spanX <= 16 && spanY <= 16 && spanX * spanY <= MaxBboxCells)
+        {
+            for (var cx = cx0; cx <= cx1; cx++)
+            {
+                for (var cy = cy0; cy <= cy1; cy++)
+                {
+                    AddCell(cx, cy, index);
+                }
+            }
+
+            return;
+        }
+
+        var dx = x2 - x1;
+        var dy = y2 - y1;
+        if (Math.Abs(dx) >= Math.Abs(dy))
+        {
+            if (spanX <= MaxInsertSlices)
+            {
+                for (var cx = cx0; cx <= cx1; cx++)
+                {
+                    SliceRangeY(cx, x1, y1, dx, dy, 0.0, cy0, cy1, out var ry0, out var ry1);
+                    for (var cy = ry0; cy <= ry1; cy++)
+                    {
+                        AddCell(cx, cy, index);
+                    }
+                }
+
+                return;
+            }
+        }
+        else if (spanY <= MaxInsertSlices)
         {
             for (var cy = cy0; cy <= cy1; cy++)
             {
-                if (!_cells.TryGetValue((cx, cy), out var list))
+                SliceRangeX(cy, x1, y1, dx, dy, 0.0, cx0, cx1, out var rx0, out var rx1);
+                for (var cx = rx0; cx <= rx1; cx++)
                 {
-                    list = new List<int>();
-                    _cells[(cx, cy)] = list;
+                    AddCell(cx, cy, index);
                 }
+            }
 
-                list.Add(index);
+            return;
+        }
+
+        // Ultra-extreme fallback (>131k cells on a single segment): sample along the true segment.
+        var added = new HashSet<(long, long)>();
+        for (var s = 0; s <= MaxInsertSlices; s++)
+        {
+            var t = (double)s / MaxInsertSlices;
+            var (cx, cy) = Cell(x1 + dx * t, y1 + dy * t);
+            for (var ox = -1L; ox <= 1L; ox++)
+            {
+                for (var oy = -1L; oy <= 1L; oy++)
+                {
+                    if (added.Add((cx + ox, cy + oy)))
+                    {
+                        AddCell(cx + ox, cy + oy, index);
+                    }
+                }
             }
         }
     }
 
+    private void AddCell(long cx, long cy, int index)
+    {
+        if (!_cells.TryGetValue((cx, cy), out var list))
+        {
+            list = new List<int>();
+            _cells[(cx, cy)] = list;
+        }
+
+        list.Add(index);
+    }
+
     public IEnumerable<int> Query(double x1, double y1, double x2, double y2, double pad)
     {
+        if (_cells.Count == 0)
+        {
+            yield break;
+        }
+
+        pad = Math.Max(0.0, pad);
         var (cx0, cy0) = Cell(Math.Min(x1, x2) - pad, Math.Min(y1, y2) - pad);
         var (cx1, cy1) = Cell(Math.Max(x1, x2) + pad, Math.Max(y1, y2) + pad);
         var seen = new HashSet<int>();
-        for (var cx = cx0; cx <= cx1; cx++)
+        var spanX = cx1 - cx0 + 1;
+        var spanY = cy1 - cy0 + 1;
+        if (spanX <= 16 && spanY <= 16 && spanX * spanY <= MaxBboxCells)
         {
-            for (var cy = cy0; cy <= cy1; cy++)
+            for (var cx = cx0; cx <= cx1; cx++)
             {
-                if (!_cells.TryGetValue((cx, cy), out var list))
+                for (var cy = cy0; cy <= cy1; cy++)
+                {
+                    if (!_cells.TryGetValue((cx, cy), out var list))
+                    {
+                        continue;
+                    }
+
+                    foreach (var i in list)
+                    {
+                        if (seen.Add(i))
+                        {
+                            yield return i;
+                        }
+                    }
+                }
+            }
+
+            yield break;
+        }
+
+        var dx = x2 - x1;
+        var dy = y2 - y1;
+        var domSpan = Math.Max(spanX, spanY);
+        var padCells = (long)Math.Ceiling(pad / _cellSize) + 2;
+        var estimatedTubeCells = domSpan > long.MaxValue / Math.Max(1L, 2 * padCells + 1)
+            ? long.MaxValue
+            : domSpan * (2 * padCells + 1);
+
+        // When the query tube has more cells than the sparse grid itself (e.g. large search pad or tiny cellSize),
+        // scanning occupied cells directly is both O(_cells.Count) fast and 100% exact.
+        if (estimatedTubeCells > Math.Max(MaxBboxCells, (long)_cells.Count * 4L))
+        {
+            foreach (var ((cx, cy), list) in _cells)
+            {
+                if (cx < cx0 || cx > cx1 || cy < cy0 || cy > cy1)
+                {
+                    continue;
+                }
+
+                if (!CellIntersectsSegmentPad(cx, cy, x1, y1, dx, dy, pad))
                 {
                     continue;
                 }
@@ -208,11 +309,141 @@ public sealed class SegmentGrid
                     }
                 }
             }
+
+            yield break;
+        }
+
+        if (Math.Abs(dx) >= Math.Abs(dy))
+        {
+            for (var cx = cx0; cx <= cx1; cx++)
+            {
+                SliceRangeY(cx, x1, y1, dx, dy, pad, cy0, cy1, out var ry0, out var ry1);
+                for (var cy = ry0; cy <= ry1; cy++)
+                {
+                    if (!_cells.TryGetValue((cx, cy), out var list))
+                    {
+                        continue;
+                    }
+
+                    foreach (var i in list)
+                    {
+                        if (seen.Add(i))
+                        {
+                            yield return i;
+                        }
+                    }
+                }
+            }
+        }
+        else
+        {
+            for (var cy = cy0; cy <= cy1; cy++)
+            {
+                SliceRangeX(cy, x1, y1, dx, dy, pad, cx0, cx1, out var rx0, out var rx1);
+                for (var cx = rx0; cx <= rx1; cx++)
+                {
+                    if (!_cells.TryGetValue((cx, cy), out var list))
+                    {
+                        continue;
+                    }
+
+                    foreach (var i in list)
+                    {
+                        if (seen.Add(i))
+                        {
+                            yield return i;
+                        }
+                    }
+                }
+            }
         }
     }
 
-    private (int, int) Cell(double x, double y)
-        => ((int)Math.Floor(x / _cellSize), (int)Math.Floor(y / _cellSize));
+    private void SliceRangeY(long cx, double x1, double y1, double dx, double dy, double pad, long cy0, long cy1, out long ry0, out long ry1)
+    {
+        if (Math.Abs(dx) <= 1e-12)
+        {
+            ry0 = cy0;
+            ry1 = cy1;
+            return;
+        }
+
+        var xMin = cx * _cellSize - pad;
+        var xMax = (cx + 1) * _cellSize + pad;
+        var ta = (xMin - x1) / dx;
+        var tb = (xMax - x1) / dx;
+        var t0 = Math.Clamp(Math.Min(ta, tb), 0.0, 1.0);
+        var t1 = Math.Clamp(Math.Max(ta, tb), 0.0, 1.0);
+        var yAt0 = y1 + dy * t0;
+        var yAt1 = y1 + dy * t1;
+        ry0 = Math.Max(cy0, CellCoord(Math.Min(yAt0, yAt1) - pad));
+        ry1 = Math.Min(cy1, CellCoord(Math.Max(yAt0, yAt1) + pad));
+    }
+
+    private void SliceRangeX(long cy, double x1, double y1, double dx, double dy, double pad, long cx0, long cx1, out long rx0, out long rx1)
+    {
+        if (Math.Abs(dy) <= 1e-12)
+        {
+            rx0 = cx0;
+            rx1 = cx1;
+            return;
+        }
+
+        var yMin = cy * _cellSize - pad;
+        var yMax = (cy + 1) * _cellSize + pad;
+        var ta = (yMin - y1) / dy;
+        var tb = (yMax - y1) / dy;
+        var t0 = Math.Clamp(Math.Min(ta, tb), 0.0, 1.0);
+        var t1 = Math.Clamp(Math.Max(ta, tb), 0.0, 1.0);
+        var xAt0 = x1 + dx * t0;
+        var xAt1 = x1 + dx * t1;
+        rx0 = Math.Max(cx0, CellCoord(Math.Min(xAt0, xAt1) - pad));
+        rx1 = Math.Min(cx1, CellCoord(Math.Max(xAt0, xAt1) + pad));
+    }
+
+    private bool CellIntersectsSegmentPad(long cx, long cy, double x1, double y1, double dx, double dy, double pad)
+    {
+        var t0 = 0.0;
+        var t1 = 1.0;
+        var xMin = cx * _cellSize - pad;
+        var xMax = (cx + 1) * _cellSize + pad;
+        if (Math.Abs(dx) <= 1e-12)
+        {
+            if (x1 < xMin || x1 > xMax) return false;
+        }
+        else
+        {
+            var tx0 = (xMin - x1) / dx;
+            var tx1 = (xMax - x1) / dx;
+            if (tx0 > tx1) (tx0, tx1) = (tx1, tx0);
+            t0 = Math.Max(t0, tx0);
+            t1 = Math.Min(t1, tx1);
+            if (t0 > t1) return false;
+        }
+
+        var yMin = cy * _cellSize - pad;
+        var yMax = (cy + 1) * _cellSize + pad;
+        if (Math.Abs(dy) <= 1e-12)
+        {
+            if (y1 < yMin || y1 > yMax) return false;
+        }
+        else
+        {
+            var ty0 = (yMin - y1) / dy;
+            var ty1 = (yMax - y1) / dy;
+            if (ty0 > ty1) (ty0, ty1) = (ty1, ty0);
+            t0 = Math.Max(t0, ty0);
+            t1 = Math.Min(t1, ty1);
+            if (t0 > t1) return false;
+        }
+
+        return true;
+    }
+
+    private long CellCoord(double v) => (long)Math.Floor(v / _cellSize);
+
+    private (long, long) Cell(double x, double y)
+        => (CellCoord(x), CellCoord(y));
 }
 
 /// <summary>
@@ -1100,14 +1331,12 @@ public static class CoverageEngine
         var mx = (q.x1 + q.x2) / 2;
         var my = (q.y1 + q.y2) / 2;
         var best = double.MaxValue;
-        foreach (var ri in grid.Query(Math.Min(q.x1, q.x2), Math.Min(q.y1, q.y2), Math.Max(q.x1, q.x2), Math.Max(q.y1, q.y2), 50))
+        foreach (var ri in grid.Query(q.x1, q.y1, q.x2, q.y2, 50))
         {
             var r = refSegs[ri];
             var d = Math.Min(
-                LineworkGeometry.PtSegDist(q.x1, q.y1, r.x1, r.y1, r.x2, r.y2, out _),
-                Math.Min(
-                    LineworkGeometry.PtSegDist(q.x2, q.y2, r.x1, r.y1, r.x2, r.y2, out _),
-                    LineworkGeometry.PtSegDist(mx, my, r.x1, r.y1, r.x2, r.y2, out _)));
+                LineworkGeometry.SegSegDist(q.x1, q.y1, q.x2, q.y2, r.x1, r.y1, r.x2, r.y2),
+                LineworkGeometry.PtSegDist(mx, my, r.x1, r.y1, r.x2, r.y2, out _));
             if (d < best)
             {
                 best = d;

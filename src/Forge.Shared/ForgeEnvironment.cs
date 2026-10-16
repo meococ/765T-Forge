@@ -135,7 +135,7 @@ public sealed record ForgeEnvironment
     private static string Get(string name, string fallback)
     {
         var value = Environment.GetEnvironmentVariable(name);
-        return string.IsNullOrWhiteSpace(value) ? fallback : value;
+        return string.IsNullOrWhiteSpace(value) ? fallback : Environment.ExpandEnvironmentVariables(value);
     }
 
     private static string? FirstNonEmpty(params string?[] values)

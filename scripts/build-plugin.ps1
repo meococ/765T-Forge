@@ -36,22 +36,28 @@ if (-not $defaultRoot) {
     exit 2
 }
 
-$acad = if ($env:AUTOCAD_2026_ROOT) { $env:AUTOCAD_2026_ROOT } else { $defaultRoot }
-$env:AUTOCAD_2026_ROOT = $acad
-if (-not (Test-Path (Join-Path $acad "AcCoreMgd.dll"))) {
-    Write-Error "AUTOCAD_ROOT_MISSING: AcCoreMgd.dll not found under AUTOCAD_2026_ROOT=$acad (year $Year)."
-    exit 2
+$prevAcadEnv = $env:AUTOCAD_2026_ROOT
+$acad = if ($prevAcadEnv) { $prevAcadEnv } else { $defaultRoot }
+try {
+    $env:AUTOCAD_2026_ROOT = $acad
+    if (-not (Test-Path (Join-Path $acad "AcCoreMgd.dll"))) {
+        Write-Error "AUTOCAD_ROOT_MISSING: AcCoreMgd.dll not found under AUTOCAD_2026_ROOT=$acad (year $Year)."
+        exit 2
+    }
+
+    $csproj = Join-Path $root "src\Forge.Plugin\Forge.Plugin.csproj"
+    if (-not $OutDir) {
+        $OutDir = Join-Path $root "artifacts\Forge.Plugin\$Year"
+    }
+    $fullOut = if ([System.IO.Path]::IsPathRooted($OutDir)) { $OutDir } else { Join-Path $root $OutDir }
+    New-Item -ItemType Directory -Force -Path $fullOut | Out-Null
+
+    Write-Host "Building plugin for year $Year from root $acad to OutDir=$fullOut"
+    dotnet build $csproj --configuration $Configuration -p:AutoCadRoot="$acad" -p:ForgeTargetYear="$Year" -p:OutDir="$fullOut"
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    Write-Host "Plugin build complete (year $Year)."
 }
-
-$csproj = Join-Path $root "src\Forge.Plugin\Forge.Plugin.csproj"
-if (-not $OutDir) {
-    $OutDir = Join-Path $root "artifacts\Forge.Plugin\$Year"
+finally {
+    $env:AUTOCAD_2026_ROOT = $prevAcadEnv
 }
-$fullOut = if ([System.IO.Path]::IsPathRooted($OutDir)) { $OutDir } else { Join-Path $root $OutDir }
-New-Item -ItemType Directory -Force -Path $fullOut | Out-Null
-
-Write-Host "Building plugin for year $Year from root $acad to OutDir=$fullOut"
-dotnet build $csproj --configuration $Configuration -p:AutoCadRoot="$acad" -p:ForgeTargetYear="$Year" -p:OutDir="$fullOut"
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-Write-Host "Plugin build complete (year $Year)."

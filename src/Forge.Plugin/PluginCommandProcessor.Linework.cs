@@ -1,3 +1,4 @@
+using System.Globalization;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.Geometry;
 using Forge.Shared;
@@ -96,7 +97,7 @@ public sealed partial class PluginCommandProcessor
         var insunits = 0;
         try
         {
-            insunits = Convert.ToInt32(Autodesk.AutoCAD.ApplicationServices.Application.GetSystemVariable("INSUNITS"));
+            insunits = Convert.ToInt32(Autodesk.AutoCAD.ApplicationServices.Application.GetSystemVariable("INSUNITS"), CultureInfo.InvariantCulture);
         }
         catch
         {
@@ -342,7 +343,7 @@ public sealed partial class PluginCommandProcessor
         return new LineworkEntity
         {
             Id = 0,
-            Handle = id.Handle.Value.ToString("X"),
+            Handle = id.Handle.Value.ToString("X", CultureInfo.InvariantCulture),
             Kind = kind,
             Layer = layer,
             Container = "modelspace",

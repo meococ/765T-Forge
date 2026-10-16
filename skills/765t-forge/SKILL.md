@@ -18,7 +18,7 @@ Use this skill when an agent drives AutoCAD through **765T-Forge** for metro/AEC
 
 ## Profiles
 
-Call `forge_system_tool_profile` (`core` | `plot` | `qa`) to shrink the tool surface for the current task. MCP resources: `forge://profiles/{name}`.
+Call `forge_system_tool_profile` (`core` | `plot` | `qa` | `linework` | `authoring`) to shrink the tool surface for the current task. MCP resources: `forge://profiles/{name}`.
 
 ## Inspect before write / publish
 
@@ -59,6 +59,22 @@ Every write should produce an audit record and, when a DWG path is available, a 
 - `forge_linework_transform` calibrates/persists/applies the CAD→Revit transform (anchor `pairs` → similarity or affine fit → `transformPath` file). Re-check `maxResidualM`; > 0.5 m means the anchors do not describe one transform.
 - `forge_linework_compare` marks every CAD segment and every Revit pipe segment (`modelSegments`/`modelSegmentsPath`) as `matched` / `partial` / `missing_in_revit` / `extra_off_cad` with distance; `overlayPath` writes a color-coded SVG for human review.
 
+## AI CAD Drawing & Authoring (C20–C30: Understand → Plan → Execute → Verify)
+
+When asked to draw or modify CAD geometry from scratch or on an existing drawing:
+1. **Understand existing drawings & standards first**:
+   - On an existing or unfamiliar DWG, call **`forge_drawing_summary`** first for a 1-call X-Ray (units, extents, entity counts by type/layer, blocks, styles, xrefs), and **`forge_entity_search_text`** to locate room names, grid labels, callouts, or table cells (with MText formatting automatically stripped).
+   - Load linetypes (`forge_linetype_load`, e.g., `name="DASHED"` or `names=["DASHED","CENTER","HIDDEN"]`), create text/dimension styles (`forge_style_text_create` with TrueType `fontName="Arial"` for Vietnamese or `.shx`, `forge_style_dim_create`; pass `updateExisting=true` to modify an existing style), and create semantic layers (`forge_layer_create`) before drawing entities.
+2. **Use high-level AEC generators, primitives & `forge_draw_batch`**:
+   - For architectural/structural plans, start with **`forge_draw_grid`** (draws axis lines, grid bubbles, bay + overall dimensions, and returns the `"A-1": [x,y]` intersection map) and **`forge_draw_wall`** (draws mitered double-line walls with `center`/`left`/`right` justification, slices out door/window `openings` with jamb caps, returns opening `center` + `angleDeg` for block placement, and optionally hatches wall loops).
+   - Prefer `forge_draw_rectangle` (`p1`+`p2` or `center`+`width`+`height`, `filletRadius`, `chamferDistance1/2`, `rotationDeg`), `forge_draw_polygon` (`inscribed=true/false`), `forge_draw_ellipse` (`majorAxis` or `majorRadius`+`rotationDeg`), `forge_draw_spline`, `forge_draw_revcloud` (always outward lobes), `forge_draw_leader` (`points`, `text`, `hasArrowHead`), and `forge_draw_table` (`rows`, `title`, `hasTitleRow`) instead of manually calculating raw lines.
+   - Use **`forge_draw_batch`** (up to 1000 steps in one call across all 15 step types: `line`, `polyline`, `rectangle`, `polygon`, `circle`, `arc`, `ellipse`, `spline`, `revcloud`, `text`, `mtext`, `hatch`, `dimension`, `leader`, `block_insert`; each step isolated in a nested transaction) to build complete details, floor plans, or mechanical parts in one call.
+3. **Precision CAD editing, OSNAP & geometric intelligence**:
+   - Never eyeball coordinates on existing geometry: call **`forge_entity_snap`** (`point`, `radius`, `fromPoint`, `snapTypes`: `endpoint`, `midpoint`, `center`, `quadrant`, `insertion`, `nearest`, `perpendicular`, `intersection`) for exact OSNAP coordinates, **`forge_entity_intersect`** (`none` / `extendFirst` / `extendSecond` / `extendBoth`) for exact 3D curve intersections, and **`forge_entity_get`** / **`forge_measure_batch`** to read exact vertices, bulges, areas, and dimensions.
+   - Use pure DB API editing tools: `forge_entity_fillet` (two lines with optional `pickPoint1`/`pickPoint2`, or all straight corners of a polyline; `radius=0` for sharp corner trim/extend), `forge_entity_chamfer`, `forge_entity_trim` (`targetHandle`, `cuttingHandles`, `pickPoint`), `forge_entity_extend` (`targetHandle`, `boundaryHandles`, `endToExtend`: `end`|`start`|`both`|`auto`|`near`), `forge_entity_join`, `forge_entity_offset`, `forge_entity_array`, and `forge_entity_explode` (BURST-style attribute preservation on blocks).
+4. **Visual & metric self-verification**:
+   - After drawing or editing, call **`forge_view_capture`** (`fit=true`) and view the PNG to visually inspect proportions, text overlaps, dimension placement, and hatches. Use `forge_undo` if a step needs to be rolled back cleanly.
+
 ## Capability awareness
 
-Trust [docs/capability-matrix.md](../../docs/capability-matrix.md). Prompts: `issue_set_runbook`, `safety_first`.
+Trust [docs/capability-matrix.md](../../docs/capability-matrix.md) and [docs/cad-authoring-tools.md](../../docs/cad-authoring-tools.md). Prompts: `issue_set_runbook`, `safety_first`.

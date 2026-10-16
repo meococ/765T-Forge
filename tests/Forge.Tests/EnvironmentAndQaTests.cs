@@ -97,6 +97,17 @@ public sealed class EnvironmentAndQaTests
             $"expected an installed AutoCAD root or the documented fallback, got: {root}");
     }
 
+    [Fact]
+    public void EnvironmentExpandsWindowsVariablesInPaths()
+    {
+        var env = ForgeEnvironmentFromProcessWith(
+            ("FORGE_BACKUP_DIR", @"%LOCALAPPDATA%\765T-Forge\Backups"),
+            ("FORGE_AUDIT_DIR", @"%LOCALAPPDATA%\765T-Forge\Audit"));
+
+        Assert.DoesNotContain("%LOCALAPPDATA%", env.BackupDirectory, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("%LOCALAPPDATA%", env.AuditDirectory, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static ForgeEnvironment ForgeEnvironmentFromProcessWith(params (string Name, string? Value)[] variables)
     {
         // FromProcess fails closed without a token; the dev escape hatch keeps the test
@@ -107,12 +118,13 @@ public sealed class EnvironmentAndQaTests
             ("MCP_AUTOCAD_TOKEN", null),
             ("FORGE_DEV_ALLOW_DEFAULT_TOKEN", "true"),
         };
-        var previous = variables.Concat(fallbacks)
+        var overrides = variables.Concat(fallbacks)
             .GroupBy(x => x.Name)
             .ToDictionary(g => g.Key, g => g.First().Value);
+        var previous = overrides.Keys.ToDictionary(k => k, Environment.GetEnvironmentVariable);
         try
         {
-            foreach (var entry in previous)
+            foreach (var entry in overrides)
             {
                 Environment.SetEnvironmentVariable(entry.Key, entry.Value);
             }

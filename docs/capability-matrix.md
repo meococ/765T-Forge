@@ -27,31 +27,36 @@ Honest status of MCP tools. AutoCAD targets: **2025 and 2026** through the typed
 | `forge_layer_list` / `_state_list` | implemented | |
 | `forge_layer_state_restore` | implemented | Sync via `LayerStateManager` |
 
-## Authoring (C20–C23)
+## Authoring, Precision Editing, Spatial Intelligence & AEC Generators (C20–C30)
 
 | Tool | Status | Notes |
 |------|--------|-------|
 | `forge_draw_line` / `_polyline` / `_circle` / `_arc` | implemented | Typed WCS geometry; handle + entity read-back; polyline supports bulges/width/closed |
-| `forge_draw_text` / `_mtext` | implemented | DBText single-line (CR/LF refused); MText converts newlines to `\P`, 9-point attachment |
-| `forge_draw_hatch` | implemented | Associative hatch on a closed-curve handle or a freshly drawn boundary polyline; pattern/scale/angle |
-| `forge_draw_dimension` | implemented | linear / aligned / radius / diameter on the current dimstyle; angular is C24 |
-| `forge_draw_batch` | implemented | ≤500 steps in one call/transaction, per-step results, continues past failures |
-| `forge_entity_get` / `_list` | implemented | Handle read; list requires window or layer — no select-all |
+| `forge_draw_rectangle` / `_polygon` / `_ellipse` / `_spline` / `_revcloud` | implemented | High-level shapes (C25): rectangle with corner fillet/chamfer/rotation; inscribed/circumscribed regular N-gon; full/elliptical arc (`majorAxis` or `majorRadius`+`rotationDeg`); NURBS spline (periodic when closed, optional tangents); outward-lobe revision cloud regardless of CW/CCW winding. Pure math unit-tested — **live AutoCAD smoke pending** |
+| `forge_draw_text` / `_mtext` / `_leader` / `_table` | implemented | DBText single-line (CR/LF refused); MText 9-point attachment; MLeader callouts (`points`, `hasArrowHead`, `textHeight`); native AutoCAD `Table` grids (`title`, `hasTitleRow`, unmerged data row 0, 10,000-cell cap) — **live AutoCAD smoke pending** for `_leader`/`_table` |
+| `forge_draw_hatch` | implemented | Associative hatch on a closed-curve handle or a freshly drawn boundary polyline; `PatternScale`/`PatternAngle` set before `SetHatchPattern` |
+| `forge_draw_dimension` | implemented | `linear` (rotated), `aligned`, `radius`, `diameter` (`DiametricDimension` across full chord `2*p1-p2`), `angular` (`Point3AngularDimension` with `vertex`, `p1`, `p2`, `dimLinePoint`), `ordinate` (X/Y datum), with `dimStyle` and `dimScale` overrides + `RecomputeDimensionBlock(true)` |
+| `forge_draw_batch` | implemented | ≤1000 steps in one call across all 15 primitive/annotation types (`line`, `polyline`, `rectangle`, `polygon`, `circle`, `arc`, `ellipse`, `spline`, `revcloud`, `text`, `mtext`, `hatch`, `dimension`, `leader`, `block_insert`); each step runs in a nested transaction so failed steps never leave partial geometry (`batch_all_failed` if all fail) |
+| `forge_drawing_summary` / `forge_entity_search_text` / `forge_entity_snap` | implemented | Spatial & semantic CAD intelligence (C29, `CadSpatialMath` unit-tested, **live AutoCAD smoke pending**): 1-call DWG X-Ray summary (units, extents, entity counts by type/layer, blocks, styles, xrefs); deep text search across `DBText`/`MText` (formatting stripped)/block attributes/dimensions/`MLeader`/`Table` cells; AI OSNAP engine (`endpoint`, `midpoint`, `center`, `quadrant`, `insertion`, `nearest`, `perpendicular`, `intersection`) |
+| `forge_draw_grid` / `forge_draw_wall` | implemented | High-level AEC/structural generators (C30, `CadSpatialMath` unit-tested, **live AutoCAD smoke pending**): structural column grid (axes, bubbles, bay + overall dimensions, and named intersection map `"A-1": [x,y]`); mitered double-line walls (`center`/`left`/`right` justification, continuous corner turns, door/window openings with jamb caps + returned opening centers/angles, optional associative hatch) |
+| `forge_entity_get` / `_list` / `_intersect` | implemented | Fault-isolated `{entity, kind, kindError?}` read-back (C28: per-vertex polyline widths up to 1000 + `truncated`, `Polyline2d/3d`, `Region`, `Xline/Ray`, dynamic block `effectiveName` + attributes, `Hatch` area, `Table` cells); spatial/layer query; exact 3D intersections via `IntersectWith` |
 | `forge_entity_move` / `_copy` / `_rotate` / `_scale` / `_mirror` / `_offset` | implemented | Explicit handles, `TransformBy`; plane-normal offset for deterministic sides; backup + undo mark |
+| `forge_entity_fillet` / `_chamfer` / `_trim` / `_extend` / `_join` / `_explode` | implemented | Precision CAD editing (C26, `CadGeometryMath` + `CadEditMath` unit-tested, **live AutoCAD smoke pending**): line-line fillet/chamfer with `pickPoint1`/`pickPoint2` (`ambiguous_side` on unpicked X-crossing) and polyline fillet preserving per-vertex widths (`filletedCorners`/`skippedCorners`); multi-piece curve trim (`insufficient_cuts` on closed curves with <2 cuts, in-place handle preservation for 1 surviving `Line`/`Arc`); strictly-beyond-endpoint extend (`Line`/`Arc`/`Polyline`); owner-space join (`nothing_joined` if 0 connect); BURST-style explode preserving visible block attributes as `DBText`/`MText` |
 | `forge_entity_erase` | implemented | Explicit handles only (≤1000; >100 needs `acknowledgeBulk`), dry-run |
 | `forge_entity_set_props` | implemented | Layer/color/linetype/lineweight by handle |
-| `forge_undo` | implemented | One Forge write = one undo group; pops exactly one |
+| `forge_undo` | implemented | One Forge write = one undo group; pops exactly one via `_.U` |
 | `forge_block_create` / `_insert` / `_list` | implemented | Create consumes source entities (clone→transform→erase, one transaction); insert applies attribute values after binding |
 | `forge_layer_create` / `forge_layout_create` | implemented | Idempotent layer create; layout refuses duplicates |
+| `forge_linetype_load` / `forge_style_text_create` / `forge_style_dim_create` | implemented | Standards & styles (C27, **live AutoCAD smoke pending**): load linetypes (`name`/`names[]`, `file`, `alreadyLoaded`, `linetype_not_found_in_file`); create/update `TextStyleTableRecord` (TTF `FontDescriptor` default `Arial` for Vietnamese, or `.ttf`/`.shx`) and `DimStyleTableRecord` (`style_exists` unless `updateExisting=true`, partial field updates) |
 | `forge_view_capture` | implemented | PrintWindow PNG of the AutoCAD window (backgrounded OK, not minimized); `fit` zooms extents first — the agent's visual read-back |
 | `forge_measure_batch` | implemented | Engine-measured length/area/distance/bbox — never re-reads vertices |
 | `forge_entity_array` | implemented | Rectangular + polar clones by explicit handles; sources untouched |
 | `forge_layer_set` / `forge_doc_new` / `forge_doc_export_dxf` | implemented | Layer state (freeze refused on current), template document, 16-digit DXF out |
 | `forge_draw_polyline_from_csv` / `forge_viewport_add` | implemented | CSV point lists → one polyline; model-space viewport on a layout tab |
 
-Tool profile `authoring` bundles the whole authoring surface via `forge_system_tool_profile`.
+Tool profile `authoring` bundles the whole **59-tool** authoring surface (out of **112** total tools) via `forge_system_tool_profile`.
 
-Authoring contract ([docs/cad-authoring-tools.md](cad-authoring-tools.md)): WCS + drawing units, degrees at the boundary, handles as the object currency, verification read-back on every write, dry-run everywhere, pure DB API (no dialogs). Live AutoCAD smoke for this wave is pending.
+Authoring contract ([docs/cad-authoring-tools.md](cad-authoring-tools.md)): WCS + drawing units, degrees at the boundary, handles as the object currency, verification read-back on every write, dry-run everywhere, no dialogs.
 
 ## Block / layout
 
@@ -92,7 +97,7 @@ Authoring contract ([docs/cad-authoring-tools.md](cad-authoring-tools.md)): WCS 
 |------|--------|-------|
 | `forge_registry_load` / `_lookup` | implemented | Fail-closed drawing numbers for titleblock tags |
 | `forge_pack_load` / `_status` | implemented | Declarative project standards pack (v2 plot bindings) |
-| `forge_system_tool_profile` | implemented | Profiles `core` / `plot` / `qa` (server-side) |
+| `forge_system_tool_profile` | implemented | Profiles `core` / `plot` / `qa` / `linework` / `authoring` (server-side) |
 | `forge_viewport_list` | implemented | Paper-space viewports |
 | `forge_viewport_set_layer_freeze` | implemented | VP freeze/thaw by handle |
 
@@ -122,8 +127,7 @@ Layer filtering on all `forge_linework_*`: `layerFilter` patterns match the full
 
 | Item | Notes |
 |------|-------|
-| Visual viewport screenshot | Competitor parity; only after PDF probes |
-| Full SSM **write** | Deferred (GUID/path fragility); read-only CSV inventory is shipped |
+| Full SSM **write** | Deferred (GUID/path fragility); CSV inventory → contract is shipped |
 | Civil 3D / geometry megakit / remote multi-tenant MCP | Explicitly out of scope |
 | netDxf offline path | Optional later — not SoT for plot truth |
 | NuGet `McpServer` / registry | After Releases packaging — see docs/packaging-nuget.md |

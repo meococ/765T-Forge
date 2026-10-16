@@ -24,7 +24,7 @@ public sealed class PublishReceipt
     public DateTimeOffset? OutputMtimeUtc { get; init; }
     public PdfProbeResult? PdfProbe { get; init; }
     public bool VerificationPassed { get; init; }
-    public string? Message { get; init; }
+    public string? Message { get; set; }
     public string? ArtifactPath { get; set; }
 
     public string ComputePreflightHash(QaReport? report)
@@ -45,6 +45,9 @@ public sealed class PublishReceipt
     }
 
     public static string? TryWriteArtifact(PublishReceipt receipt, string? auditDir = null)
+        => TryWriteArtifact(receipt, out _, auditDir);
+
+    public static string? TryWriteArtifact(PublishReceipt receipt, out string? error, string? auditDir = null)
     {
         try
         {
@@ -56,10 +59,12 @@ public sealed class PublishReceipt
             Directory.CreateDirectory(root);
             var path = Path.Combine(root, $"receipt-{receipt.ReceiptId}.json");
             File.WriteAllText(path, JsonSerializer.Serialize(receipt, ForgeJson.Options));
+            error = null;
             return path;
         }
-        catch
+        catch (Exception ex)
         {
+            error = ex.Message;
             return null;
         }
     }
@@ -78,9 +83,10 @@ public sealed class PdfProbeResult
     public string[] Warnings { get; init; } = [];
 
     /// <summary>
-    /// Lightweight PDF probe: existence, size, and page-count via /Type /Page counts (heuristic).
+    /// Lightweight PDF probe: existence, size, %PDF- header, optional freshness (mtime &gt;= notBeforeUtc),
+    /// and page-count via /Type /Page counts (heuristic).
     /// </summary>
-    public static PdfProbeResult Probe(string path, int? expectedPages = null)
+    public static PdfProbeResult Probe(string path, int? expectedPages = null, DateTimeOffset? notBeforeUtc = null)
     {
         var warnings = new List<string>();
         if (!File.Exists(path))
@@ -109,11 +115,54 @@ public sealed class PdfProbeResult
             };
         }
 
+        if (notBeforeUtc.HasValue && info.LastWriteTimeUtc < notBeforeUtc.Value.UtcDateTime.AddSeconds(-1))
+        {
+            return new PdfProbeResult
+            {
+                Exists = true,
+                Bytes = bytes,
+                NonEmpty = true,
+                ExpectedPages = expectedPages,
+                Passed = false,
+                Message = $"PDF output is stale: last-write time ({info.LastWriteTimeUtc:O}) precedes plot start ({notBeforeUtc.Value.UtcDateTime:O})."
+            };
+        }
+
         int? pageCount = null;
+        var hasPdfHeader = false;
+        var hasPdfTrailer = false;
         try
         {
-            // Heuristic: count "/Type /Page" not "/Type /Pages"
             var text = File.ReadAllText(path);
+            hasPdfHeader = text.StartsWith("%PDF-", StringComparison.Ordinal);
+            if (!hasPdfHeader)
+            {
+                return new PdfProbeResult
+                {
+                    Exists = true,
+                    Bytes = bytes,
+                    NonEmpty = true,
+                    ExpectedPages = expectedPages,
+                    Passed = false,
+                    Message = "Output file is not a valid PDF (missing %PDF- header)."
+                };
+            }
+
+            hasPdfTrailer = text.Contains("%%EOF", StringComparison.Ordinal);
+            if (!hasPdfTrailer)
+            {
+                return new PdfProbeResult
+                {
+                    Exists = true,
+                    Bytes = bytes,
+                    NonEmpty = true,
+                    ExpectedPages = expectedPages,
+                    Passed = false,
+                    Message = "Output PDF is incomplete or truncated (missing %%EOF trailer)."
+                };
+            }
+
+            // Heuristic: count "/Type /Page" not "/Type /Pages"
             var matches = Regex.Matches(text, @"/Type\s*/Page\b");
             pageCount = matches.Count;
             if (pageCount == 0)
@@ -127,13 +176,15 @@ public sealed class PdfProbeResult
             warnings.Add($"PDF text probe failed: {ex.Message}");
         }
 
-        var pageOk = expectedPages is null || pageCount is null || pageCount == expectedPages;
-        if (expectedPages is not null && pageCount is not null && pageCount != expectedPages)
+        var pageOk = expectedPages is null
+            ? (pageCount is null || pageCount > 0)
+            : (pageCount is not null && pageCount == expectedPages);
+        if (expectedPages is not null && pageCount != expectedPages)
         {
-            warnings.Add($"Page count {pageCount} != expected {expectedPages}.");
+            warnings.Add($"Page count {(pageCount?.ToString() ?? "unknown")} != expected {expectedPages}.");
         }
 
-        var passed = bytes > 0 && pageOk;
+        var passed = bytes > 0 && hasPdfHeader && hasPdfTrailer && pageOk;
         return new PdfProbeResult
         {
             Exists = true,
