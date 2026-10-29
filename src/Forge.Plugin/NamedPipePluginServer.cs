@@ -235,10 +235,11 @@ public sealed class NamedPipePluginServer : IDisposable
 
     private Task<ForgeResult> ExecuteOnMainThreadAsync(ForgeCommand command)
     {
-        if (command.Tool.Equals(PluginCommandProcessor.DocActivateTool, StringComparison.OrdinalIgnoreCase))
+        if (DocumentContextPolicy.RunsInApplicationContext(command.Tool))
         {
-            // Switching the active drawing must happen in application context, never inside a
-            // document command context — and it must work from the Start tab too.
+            // Creating, opening or switching the active drawing must happen in application context,
+            // never inside a document command context (AutoCAD defers the switch until that command
+            // ends; fix-smoke-20261029 D1) — and it must work from the Start tab too.
             return ExecuteDocActivateWhenIdleAsync(command);
         }
 
@@ -408,10 +409,12 @@ public sealed class NamedPipePluginServer : IDisposable
     }
 
     /// <summary>
-    /// forge_doc_activate: runs on the Idle marshal (application context). The first idle tick runs
-    /// the processor (safety, audit, the switch itself and a first read-back); if AutoCAD has not
-    /// reported the switch yet, later idle ticks re-read the active document for up to two seconds
-    /// before answering, so the reply states what is really active.
+    /// forge_doc_activate / forge_doc_new / forge_doc_open: run on the Idle marshal (application
+    /// context). The first idle tick runs the processor (safety, audit, the action and a first
+    /// read-back); if AutoCAD has not reported the switch yet, later idle ticks re-read the active
+    /// document — matched by reference to the target Document — for up to two seconds (activate) or
+    /// until five seconds before the request deadline (new/open), so the reply states what is really
+    /// active.
     /// </summary>
     private Task<ForgeResult> ExecuteDocActivateWhenIdleAsync(ForgeCommand command)
     {
@@ -443,19 +446,19 @@ public sealed class NamedPipePluginServer : IDisposable
                     }
 
                     first = _processor.Process(command);
-                    if (first.Ok || first.Error?.Code != PluginCommandProcessor.DocActivateUnconfirmedCode ||
+                    if (first.Ok || first.Error?.Code is not { } code || !DocumentContextPolicy.UnconfirmedCodes.Contains(code) ||
                         first.Data is not PluginCommandProcessor.DocActivateReadBack)
                     {
                         Finish(first);
                         return;
                     }
 
-                    pollUntil = Environment.TickCount64 + 2000;
+                    pollUntil = Math.Max(Environment.TickCount64 + DocumentContextPolicy.ActivatePollMs, startedAt + DocumentContextPolicy.PollWindowMs(command.Tool, staleAfterMs));
                     return;
                 }
 
                 var pending = (PluginCommandProcessor.DocActivateReadBack)first.Data!;
-                var reread = PluginCommandProcessor.ReadBackActiveDocument(command.Id, pending.Target, pending.ActiveBefore) with { AuditId = first.AuditId };
+                var reread = PluginCommandProcessor.ReadBackActiveDocument(command.Id, pending) with { AuditId = first.AuditId };
                 if (reread.Ok || Environment.TickCount64 >= pollUntil)
                 {
                     Finish(reread);

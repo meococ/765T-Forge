@@ -34,6 +34,22 @@ public sealed record PlotFitResult(double PaperUnitsPerDrawingUnit, double FillX
 /// <summary>Content-vs-area coverage: how much of the plotted area the drawing's own geometry actually occupies.</summary>
 public sealed record PlotCoverage(double ContentFillX, double ContentFillY, double AreaFraction, bool LooksTiny, string? Warning);
 
+/// <summary>fix-smoke-20261029 D4: what forge_plot_to_pdf must do so AutoCAD's plot validator accepts the layout.</summary>
+public enum PlotLayoutAction
+{
+    /// <summary>The target layout is already current and ready.</summary>
+    None,
+
+    /// <summary>Make the target layout current (restored afterwards).</summary>
+    Switch,
+
+    /// <summary>The paper layout is current but a model-space viewport is active: switch to paper space.</summary>
+    SwitchToPaperSpace,
+
+    /// <summary>Dry run on a layout that is not current: nothing is switched, so validation is deferred to the real plot.</summary>
+    DeferValidation
+}
+
 /// <summary>
 /// Pure plot planning for forge_plot_to_pdf (no AutoCAD types): media-name resolution, orientation
 /// that does not depend on how a PC3 defines its media, fit math, and the "drawing came out tiny in
@@ -302,4 +318,59 @@ public static class PlotLayoutMath
         heightMm = Math.Round(Math.Abs(P("y1") - P("y0")) * MmPerPoint, 1);
         return widthMm > 0 && heightMm > 0;
     }
+
+    /// <summary>
+    /// fix-smoke-20261029 D4: PlotInfoValidator rejects a layout that is not current (eLayoutNotCurrent).
+    /// A real plot switches to it and restores afterwards; a dry run never switches.
+    /// </summary>
+    public static PlotLayoutAction PlanLayoutSwitch(string? currentLayout, string targetLayout, bool targetIsModel, int tilemode, int cvport, bool dryRun)
+    {
+        var isCurrent = SameLayout(currentLayout, targetLayout);
+        if (dryRun)
+        {
+            return isCurrent ? PlotLayoutAction.None : PlotLayoutAction.DeferValidation;
+        }
+
+        if (!isCurrent || (targetIsModel && tilemode != 1) || (!targetIsModel && tilemode != 0))
+        {
+            return PlotLayoutAction.Switch;
+        }
+
+        return !targetIsModel && cvport != 1 ? PlotLayoutAction.SwitchToPaperSpace : PlotLayoutAction.None;
+    }
+
+    /// <summary>
+    /// The plot gate after the switch: CTAB and LayoutManager.CurrentLayout name the target; Model needs
+    /// TILEMODE=1; a paper layout needs TILEMODE=0 and paper space active (CVPORT=1).
+    /// </summary>
+    public static bool IsLayoutReady(string targetLayout, string? ctab, string? currentLayout, bool targetIsModel, int tilemode, int cvport)
+        => SameLayout(ctab, targetLayout)
+           && SameLayout(currentLayout, targetLayout)
+           && (targetIsModel ? tilemode == 1 : tilemode == 0 && cvport == 1);
+
+    /// <summary>What differs between the state saved before the plot and the state read back after the restore.</summary>
+    public static IReadOnlyList<string> LayoutRestoreMismatches(string? ctabBefore, int tilemodeBefore, int cvportBefore, string? ctabAfter, int tilemodeAfter, int cvportAfter)
+    {
+        var mismatches = new List<string>();
+        if (!SameLayout(ctabBefore, ctabAfter))
+        {
+            mismatches.Add($"CTAB is '{ctabAfter}' (was '{ctabBefore}')");
+        }
+
+        if (tilemodeBefore != tilemodeAfter)
+        {
+            mismatches.Add($"TILEMODE is {tilemodeAfter} (was {tilemodeBefore})");
+        }
+
+        if (cvportBefore != cvportAfter)
+        {
+            mismatches.Add($"CVPORT is {cvportAfter} (was {cvportBefore})");
+        }
+
+        return mismatches;
+    }
+
+    /// <summary>Layout names are case-insensitive in AutoCAD.</summary>
+    public static bool SameLayout(string? a, string? b)
+        => a is not null && b is not null && string.Equals(a.Trim(), b.Trim(), StringComparison.OrdinalIgnoreCase);
 }

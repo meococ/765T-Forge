@@ -24,7 +24,7 @@ pinned coordinates, no dialogs, serialized execution.
   are typed values, never command strings. `forge_entity_erase` and bulk mutations take explicit
   handles only; there is no "ALL" path anywhere.
 - **Dry-run:** all writes accept `dryRun=true`, run full parameter/layer/geometry validation, and return the plan without touching the drawing.
-- **No dialogs, no prompts:** pure DB API for all C20–C28 geometry/edit/style handlers (`forge_undo` invokes `Editor.Command("_.U")` to pop one undo group).
+- **No dialogs, no prompts:** pure DB API for all C20–C28 geometry/edit/style handlers (`forge_undo` invokes `Editor.Command("_.U")` and verifies the revert by readback).
 - **No-document state:** all authoring tools need a drawing; on the Start tab they return
   `no_command_context` like every other document tool.
 
@@ -45,7 +45,7 @@ pinned coordinates, no dialogs, serialized execution.
 | `forge_draw_mtext` | position, height, text (`\P` newline allowed), width? (0 = no wrap), attachmentPoint? (9-point, default topLeft), rotationDeg?, layer?, colorIndex? | handle | invalid_attachment |
 | `forge_draw_leader` | points (≥2: `[arrowTip, ..., landing]`), text? (optional MText callout), textHeight? (default 2.5), arrowSize?, hasArrowHead? (default true; false sets ArrowSize=0), layer?, colorIndex? | MLeader handle + vertexCount/leaderCount/hasText | too_few_points, invalid_height, layer_not_found |
 | `forge_draw_table` | position, rows (`string[][]`, max 10,000 cells), title? (prepends a merged title row above `rows`), hasTitleRow? (when true without `title`, merges `rows[0]`; when false, unmerges row 0), rowHeight? (default 8), columnWidth? (default 30), columnWidths[]?, textHeight? (default 2.5), layer?, colorIndex? | Table handle + rows/columns/cell summary from DB | invalid_args, table_too_large, invalid_width, layer_not_found |
-| `forge_draw_hatch` | pattern (default `ANSI31`), scale? (default 1), angleDeg?, boundary `{handle}` (closed curve) or `{vertices}` (a closed polyline is created first), layer? | hatch handle (+ boundaryHandle when created) | boundary_not_closed, boundary_not_found |
+| `forge_draw_hatch` | pattern (default `ANSI31`), scale? (default 1), angleDeg?, boundary `{handle}` (closed curve) or `{vertices}` (a closed polyline is created first), layer? | hatch handle (+ boundaryHandle when created); pattern, scale, angle, loops and first pattern line read back | boundary_not_closed, boundary_not_found, invalid_pattern, hatch_readback_mismatch |
 | `forge_draw_dimension` | kind (required): `linear`\|`aligned`\|`radius`\|`diameter`\|`angular`\|`ordinate`; p1, p2?, vertex? (required for `angular` via `Point3AngularDimension`), dimLinePoint?, rotationDeg? (rotated linear dim), useXAxis? (ordinate X vs Y), textOverride?, dimStyle? (must exist), dimScale? (>0), layer?, colorIndex? | handle + measurement + dimStyle from DB | unsupported_kind, dimstyle_not_found, invalid_points, invalid_scale |
 | `forge_draw_batch` | steps[] (≤1000): `{ tool, …params }` supporting all 15 primitives (`line`, `polyline`, `rectangle`, `polygon`, `circle`, `arc`, `ellipse`, `spline`, `revcloud`, `text`, `mtext`, `hatch`, `dimension`, `leader`, `block_insert`) | per-step nested transaction (`ok/handle/error`), createdHandles[]; failed steps roll back cleanly without leaving partial entities | batch_too_large, batch_all_failed |
 
@@ -74,7 +74,7 @@ All `forge_draw_*` create new entities only: `RequiresBackup=false`, `Idempotent
 | `forge_entity_explode` | handles[] (≤1000), eraseSource? (default true) | C26: explodes compound entities into their owner space via `Entity.Explode`; converts visible non-constant `BlockReference` `AttributeReference`s to standalone `DBText`/`MText` (BURST-style) and reports per-handle `failed:[{handle,reason}]` |
 | `forge_entity_erase` | handles[] (≤1000; above 100 requires acknowledgeBulk=true), dryRun | Destructive; explicit handles only |
 | `forge_entity_set_props` | handles[], layer?, colorIndex?, linetype?, lineweight? | null = unchanged; layer/linetype must exist |
-| `forge_undo` | — | Undoes the last undo group (`_.U`); returns honestly what AutoCAD reported |
+| `forge_undo` | — | Undoes the last tracked Forge write and reads the drawing back (fix-smoke-20261029 D3): `undone=true` only when reverted; skips empty / zoom-pan / plot side-effect units; refuses when the drawing changed after the write; a foreign or incomplete unit is redone (`MREDO`) and read back |
 
 Mutating entity tools check locked layers before upgrading to write (`layer_locked`) and set `Destructive=true`, `RequiresBackup=true`. `forge_entity_get` / `forge_entity_list` / `forge_entity_intersect`: `ReadOnly=true`.
 
@@ -104,7 +104,7 @@ Mutating entity tools check locked layers before upgrading to write (`layer_lock
 | `forge_measure_batch` | handles[]?, p1+p2? | True engine measurement — per-handle length/area/type/layer, pointDistance, bbox union. Never re-read vertices (shoelace math silently loses area on curved segments) |
 | `forge_entity_array` | handles[], kind: `rectangular` (rows, columns, rowSpacing, colSpacing) \| `polar` (center, count 2..5000, angleTotalDeg default 360, rotateItems default true) | Clones + TransformBy placements, sources untouched; destructive + backup like copy |
 | `forge_layer_set` | name, isOn?, isFrozen? (refused on the current layer), isLocked?, isPlottable?, colorIndex?, makeCurrent? | Idempotent state write with full state read-back |
-| `forge_doc_new` | templatePath? | New document (blank or DWT/DWG); it becomes active |
+| `forge_doc_new` | templatePath? | New document (blank or DWT/DWG), made active in application context; `ok` only when it reads back as active (`doc_new_unconfirmed` otherwise) |
 | `forge_doc_export_dxf` | outputPath, overwriteAcknowledged? | `DxfOut(path, 16, false)` — 16-digit precision; exports the in-memory state; destination backup + overwrite ack |
 | `forge_draw_polyline_from_csv` | csvPath, hasHeader?, delimiter?, xColumn?, yColumn?, closed?, constantWidth?, layer?, colorIndex? | Survey/centerline point lists from CSV without token cost; reports dropped lines |
 | `forge_viewport_add` | layout, center, width, height | Rectangular model-space viewport on a paper-space layout, read-back carries the viewport number |
@@ -122,7 +122,7 @@ Mutating entity tools check locked layers before upgrading to write (`layer_lock
 | Tool | Params | Notes |
 |---|---|---|
 | `forge_draw_grid` | origin? `[x,y]`, xPositions? / xSpacings?, xLabels?, yPositions? / ySpacings?, yLabels?, extensionLength?, bubbleRadius?, bubbleSides? (`start`\|`end`\|`both`\|`none`), includeDimensions? (default true), layer?, gridLayer?, bubbleLayer?, dimLayer?, gridLinetype?, dimStyle?, colorIndex? | Draws complete column grid (axis lines, grid bubble circles + centered `DBText`, bay + overall `RotatedDimension`s) and returns named intersection dictionary (`"A-1": [x,y]`) for column/wall placement |
-| `forge_draw_wall` | vertices `[[x,y],...]`, thickness (>0), justification? (`center`\|`left`\|`right`), closed?, openings? `[{segmentIndex, offsetFromStart, width}]`, hatchPattern?, hatchScale?, hatchAngleDeg?, layer?, hatchLayer?, colorIndex? | Draws mitered double-line walls with continuous corner turns, slices out door/window openings with jamb end-caps, optionally hatches wall loops, and returns opening `center` + `angleDeg` for door/window block insertion |
+| `forge_draw_wall` | vertices `[[x,y],...]`, thickness (>0), justification? (`center`\|`left`\|`right`), closed?, openings? `[{segmentIndex, offsetFromStart, width}]`, hatchPattern?, hatchScale?, hatchAngleDeg?, layer?, hatchLayer?, colorIndex? | Draws mitered double-line walls with continuous corner turns, slices out door/window openings with jamb end-caps, optionally hatches wall loops (same pattern order and readback as `forge_draw_hatch`; `invalid_pattern` rolls back the call), and returns opening `center` + `angleDeg` for door/window block insertion |
 
 Tool profile `authoring` (`forge_system_tool_profile name=authoring`) lists the whole C20–C30
 surface plus the reliability-wave tools (`forge_doc_activate`, `forge_text_list`) and the speed-wave
@@ -137,5 +137,5 @@ all **119 tools**.
 - Hatch: `SetDatabaseDefaults(db)` → append to BTR → set `PatternScale` and `PatternAngle` **before** `SetHatchPattern` → `Associative = true` → `AppendLoop` → `EvaluateHatch(true)`.
 - Dimensions: construct (`RotatedDimension`, `AlignedDimension`, `RadialDimension`, `DiametricDimension(chordPt, farChordPt, ...)`, `Point3AngularDimension(vertex, p1, p2, arcPt, ...)`, `OrdinateDimension`), call `SetDatabaseDefaults(db)`, set `DimensionStyle = styleId`, apply `Dimscale`/`DimensionText`, append, and call `RecomputeDimensionBlock(true)`.
 - Blocks: entities cannot be re-parented — append clones transformed by −basePoint, erase the originals last, all in one transaction; `SetAttributesFromBlock` overwrites attribute values, so set values only after it.
-- Undo marks: the dispatcher already groups every non-read-only typed write (`WithUndoMark`); `forge_undo` pops exactly one group.
+- Undo marks: the dispatcher already groups every non-read-only typed write (`WithUndoMark`) and records what it changed; `forge_undo` reverts the last one and reads it back.
 

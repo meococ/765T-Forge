@@ -330,7 +330,7 @@ public sealed partial class PluginCommandProcessor
 
                             // Attribute references live in the INSERT's owner space; they belong to this INSERT.
                             var size = insertSizes.TryGetValue(br.Handle.ToString(), out var s) ? s : 0;
-                            AddAttribute(ar, value, frame, br.Handle.ToString(), size);
+                            AddAttribute(ar, value, frame, br.Layer, br.Handle.ToString(), size);
                         }
 
                         break;
@@ -348,7 +348,7 @@ public sealed partial class PluginCommandProcessor
             return texts.Count < ClashMaxTexts || segments < ClashMaxSegments;
         });
 
-        void AddAttribute(AttributeReference ar, string value, BlockWalkFrame frame, string owner, double ownerSize)
+        void AddAttribute(AttributeReference ar, string value, BlockWalkFrame frame, string insertLayer, string owner, double ownerSize)
         {
             if (texts.Count >= ClashMaxTexts)
             {
@@ -356,7 +356,8 @@ public sealed partial class PluginCommandProcessor
                 return;
             }
 
-            var effective = BlockWalk.EffectiveLayer(ar.Layer, frame.ParentEffectiveLayer);
+            // D6: a layer-0 ATTRIB shows on its INSERT's effective layer (the frame is the INSERT's owner space).
+            var effective = BlockWalk.AttributeEffectiveLayer(ar.Layer, insertLayer, frame.ParentEffectiveLayer);
             if (!LayerVisible(effective) || exclude.Matches(effective) || !TextWanted(ar.Layer, effective))
             {
                 return;

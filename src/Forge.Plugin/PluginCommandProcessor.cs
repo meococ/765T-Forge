@@ -72,6 +72,11 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, "unauthorized", "Invalid Forge named pipe token.");
         }
 
+        // fix-smoke-20261029 D3: every authenticated call opens an undo-ledger scope, so object changes
+        // made by this call are never mistaken for changes made outside Forge.
+        BeginUndoCallScope(command.Tool);
+        ResetHatchBaselines();
+
         // docs/cad-job-tools.md C2: the year gate runs before safety eval, backup, undo mark and
         // dispatch; the two diagnostic tools still answer so the mismatch is visible by name.
         MeasureHostYear();
@@ -241,7 +246,7 @@ public sealed partial class PluginCommandProcessor
         var skipUndo = metadata.ReadOnly || command.DryRun || SkipUndoMarkTools.Contains(command.Tool) || LineworkLocal.IsLineworkTool(command.Tool);
         var result = skipUndo
             ? Dispatch()
-            : WithUndoMark(Dispatch);
+            : WithUndoMark(command, Dispatch);
 
         return result with
         {
@@ -252,45 +257,21 @@ public sealed partial class PluginCommandProcessor
         };
     }
 
-    private static readonly Dictionary<IntPtr, int> UndoDepthByDb = new();
-
-    internal static int GetTrackedUndoDepth(Database db)
-    {
-        lock (UndoDepthByDb)
-        {
-            return UndoDepthByDb.TryGetValue(db.UnmanagedObject, out var depth) ? depth : 0;
-        }
-    }
-
-    internal static bool TryDecrementTrackedUndoDepth(Database db, out int remaining)
-    {
-        lock (UndoDepthByDb)
-        {
-            if (UndoDepthByDb.TryGetValue(db.UnmanagedObject, out var depth) && depth > 0)
-            {
-                remaining = depth - 1;
-                UndoDepthByDb[db.UnmanagedObject] = remaining;
-                return true;
-            }
-
-            remaining = 0;
-            return false;
-        }
-    }
-
-    private static void IncrementTrackedUndoDepth(Database db)
-    {
-        lock (UndoDepthByDb)
-        {
-            UndoDepthByDb.TryGetValue(db.UnmanagedObject, out var depth);
-            UndoDepthByDb[db.UnmanagedObject] = depth + 1;
-        }
-    }
-
-    private static ForgeResult WithUndoMark(Func<ForgeResult> action)
+    private static ForgeResult WithUndoMark(ForgeCommand command, Func<ForgeResult> action)
     {
         // AutoCAD 2026 Document no longer exposes StartUndoMark/EndUndoMark on the managed Document type.
         // Use a synchronous UNDO Begin/End group so typed writes remain one Ctrl+Z unit when possible.
+        // D3: the undo ledger records this write's footprint from just before BE to just after E.
+        UndoFootprint? footprint = null;
+        try
+        {
+            footprint = OpenFootprint(command.Tool, command.Id);
+        }
+        catch
+        {
+            footprint = null;
+        }
+
         var openedGroup = false;
         try
         {
@@ -310,16 +291,14 @@ public sealed partial class PluginCommandProcessor
         }
         finally
         {
+            var succeeded = false;
             if (openedGroup)
             {
                 try
                 {
                     ActiveEditor.Command("_.UNDO", "_E");
-                    if (result is { Ok: true })
-                    {
-                        IncrementTrackedUndoDepth(ActiveDb);
-                    }
-                    else
+                    succeeded = result is { Ok: true };
+                    if (!succeeded)
                     {
                         // Failed or exception-aborted write: pop the empty/aborted undo group
                         // so a subsequent forge_undo reverts the previous valid write, not a no-op group.
@@ -330,6 +309,16 @@ public sealed partial class PluginCommandProcessor
                 {
                     // Best effort close/cleanup.
                 }
+            }
+
+            try
+            {
+                // A write that could not open its own group is not undoable by forge_undo.
+                CloseFootprint(footprint, succeeded && openedGroup);
+            }
+            catch
+            {
+                // Ledger bookkeeping must never fail the write itself.
             }
         }
     }
@@ -518,65 +507,222 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, "missing_path", "DWG path is required.");
         }
 
+        if (RejectControlChars(command, ("path", args.Path)) is { } reject)
+        {
+            return reject;
+        }
+
+        var path = Path.GetFullPath(args.Path!.Trim());
+        var docs = Documents.Cast<Document>().ToList();
+        var openMatch = docs.FirstOrDefault(d => PathsEqual(d.Name, path));
         if (command.DryRun)
         {
-            return DryRun(command, new { args.Path });
+            return DryRun(command, new { path, alreadyOpen = openMatch is not null });
         }
 
-        if (!File.Exists(args.Path))
+        if (openMatch is null && !File.Exists(path))
         {
-            return ForgeResult.Failure(command.Id, "dwg_not_found", $"DWG not found: {args.Path}");
+            return ForgeResult.Failure(command.Id, "dwg_not_found", $"DWG not found: {path}");
         }
 
-        var previousFileDia = Application.GetSystemVariable("FILEDIA");
-        try
+        // fix-smoke-20261029 D1: application-context (Idle) lane; the opened drawing is made active and
+        // read back by reference. A drawing that is already open is activated, not opened a second time
+        // (AutoCAD would offer read-only).
+        var before = Documents.MdiActiveDocument?.Name;
+        Document document;
+        if (openMatch is not null)
         {
-            Application.SetSystemVariable("FILEDIA", 0);
-            Documents.Open(args.Path, false);
+            document = openMatch;
         }
-        finally
+        else
         {
-            Application.SetSystemVariable("FILEDIA", previousFileDia);
+            var previousFileDia = Application.GetSystemVariable("FILEDIA");
+            try
+            {
+                Application.SetSystemVariable("FILEDIA", 0);
+                document = Documents.Open(path, false);
+            }
+            catch (System.Exception ex)
+            {
+                return ForgeResult.Failure(command.Id, "doc_open_failed", $"Opening the drawing failed: {ex.Message}", "Check the file is a readable DWG for this AutoCAD version and not locked by another program.");
+            }
+            finally
+            {
+                Application.SetSystemVariable("FILEDIA", previousFileDia);
+            }
         }
 
-        return ForgeResult.Success(command.Id, new { opened = args.Path });
+        if (!ReferenceEquals(Documents.MdiActiveDocument, document))
+        {
+            Documents.MdiActiveDocument = document;
+        }
+
+        return ReadBackActiveDocument(
+            command.Id,
+            new DocActivateReadBack(document.Name, before, null, false, false, [])
+            {
+                TargetDocument = document,
+                AlreadyOpen = openMatch is not null,
+                UnconfirmedCode = "doc_open_unconfirmed"
+            });
     }
 
     private ForgeResult SaveDocument(ForgeCommand command)
     {
         var args = Args<PathArgs>(command);
-        if (command.DryRun)
+        if (RejectControlChars(command, ("path", args.Path)) is { } reject)
         {
-            return DryRun(command, new { current = ActiveDocumentPath(), saveAs = args.Path, args.OverwriteAcknowledged });
+            return reject;
         }
 
+        var doc = ActiveDoc;
+        var db = doc.Database;
+        var activePath = ActiveDocumentPath();
+        var titled = IsTitled();
+
+        // fix-smoke-20261029 D7: Database.Save() is "not implemented" and the 2-argument SaveAs writes a
+        // copy without renaming the document. Both branches use SaveAs(path, bBakAndRename: true, ...),
+        // which renames the open document, and the result comes from a readback.
+        string target;
         if (string.IsNullOrWhiteSpace(args.Path))
         {
-            ActiveDb.Save();
-            return ForgeResult.Success(command.Id, new { saved = ActiveDocumentPath() });
+            if (!titled || string.IsNullOrWhiteSpace(activePath) || !Path.IsPathRooted(activePath))
+            {
+                return ForgeResult.Failure(command.Id, "save_requires_path", "This drawing has never been saved, so it has no file to save to.", "Pass path=\"...\name.dwg\" to save it under a name.");
+            }
+
+            target = activePath!;
+        }
+        else
+        {
+            target = Path.GetFullPath(args.Path!.Trim());
         }
 
-        var activePath = ActiveDocumentPath();
-        var destinationExists = File.Exists(args.Path);
-        var samePath = PathsEqual(activePath, args.Path);
+        if (!string.Equals(Path.GetExtension(target), ".dwg", StringComparison.OrdinalIgnoreCase))
+        {
+            return ForgeResult.Failure(command.Id, "invalid_path", $"The save path must end in .dwg: {target}", "AutoCAD's save API does not add the extension; pass the full file name.");
+        }
+
+        var destinationExists = File.Exists(target);
+        var samePath = PathsEqual(activePath, target);
+        if (command.DryRun)
+        {
+            return DryRun(command, new { current = activePath, saveAs = target, samePath, destinationExists, args.OverwriteAcknowledged });
+        }
 
         if (destinationExists && !samePath && !args.OverwriteAcknowledged)
         {
             return ForgeResult.Failure(
                 command.Id,
                 "saveas_overwrite_not_acknowledged",
-                $"Refusing to overwrite an existing different drawing: {args.Path}",
+                $"Refusing to overwrite an existing different drawing: {target}",
                 "Pass overwriteAcknowledged=true after confirming the destination backup policy.");
         }
 
         string? destinationBackup = null;
         if (destinationExists && !samePath)
         {
-            destinationBackup = _backupPlanner.TryBackup(args.Path);
+            destinationBackup = _backupPlanner.TryBackup(target);
         }
 
-        ActiveDb.SaveAs(args.Path, DwgVersion.Current);
-        return ForgeResult.Success(command.Id, new { savedAs = args.Path, destinationBackup });
+        var bakPath = Path.ChangeExtension(target, ".bak");
+        var startUtc = DateTime.UtcNow;
+        try
+        {
+            db.SaveAs(target, true, DwgVersion.Current, db.SecurityParameters);
+        }
+        catch (System.Exception ex)
+        {
+            return ForgeResult.Failure(command.Id, "save_failed", $"Saving failed: {ex.Message}", "Check the folder is writable and the file is not open elsewhere.", data: new { target, destinationBackup });
+        }
+
+        var info = new FileInfo(target);
+        string? dwgName = null;
+        object? dbmodAfter = null;
+        try
+        {
+            dwgName = Application.GetSystemVariable("DWGNAME") as string;
+            dbmodAfter = Application.GetSystemVariable("DBMOD");
+        }
+        catch
+        {
+            // Reported as null.
+        }
+
+        string? docName = null;
+        string? dbFilename = null;
+        try
+        {
+            docName = doc.Name;
+            dbFilename = db.Filename;
+        }
+        catch
+        {
+            // Reported as null; the decision below fails closed.
+        }
+
+        info.Refresh();
+        var decision = DocumentReadBack.SaveDecision(target, docName, dbFilename, dwgName, info.Exists, info.Exists ? info.Length : 0, info.Exists ? info.LastWriteTimeUtc : DateTime.MinValue, startUtc);
+        var warnings = new List<string>();
+        string? bakReported = null;
+        if (File.Exists(bakPath) && File.GetLastWriteTimeUtc(bakPath) >= startUtc.AddSeconds(-2))
+        {
+            bakReported = bakPath;
+            warnings.Add($"AutoCAD kept the previous file as {bakPath}.");
+        }
+        else if (File.Exists(bakPath) && destinationExists)
+        {
+            bakReported = bakPath;
+        }
+
+        var data = new
+        {
+            savedAs = target,
+            previousName = activePath,
+            documentName = docName,
+            databaseFilename = dbFilename,
+            dwgName,
+            fileBytes = info.Exists ? info.Length : 0,
+            fileWriteUtc = info.Exists ? info.LastWriteTimeUtc : (DateTime?)null,
+            dbmodAfter,
+            dbmodNote = dbmodAfter is not null && System.Convert.ToInt32(dbmodAfter, System.Globalization.CultureInfo.InvariantCulture) != 0
+                ? "AutoCAD's save API does not always clear DBMOD, so the drawing can still read as modified after this save."
+                : null,
+            bakPath = bakReported,
+            destinationBackup,
+            warnings
+        };
+        var verification = new ForgeVerification
+        {
+            Attempted = true,
+            Passed = decision == DocumentReadBack.SaveConfirmed,
+            Message = decision switch
+            {
+                DocumentReadBack.SaveConfirmed => "The file was written during this call and the open document now carries its name.",
+                DocumentReadBack.SaveNotRenamed => "The file was written but the open document did not take its name.",
+                _ => "No file was written at the target during this call."
+            },
+            ReadBack = new { documentName = docName, databaseFilename = dbFilename, dwgName }
+        };
+
+        return decision switch
+        {
+            DocumentReadBack.SaveConfirmed => ForgeResult.Success(command.Id, data, verification: verification),
+            DocumentReadBack.SaveNotRenamed => ForgeResult.Failure(command.Id, "saveas_not_renamed", $"The drawing was written to {target}, but the open document is still named '{docName}'.", "forge_doc_open the saved file before working on it by that name.", data: data, verification: verification),
+            _ => ForgeResult.Failure(command.Id, "save_unconfirmed", $"No new file was found at {target} after the save.", "Check the folder and read back with forge_doc_list_open before retrying.", data: data, verification: verification)
+        };
+    }
+
+    private static bool IsTitled()
+    {
+        try
+        {
+            return System.Convert.ToInt32(Application.GetSystemVariable("DWGTITLED"), CultureInfo.InvariantCulture) != 0;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static ForgeResult ListXrefs(ForgeCommand command)

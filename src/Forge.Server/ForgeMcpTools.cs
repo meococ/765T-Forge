@@ -50,12 +50,12 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_doc_list_layouts", new { }, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_doc_open", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
-    [Description("Open a DWG in AutoCAD with dialog suppression.")]
+    [Description("Open a DWG in AutoCAD (dialogs suppressed) and make it the active document. Runs in application context (works from the Start tab). A drawing that is already open is activated, not opened twice (alreadyOpen=true). ok=true only when AutoCAD reads back the opened drawing as the active document and DWGNAME names it; otherwise it fails with doc_open_unconfirmed and data shows which drawing is active. dwg_not_found / doc_open_failed when the file cannot be opened.")]
     public static Task<ForgeResult> DocOpen(ForgeToolRunner runner, string path, bool dryRun = false, CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_doc_open", new { path }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_doc_save", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
-    [Description("Save the active document or save as a specified path with audit and backup.")]
+    [Description("Save the active document, or save it as path (must end in .dwg). Save-as renames the open document to the new file, as AutoCAD SAVEAS does; AutoCAD keeps the previous file as .bak (bakPath). ok=true only when the file was written during this call and the document name, database file name and DWGNAME all read back as the target; otherwise saveas_not_renamed (written but the document kept its old name) or save_unconfirmed (no new file at the target). Overwriting a different existing drawing needs overwriteAcknowledged=true and is backed up first. A never-saved drawing needs path (save_requires_path).")]
     public static Task<ForgeResult> DocSave(ForgeToolRunner runner, string? path = null, bool overwriteAcknowledged = false, bool dryRun = false, CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_doc_save", new { path, overwriteAcknowledged }, dryRun, cancellationToken: cancellationToken);
 
@@ -125,7 +125,7 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_layout_page_setup_apply", new { setupName, layout }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_plot_to_pdf", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
-    [Description("Plot one layout (or Model) to PDF through the PlotEngine API. Never opens a PDF viewer: the plot always goes through a Forge-owned copy of the device PC3 with View_New_File=FALSE (\"765T-Forge <device> (no viewer).pc3\"). Defaults: device \"DWG To PDF.pc3\"; a layout keeps its own paper and plots plotArea=layout; when paperSize differs from the layout's paper the area defaults to extents + fit + centered so the drawing fills the sheet; Model defaults to ISO A1 + extents + fit. plotArea: layout|extents|display|limits|window (window=[[x1,y1],[x2,y2]] in the plotted space). scale: fit or \"1:100\". orientation: auto (default, long side to long side)|landscape|portrait, honoured against the real paper. paperSize accepts the localized or canonical media name; an unknown one fails with candidates. Read-back: device actually used, viewer suppression, media, paper/printable mm, PDF sheet size from /MediaBox, fit + coverage estimates and warnings (e.g. content would be small in a corner). engine=\"command\" is the legacy -PLOT fallback.")]
+    [Description("Plot one layout (or Model) to PDF through the PlotEngine API. Never opens a PDF viewer: the plot always goes through a Forge-owned copy of the device PC3 with View_New_File=FALSE (\"765T-Forge <device> (no viewer).pc3\"). Defaults: device \"DWG To PDF.pc3\"; a layout keeps its own paper and plots plotArea=layout; when paperSize differs from the layout's paper the area defaults to extents + fit + centered so the drawing fills the sheet; Model defaults to ISO A1 + extents + fit. plotArea: layout|extents|display|limits|window (window=[[x1,y1],[x2,y2]] in the plotted space). scale: fit or \"1:100\". orientation: auto (default, long side to long side)|landscape|portrait, honoured against the real paper. paperSize accepts the localized or canonical media name; an unknown one fails with candidates. A layout that is not current is made current for the plot and restored afterwards (layoutSwitched, layoutRestored; a restore mismatch is a warning); a dry run never switches and reports validation=deferred. Model extents are refreshed before an extents plot. Read-back: device actually used, viewer suppression, media, paper/printable mm, PDF sheet size from /MediaBox, and coverage measured from the PDF ink (coverageSource=pdf, looksTiny, pdfContent). With plotArea=extents and scale=fit a tiny or empty PDF fails (plot_content_tiny / plot_content_empty); otherwise it is a warning. looksTiny is null when the PDF could not be measured. engine=\"command\" is the legacy -PLOT fallback.")]
     public static Task<ForgeResult> PlotToPdf(
         ForgeToolRunner runner,
         string outputPath,
@@ -205,7 +205,7 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_draw_mtext", new { position, height, text, width, attachmentPoint, rotationDeg, layer, colorIndex }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_draw_hatch", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
-    [Description("Draw a hatch: boundary = an existing closed curve handle, or vertices that first draw a closed polyline (associative). pattern (default ANSI31), scale, angleDeg. Returns the hatch handle.")]
+    [Description("Draw a hatch: boundary = an existing closed curve handle, or vertices that first draw a closed polyline (associative). pattern (default ANSI31), scale, angleDeg. The pattern, scale, angle, loop count and first pattern line are read back; a mismatch fails with hatch_readback_mismatch and an unknown pattern with invalid_pattern (nothing is left behind). Returns the hatch handle.")]
     public static Task<ForgeResult> DrawHatch(ForgeToolRunner runner, string? boundaryHandle = null, double[][]? boundaryVertices = null, string? pattern = null, double? scale = null, double angleDeg = 0, string? layer = null, bool dryRun = false, CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_draw_hatch", new { boundary = new { handle = boundaryHandle, vertices = boundaryVertices }, pattern, scale, angleDeg, layer }, dryRun, cancellationToken: cancellationToken);
 
@@ -403,7 +403,7 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_entity_set_props", new { handles, layer, colorIndex, linetype, lineweight }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_undo", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
-    [Description("Undo one step in AutoCAD: every Forge write is one undo group, so this reverts exactly the last typed write. Honest result; nothing to undo returns undo_failed.")]
+    [Description("Undo the last tracked Forge write in the active drawing, verified by readback. Forge records what each write changed; this runs U, steps over empty, zoom/pan and plot side-effect undo steps, and returns undone=true only when the drawing reads back as reverted. Refuses without undoing when the drawing changed after that write (undo_target_changed_since_write) or the write was too large (undo_footprint_too_large). If an undo step would revert a change made outside Forge, or the revert is incomplete, every U of this call is redone and read back (undo_target_not_reverted / undo_incomplete, restored=true|false). undo_nothing_recorded: the write changed nothing; undo_failed: no Forge write to undo.")]
     public static Task<ForgeResult> Undo(ForgeToolRunner runner, CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_undo", new { }, cancellationToken: cancellationToken);
 
@@ -443,7 +443,7 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_viewport_add", new { layout, center, width, height }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_doc_new", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
-    [Description("Create a new document (optionally from a DWT/DWG templatePath); it becomes the active document. Call forge_doc_list_open afterwards to confirm.")]
+    [Description("Create a new document (optionally from a DWT/DWG templatePath) and make it the active document. Runs in application context (works from the Start tab). ok=true only when AutoCAD reads back the new drawing as the active document and DWGNAME names it; otherwise it fails with doc_new_unconfirmed and data shows which drawing is active.")]
     public static Task<ForgeResult> DocNew(ForgeToolRunner runner, string? templatePath = null, bool dryRun = false, CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_doc_new", new { templatePath }, dryRun, cancellationToken: cancellationToken);
 
@@ -1150,7 +1150,7 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_draw_grid", new { origin, xPositions, xSpacings, xLabels, yPositions, ySpacings, yLabels, extensionLength, bubbleRadius, bubbleSides, includeDimensions, layer, gridLayer, bubbleLayer, dimLayer, gridLinetype, dimStyle, colorIndex }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_draw_wall", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
-    [Description("Draw a double-line architectural wall along a 2D centerline/reference path with clean mitered corners, end caps, optional door/window openings (each opening has segmentIndex, offsetFromStart, width — slices the wall with jamb end-caps and returns opening center + angleDeg for door/window block insertion), and optional associative hatch fill. justification: 'center'|'left'|'right'.")]
+    [Description("Draw a double-line architectural wall along a 2D centerline/reference path with clean mitered corners, end caps, optional door/window openings (each opening has segmentIndex, offsetFromStart, width — slices the wall with jamb end-caps and returns opening center + angleDeg for door/window block insertion), and optional associative hatch fill (same pattern order and readback as forge_draw_hatch; invalid_pattern or hatch_readback_mismatch rolls back the whole call). justification: 'center'|'left'|'right'.")]
     public static Task<ForgeResult> DrawWall(
         ForgeToolRunner runner,
         double[][] vertices,

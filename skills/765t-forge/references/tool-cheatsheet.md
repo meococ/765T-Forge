@@ -11,7 +11,7 @@
 | Ground | `forge_entity_get` (one handle), `forge_entity_list` (window or layer — no select-all), `forge_block_list`, `forge_layer_list` |
 | Draw | `forge_layer_create` first, then `forge_draw_line/_polyline/_circle/_arc/_text/_mtext/_hatch/_dimension` — many shapes per call: `forge_draw_batch` (≤1000 steps; `atomic=true`, `resultMode=summary` for big batches); CSV point lists: `forge_draw_polyline_from_csv` |
 | Bring in / set up | `forge_doc_import` (DXF/DWG → block / merge / xref in one call), `forge_standards_import` (styles, layers, page setups from a template), `forge_block_insert_bulk` (≤2000 INSERTs + tags) |
-| Modify | `forge_entity_move/_copy/_rotate/_scale/_mirror/_array/_offset/_erase/_set_props` by handles; `forge_undo` reverts one Forge write |
+| Modify | `forge_entity_move/_copy/_rotate/_scale/_mirror/_array/_offset/_erase/_set_props` by handles; `forge_undo` reverts the last Forge write, verified (`undone=true` only after readback; refuses if the drawing changed since) |
 | See / measure | `forge_view_capture` (PNG — read it to visually verify), `forge_measure_batch` (engine length/area/distance) |
 | Sheets | `forge_layout_create`, `forge_viewport_add`, `forge_layer_set`, `forge_doc_new`, `forge_doc_export_dxf` |
 | Gate | `forge_qa_annotation_clash` (text overlap / crossing / door swing / wall / plotted height — before PNG review), `forge_qa_preflight`, `forge_qa_check_xrefs`, `forge_qa_verify_titleblock` |

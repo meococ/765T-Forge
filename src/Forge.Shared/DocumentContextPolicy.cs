@@ -1,0 +1,112 @@
+namespace Forge.Shared;
+
+/// <summary>
+/// fix-smoke-20261029 D1: tools that create, open, switch or close documents must run in AutoCAD's
+/// application context (the plugin's Application.Idle lane). Inside a document's command context AutoCAD
+/// defers the document switch until that command ends, so the new drawing never became active.
+/// </summary>
+public static class DocumentContextPolicy
+{
+    public static readonly IReadOnlySet<string> ApplicationContextTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "forge_doc_activate",
+        "forge_doc_new",
+        "forge_doc_open"
+    };
+
+    /// <summary>Tools that create or open a drawing: they may need longer than a plain switch to settle.</summary>
+    public static readonly IReadOnlySet<string> LifecycleTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "forge_doc_new",
+        "forge_doc_open"
+    };
+
+    /// <summary>Failure codes that mean "done, but AutoCAD has not yet reported the drawing as active": keep polling.</summary>
+    public static readonly IReadOnlySet<string> UnconfirmedCodes = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "doc_activate_unconfirmed",
+        "doc_new_unconfirmed",
+        "doc_open_unconfirmed"
+    };
+
+    public const int ActivatePollMs = 2000;
+
+    /// <summary>Safety margin kept before the request deadline when a lifecycle tool polls.</summary>
+    public const int LifecycleDeadlineMarginMs = 5000;
+
+    public static bool RunsInApplicationContext(string tool) => ApplicationContextTools.Contains(tool);
+
+    /// <summary>How long (ms since the request started) the Idle lane may keep re-reading the active document.</summary>
+    public static long PollWindowMs(string tool, long requestDeadlineMs)
+        => LifecycleTools.Contains(tool)
+            ? Math.Max(ActivatePollMs, requestDeadlineMs - LifecycleDeadlineMarginMs)
+            : ActivatePollMs;
+}
+
+/// <summary>Pure readback decisions for document activation (D1) and save-as (D7).</summary>
+public static class DocumentReadBack
+{
+    /// <summary>
+    /// The target drawing is confirmed active only when AutoCAD's active document is the same object
+    /// AND DWGNAME names its file (DWGNAME lagged behind in r1).
+    /// </summary>
+    public static bool IsConfirmed(bool activeIsTarget, string? targetName, string? dwgName)
+        => activeIsTarget
+           && !string.IsNullOrWhiteSpace(targetName)
+           && string.Equals(FileName(targetName), dwgName?.Trim(), StringComparison.OrdinalIgnoreCase);
+
+    public const string SaveConfirmed = "confirmed";
+    public const string SaveNotRenamed = "not_renamed";
+    public const string SaveNotWritten = "not_written";
+
+    /// <summary>
+    /// forge_doc_save readback: the file must exist, be non-empty and be written during this call, and the
+    /// open document must now carry the target path (document name, database file name and DWGNAME).
+    /// </summary>
+    public static string SaveDecision(
+        string targetPath,
+        string? documentName,
+        string? databaseFilename,
+        string? dwgName,
+        bool fileExists,
+        long fileLength,
+        DateTime fileWriteUtc,
+        DateTime callStartUtc)
+    {
+        // File times on NTFS are precise, but allow for coarse file systems.
+        if (!fileExists || fileLength <= 0 || fileWriteUtc < callStartUtc.AddSeconds(-2))
+        {
+            return SaveNotWritten;
+        }
+
+        return SamePath(documentName, targetPath)
+               && SamePath(databaseFilename, targetPath)
+               && string.Equals(FileName(targetPath), dwgName?.Trim(), StringComparison.OrdinalIgnoreCase)
+            ? SaveConfirmed
+            : SaveNotRenamed;
+    }
+
+    public static bool SamePath(string? a, string? b)
+    {
+        if (string.IsNullOrWhiteSpace(a) || string.IsNullOrWhiteSpace(b))
+        {
+            return false;
+        }
+
+        try
+        {
+            return string.Equals(Path.GetFullPath(a.Trim()), Path.GetFullPath(b.Trim()), StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string FileName(string path)
+    {
+        var trimmed = path.Trim();
+        var cut = trimmed.LastIndexOfAny(['\\', '/']);
+        return cut >= 0 ? trimmed[(cut + 1)..] : trimmed;
+    }
+}

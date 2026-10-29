@@ -294,9 +294,9 @@ public sealed partial class PluginCommandProcessor
         var results = new List<object>();
         var countsByType = new Dictionary<string, int>(StringComparer.Ordinal);
 
-        bool Emit(string type, Entity source, string text, string? raw, string? tag, Point3d localPosition, Point3d? localAlignment, double localRotation, double localHeight, string style, bool invisible, BlockWalkFrame frame, double[]? worldBox)
+        bool Emit(string type, Entity source, string text, string? raw, string? tag, Point3d localPosition, Point3d? localAlignment, double localRotation, double localHeight, string style, bool invisible, BlockWalkFrame frame, double[]? worldBox, string? effectiveLayerOverride = null)
         {
-            var effectiveLayer = BlockWalk.EffectiveLayer(source.Layer, frame.ParentEffectiveLayer);
+            var effectiveLayer = effectiveLayerOverride ?? BlockWalk.EffectiveLayer(source.Layer, frame.ParentEffectiveLayer);
             if (!TextRead.LayerMatches(args.Layer, source.Layer, effectiveLayer))
             {
                 return true;
@@ -424,8 +424,10 @@ public sealed partial class PluginCommandProcessor
                             text = CadSpatialMath.StripMTextFormatting(raw);
                         }
 
-                        // Attribute references live in the INSERT's owner space: same frame as the INSERT.
-                        if (!Emit("ATTRIB", ar, text, raw, ar.Tag, ar.Position, AlignmentOrNull(ar), ar.Rotation, ar.Height, ar.TextStyleName, ar.Invisible, frame, WorldBox(ar, frame)))
+                        // Attribute references live in the INSERT's owner space: same frame as the INSERT. Their
+                        // layer-0 fallback is the INSERT's effective layer, not the frame's (D6).
+                        var attribLayer = BlockWalk.AttributeEffectiveLayer(ar.Layer, br.Layer, frame.ParentEffectiveLayer);
+                        if (!Emit("ATTRIB", ar, text, raw, ar.Tag, ar.Position, AlignmentOrNull(ar), ar.Rotation, ar.Height, ar.TextStyleName, ar.Invisible, frame, WorldBox(ar, frame), attribLayer))
                         {
                             return false;
                         }

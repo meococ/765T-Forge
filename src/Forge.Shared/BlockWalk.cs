@@ -194,6 +194,14 @@ public static class BlockWalk
             ? parentEffectiveLayer
             : ownLayer;
 
+    /// <summary>
+    /// fix-smoke-20261029 D6: an ATTRIB belongs to its INSERT, so a layer-0 ATTRIB shows on the INSERT's
+    /// effective layer (the INSERT's own layer, or its parent's when the INSERT itself is on 0). The walk
+    /// frame of an ATTRIB is the INSERT's owner space, so the INSERT's own layer must be applied here.
+    /// </summary>
+    public static string AttributeEffectiveLayer(string attribLayer, string insertLayer, string? insertParentEffectiveLayer)
+        => EffectiveLayer(attribLayer, EffectiveLayer(insertLayer, insertParentEffectiveLayer));
+
     /// <summary>Sweep-correct arc chord sampling count used for transformed arcs (matches LineworkGeometry.TessellateArc density).</summary>
     public static int ArcSampleCount(double sweepRadians, double maxStepRad = Math.PI / 12)
     {

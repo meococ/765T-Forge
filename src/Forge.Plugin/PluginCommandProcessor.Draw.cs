@@ -1593,14 +1593,18 @@ public sealed partial class PluginCommandProcessor
     }
 
     /// <summary>
-    /// Single ordering for every hatch path: defaults/layer/colour, append (associativity and
-    /// pattern generation need a resident hatch), PatternScale + PatternAngle BEFORE
-    /// SetHatchPattern (it generates the pattern lines from the current scale/angle),
-    /// Associative before AppendLoop, EvaluateHatch last or the hatch renders blank.
+    /// Single ordering for every hatch path (fix-smoke-20261029 D2; Autodesk "Edit Hatch Patterns (.NET)"
+    /// and AcDbHatch remarks): defaults/layer/colour, append (associativity needs a resident hatch),
+    /// SetHatchPattern FIRST (PatternAngle throws eInvalidInput while no pattern is set), then
+    /// PatternScale and PatternAngle, then SetHatchPattern AGAIN so the definition lines are rebuilt
+    /// from the new scale/angle, Associative before AppendLoop, EvaluateHatch last. The result is read
+    /// back (name, scale, angle, loops, first definition line) before the step reports success.
     /// </summary>
     private static ObjectId CreateHatchOnBoundary(Database db, Transaction tr, ObjectId boundaryId, string pattern, double scale, double angleDeg, bool associative, string? layer, int? colorIndex)
     {
         var patternName = pattern.Trim().ToUpperInvariant();
+        var isSolid = patternName.Equals("SOLID", StringComparison.Ordinal);
+        var angleRad = DegreesToRadians(angleDeg);
         var boundaryEntity = tr.GetObject(boundaryId, OpenMode.ForRead) as Entity;
         var ownerId = boundaryEntity?.OwnerId ?? ObjectId.Null;
         var hatch = new Hatch();
@@ -1626,12 +1630,21 @@ public sealed partial class PluginCommandProcessor
             throw;
         }
 
-        if (!patternName.Equals("SOLID", StringComparison.Ordinal))
-        {
-            hatch.PatternScale = scale;
-            hatch.PatternAngle = DegreesToRadians(angleDeg);
-        }
+        ApplyHatchPattern(hatch, patternName, isSolid, scale, angleRad);
+        hatch.Associative = associative;
+        hatch.AppendLoop(HatchLoopTypes.Outermost, new ObjectIdCollection { boundaryId });
+        hatch.EvaluateHatch(true);
+        VerifyHatch(db, hatch, patternName, isSolid, scale, angleRad);
+        return id;
+    }
 
+    /// <summary>
+    /// The D2 pattern order shared by every hatch path (forge_draw_hatch, the draw_batch hatch step and
+    /// forge_draw_wall): SetHatchPattern first, then PatternScale and PatternAngle, then SetHatchPattern
+    /// again so the definition lines are rebuilt. A pattern AutoCAD rejects is the step error invalid_pattern.
+    /// </summary>
+    private static void ApplyHatchPattern(Hatch hatch, string patternName, bool isSolid, double scale, double angleRad)
+    {
         try
         {
             hatch.SetHatchPattern(HatchPatternType.PreDefined, patternName);
@@ -1641,10 +1654,95 @@ public sealed partial class PluginCommandProcessor
             throw new DrawStepException("invalid_pattern", $"Hatch pattern '{patternName}' could not be applied ({ex.ErrorStatus}). Use a predefined pattern such as ANSI31, ANSI37, AR-CONC or SOLID.");
         }
 
-        hatch.Associative = associative;
-        hatch.AppendLoop(HatchLoopTypes.Outermost, new ObjectIdCollection { boundaryId });
-        hatch.EvaluateHatch(true);
-        return id;
+        if (!isSolid)
+        {
+            hatch.PatternScale = scale;
+            hatch.PatternAngle = angleRad;
+            hatch.SetHatchPattern(hatch.PatternType, hatch.PatternName);
+        }
+    }
+
+    /// <summary>Per-call cache of scale-1/angle-0 first-definition lines, keyed by pattern and MEASUREMENT.</summary>
+    [ThreadStatic]
+    private static Dictionary<string, (double Angle, double Spacing)?>? _hatchBaselines;
+
+    private static void ResetHatchBaselines() => _hatchBaselines = null;
+
+    private static (double Angle, double Spacing)? HatchBaseline(Database db, string patternName)
+    {
+        _hatchBaselines ??= new Dictionary<string, (double, double)?>(StringComparer.OrdinalIgnoreCase);
+        var key = patternName + "|" + db.Measurement;
+        if (_hatchBaselines.TryGetValue(key, out var cached))
+        {
+            return cached;
+        }
+
+        (double, double)? baseline = null;
+        try
+        {
+            using var probe = new Hatch();
+            probe.SetDatabaseDefaults(db);
+            probe.SetHatchPattern(HatchPatternType.PreDefined, patternName);
+            if (probe.NumberOfPatternDefinitions > 0)
+            {
+                var def = probe.GetPatternDefinitionAt(0);
+                baseline = (def.Angle, HatchMath.PerpendicularSpacing(def.Angle, def.OffsetX, def.OffsetY));
+            }
+        }
+        catch
+        {
+            baseline = null;
+        }
+
+        _hatchBaselines[key] = baseline;
+        return baseline;
+    }
+
+    private static void VerifyHatch(Database db, Hatch hatch, string patternName, bool isSolid, double scale, double angleRad)
+    {
+        var problems = new List<string>();
+        if (!string.Equals(hatch.PatternName, patternName, StringComparison.OrdinalIgnoreCase))
+        {
+            problems.Add($"pattern '{hatch.PatternName}'");
+        }
+
+        if (hatch.NumberOfLoops < 1)
+        {
+            problems.Add("no boundary loop");
+        }
+
+        if (!isSolid)
+        {
+            if (Math.Abs(hatch.PatternScale - scale) > 1e-9 * Math.Max(1, Math.Abs(scale)))
+            {
+                problems.Add($"scale {hatch.PatternScale} (asked {scale})");
+            }
+
+            if (Math.Abs(HatchMath.WrapAngle(hatch.PatternAngle) - HatchMath.WrapAngle(angleRad)) > HatchMath.AngleTolerance)
+            {
+                problems.Add($"angle {hatch.PatternAngle * 180 / Math.PI:0.###}° (asked {angleRad * 180 / Math.PI:0.###}°)");
+            }
+
+            if (hatch.NumberOfPatternDefinitions < 1)
+            {
+                problems.Add("no pattern definition lines");
+            }
+            else if (HatchBaseline(db, patternName) is { } baseline)
+            {
+                var def = hatch.GetPatternDefinitionAt(0);
+                var (expectedAngle, expectedSpacing) = HatchMath.ExpectedDefinition(baseline.Angle, baseline.Spacing, scale, angleRad);
+                var spacing = HatchMath.PerpendicularSpacing(def.Angle, def.OffsetX, def.OffsetY);
+                if (!HatchMath.SameLineAngle(expectedAngle, def.Angle) || !HatchMath.SameSpacing(expectedSpacing, spacing))
+                {
+                    problems.Add($"definition line {def.Angle * 180 / Math.PI:0.###}°/{spacing:0.####} (expected {expectedAngle * 180 / Math.PI:0.###}°/{expectedSpacing:0.####})");
+                }
+            }
+        }
+
+        if (problems.Count > 0)
+        {
+            throw new DrawStepException("hatch_readback_mismatch", $"Hatch '{patternName}' read back wrong: {string.Join("; ", problems)}.");
+        }
     }
 
     private static ObjectId CreateDimension(Database db, Transaction tr, DrawBatchStep step)

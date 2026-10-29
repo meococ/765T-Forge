@@ -31,6 +31,21 @@ If you believe a specific file retains third-party copyrighted material that sho
 
 Historical planning notes (Vietnamese, aspirational — not the shipped tool list): [docs/history/build-brief.md](docs/history/build-brief.md).
 
+## References consulted (no code copied)
+
+The fix-smoke-20261029 wave (D1–D7) checked its API call sequences against these permissively licensed projects. **No code was copied from any of them**; each fix re-implements a documented AutoCAD API sequence in Forge's own code (`artifacts/fix-smoke-20261029/FIX-PLAN.md`, section R).
+
+- [luanshixia/AutoCADCodePack](https://github.com/luanshixia/AutoCADCodePack) (MIT) — hatch pattern before pattern angle (D2)
+- InspireFunction/IFoxCAD (MIT) — hatch build order (D2)
+- ADN MgdDbg (MIT) — hatch properties on a non-resident hatch (D2; older-release behaviour, not adopted)
+- [HorizunGroup/horizun-civil3d-mcp](https://github.com/HorizunGroup/horizun-civil3d-mcp) (Apache-2.0) — undo attribution in command context (D3)
+- U-C4N/Autocad-MCP (MIT) and [puran-water/autocad-mcp](https://github.com/puran-water/autocad-mcp) (MIT) — unverified undo, as a pattern to avoid (D3)
+- gile, Gile.AutoCAD.Extension (MIT) — `UpdateExt` before reading the extents (D5)
+- [UglyToad/PdfPig](https://github.com/UglyToad/PdfPig) (Apache-2.0) — PDF ink box as the union of painted paths, glyph boxes and images (D5)
+- [mozman/ezdxf](https://github.com/mozman/ezdxf) (MIT) — an ATTRIB on layer 0 takes its INSERT's resolved layer (D6)
+
+Autodesk documentation, ADN and Through-the-Interface blog posts and forum threads were read for the documented call sequences only (ideas, not code).
+
 ## Third-party notices
 
 Forge depends on open-source packages declared in `Directory.Packages.props` (including the Model Context Protocol C# SDK). See each package’s own license for terms.

@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.Geometry;
@@ -154,6 +156,123 @@ public sealed partial class PluginCommandProcessor
                 data: new { viewerSuppression = viewer });
         }
 
+        // fix-smoke-20261029 D4: PlotInfoValidator only accepts the CURRENT layout (eLayoutNotCurrent in r1).
+        // A real plot makes the target layout current, gates on the readback, plots, and restores the
+        // previous layout in finally. A dry run never switches; it defers validation instead.
+        bool targetIsModel;
+        using (var ltr = db.TransactionManager.StartOpenCloseTransaction())
+        {
+            var target = (Layout)ltr.GetObject(layoutId, OpenMode.ForRead);
+            layoutName = target.LayoutName;
+            targetIsModel = target.ModelType;
+            ltr.Commit();
+        }
+
+        var before = ReadLayoutState();
+        var action = PlotLayoutMath.PlanLayoutSwitch(LayoutManager.Current.CurrentLayout, layoutName, targetIsModel, before.Tilemode, before.Cvport, command.DryRun);
+        var request = new PlotRequest(command, args, outputPath, engine, requestedArea, window, scaleSpec, scaleRequested, orientationWord, requestedUnits, layoutId, layoutName, requestedDevice, viewer, action == PlotLayoutAction.DeferValidation);
+        if (action is PlotLayoutAction.None or PlotLayoutAction.DeferValidation)
+        {
+            var plain = PlotOnLayout(request);
+            return command.DryRun ? plain : AttachLayoutReport(plain, new PlotLayoutReport { DbmodBefore = before.Dbmod, DbmodAfter = ReadLayoutState().Dbmod });
+        }
+
+        var report = new PlotLayoutReport
+        {
+            Switched = true,
+            SwitchKind = action == PlotLayoutAction.SwitchToPaperSpace ? "paper_space" : "layout",
+            DbmodBefore = before.Dbmod,
+            Before = before
+        };
+        string? switchError = null;
+        var appended = new List<string>();
+        void OnAppended(object? sender, ObjectEventArgs e)
+        {
+            try
+            {
+                appended.Add(e.DBObject.Handle.ToString());
+            }
+            catch
+            {
+                // Never throw into AutoCAD.
+            }
+        }
+
+        ForgeResult result;
+        try
+        {
+            db.ObjectAppended += OnAppended;
+            try
+            {
+                if (action == PlotLayoutAction.Switch)
+                {
+                    LayoutManager.Current.CurrentLayout = layoutName;
+                }
+
+                if (!targetIsModel && ReadLayoutState().Cvport != 1)
+                {
+                    doc.Editor.SwitchToPaperSpace();
+                }
+            }
+            catch (System.Exception ex)
+            {
+                switchError = ex.Message;
+            }
+            finally
+            {
+                db.ObjectAppended -= OnAppended;
+            }
+
+            report.Initialized = appended.Count > 0;
+            report.AppendedCount = appended.Count;
+            report.AppendedSample = appended.Take(50).ToArray();
+            var now = ReadLayoutState();
+            if (switchError is null && PlotLayoutMath.IsLayoutReady(layoutName, now.Ctab, LayoutManager.Current.CurrentLayout, targetIsModel, now.Tilemode, now.Cvport))
+            {
+                result = PlotOnLayout(request);
+            }
+            else
+            {
+                result = ForgeResult.Failure(
+                    command.Id,
+                    "plot_layout_not_current",
+                    $"Layout '{layoutName}' could not be made current for plotting (CTAB={now.Ctab}, TILEMODE={now.Tilemode}, CVPORT={now.Cvport}{(switchError is null ? "" : "; " + switchError)}). Nothing was plotted.",
+                    "Make the layout current in AutoCAD (and paper space active) and retry.");
+            }
+        }
+        finally
+        {
+            RestoreLayout(doc, before, report);
+        }
+
+        report.DbmodAfter = ReadLayoutState().Dbmod;
+        return AttachLayoutReport(result, report);
+    }
+
+    private sealed record PlotRequest(
+        ForgeCommand Command,
+        PlotArgs Args,
+        string OutputPath,
+        string Engine,
+        PlotAreaKind? RequestedArea,
+        double[]? Window,
+        PlotScaleSpec ScaleSpec,
+        bool ScaleRequested,
+        string? OrientationWord,
+        PlotPaperUnit? RequestedUnits,
+        ObjectId LayoutId,
+        string LayoutName,
+        string RequestedDevice,
+        ViewerSuppression Viewer,
+        bool DeferValidation);
+
+    /// <summary>Plots the layout (already made current, or a dry run). Everything after the D4 layout switch.</summary>
+    private static ForgeResult PlotOnLayout(PlotRequest request)
+    {
+        var (command, args, outputPath, engine, requestedArea, window, scaleSpec, scaleRequested, orientationWord, requestedUnits, layoutId, _, requestedDevice, viewer, deferValidation) = request;
+        var layoutName = request.LayoutName;
+        var doc = ActiveDoc;
+        var db = doc.Database;
         var warnings = new List<string>();
         using var tr = db.TransactionManager.StartTransaction();
         var layout = (Layout)tr.GetObject(layoutId, OpenMode.ForRead);
@@ -265,6 +384,36 @@ public sealed partial class PluginCommandProcessor
         if (area == PlotAreaKind.Layout && mediaChanged && requestedArea == PlotAreaKind.Layout)
         {
             warnings.Add($"plotArea=layout on a different sheet than the layout's own ({layoutMedia} -> {canonicalMedia}) keeps the layout at its own scale; the drawing may not fill the sheet. Prefer plotArea=extents with scale=fit.");
+        }
+
+        // fix-smoke-20261029 D5: EXTMIN/EXTMAX only grow, so an extents plot of a stale header plotted empty
+        // sheet space in r1. A real extents plot refreshes the header from the geometry first (as ZOOM
+        // Extents does; a header write, so DBMOD is not hidden). A dry run never writes.
+        var headerExtentsBefore = HeaderExtents(db, isModel);
+        double[]? headerExtentsAfter = null;
+        bool? headerExtentsRefreshed = null;
+        string? headerExtentsRefresh = null;
+        if (area == PlotAreaKind.Extents)
+        {
+            if (command.DryRun)
+            {
+                headerExtentsRefresh = "The real plot refreshes EXTMIN/EXTMAX from the geometry (UpdateExt) before plotting.";
+            }
+            else
+            {
+                try
+                {
+                    db.UpdateExt(true);
+                    headerExtentsRefreshed = true;
+                }
+                catch (Autodesk.AutoCAD.Runtime.Exception ex)
+                {
+                    headerExtentsRefreshed = false;
+                    warnings.Add($"Header extents could not be refreshed ({ex.ErrorStatus}); the extents plot may include stale empty space.");
+                }
+
+                headerExtentsAfter = HeaderExtents(db, isModel);
+            }
         }
 
         var content = ComputeContentBox(tr, db, layout, isModel, out var contentSource);
@@ -401,16 +550,29 @@ public sealed partial class PluginCommandProcessor
 
         var info = new PlotInfo { Layout = layoutId, OverrideSettings = ps };
         PlotSettings validated;
-        try
+        string validation;
+        if (deferValidation)
         {
-            var validator = new PlotInfoValidator { MediaMatchingPolicy = MatchingPolicy.MatchEnabled };
-            validator.Validate(info);
-            validated = info.ValidatedSettings;
+            // D4: a dry run never switches layouts and the validator rejects a layout that is not current,
+            // so the plan is built from the unvalidated settings.
+            validated = ps;
+            validation = "deferred";
+            warnings.Add($"Validation deferred: layout '{layoutName}' is not current and a dry run does not switch to it. The real plot switches to it, validates, plots and switches back.");
         }
-        catch (Autodesk.AutoCAD.Runtime.Exception ex)
+        else
         {
-            tr.Commit();
-            return ForgeResult.Failure(command.Id, "plot_validation_failed", $"AutoCAD rejected the plot settings: {ex.Message}", "Try another paperSize or plotArea=extents.");
+            try
+            {
+                var validator = new PlotInfoValidator { MediaMatchingPolicy = MatchingPolicy.MatchEnabled };
+                validator.Validate(info);
+                validated = info.ValidatedSettings;
+                validation = "passed";
+            }
+            catch (Autodesk.AutoCAD.Runtime.Exception ex)
+            {
+                tr.Commit();
+                return ForgeResult.Failure(command.Id, "plot_validation_failed", $"AutoCAD rejected the plot settings: {ex.Message}", "Try another paperSize or plotArea=extents.");
+            }
         }
 
         var readBack = DescribeSettings(psv, validated);
@@ -464,6 +626,11 @@ public sealed partial class PluginCommandProcessor
             plotAreaBox = areaBox,
             contentBox = content,
             contentSource,
+            validation,
+            headerExtentsBefore,
+            headerExtentsAfter,
+            headerExtentsRefreshed,
+            headerExtentsRefresh,
             rotationDeg = readBack.RotationDeg,
             orientation = readBack.Orientation,
             scale = readBack.UsesFit ? "fit" : readBack.CustomScale is { } s ? $"{s[0].ToString("0.######", CultureInfo.InvariantCulture)}:{s[1].ToString("0.######", CultureInfo.InvariantCulture)}" : "layout",
@@ -535,6 +702,25 @@ public sealed partial class PluginCommandProcessor
             // Read-back of the sheet size is best-effort; the probe above is the gate.
         }
 
+        // fix-smoke-20261029 D5: coverage and looksTiny come from the PDF itself, not from the plan.
+        var pdfContent = probe.Passed ? PdfContentBox.Read(outputPath) : null;
+        var coverageDecision = pdfContent is null
+            ? null
+            : PlotPdfGate.DecideCoverage(
+                area,
+                scaleSpec.Fit,
+                coverage?.LooksTiny,
+                content is { Length: 4 },
+                pdfContent.Status switch { PdfInkStatus.Ok => "ok", PdfInkStatus.Empty => "empty", _ => "unavailable" },
+                pdfContent.LooksTiny == true,
+                pdfContent.FillX,
+                pdfContent.FillY,
+                pdfContent.Reason);
+        if (coverageDecision?.Warning is { } pdfCoverageWarning)
+        {
+            warnings.Add(pdfCoverageWarning);
+        }
+
         return PlotPdfGate.FromProbe(
             command.Id,
             probe,
@@ -561,11 +747,170 @@ public sealed partial class PluginCommandProcessor
                 plan.centered,
                 plan.plotStyle,
                 plan.fitEstimate,
+                plan.contentBox,
+                plan.contentSource,
+                plan.validation,
+                plan.headerExtentsBefore,
+                plan.headerExtentsAfter,
+                plan.headerExtentsRefreshed,
+                coverageSource = coverageDecision?.CoverageSource ?? PlotPdfGate.SourceUnavailable,
+                looksTiny = coverageDecision?.LooksTiny,
+                coverage = coverageDecision,
+                pdfContent,
                 plan.coverageEstimate,
                 plan.warnings,
                 bytes = probe.Bytes,
                 pdfProbe = probe
-            });
+            },
+            coverageDecision);
+    }
+
+    private sealed record LayoutState(string Ctab, int Tilemode, int Cvport, int Dbmod);
+
+    /// <summary>D4 report: what the layout switch did, and whether the previous state came back.</summary>
+    private sealed class PlotLayoutReport
+    {
+        public bool Switched { get; set; }
+        public string? SwitchKind { get; set; }
+        public bool Initialized { get; set; }
+        public int AppendedCount { get; set; }
+        public string[] AppendedSample { get; set; } = [];
+        public bool? Restored { get; set; }
+        public int DbmodBefore { get; set; }
+        public int DbmodAfter { get; set; }
+        public LayoutState? Before { get; set; }
+        public LayoutState? After { get; set; }
+        public List<string> Warnings { get; } = [];
+    }
+
+    private static LayoutState ReadLayoutState()
+    {
+        static int Int(string name)
+        {
+            try
+            {
+                return System.Convert.ToInt32(Application.GetSystemVariable(name), CultureInfo.InvariantCulture);
+            }
+            catch
+            {
+                return -1;
+            }
+        }
+
+        string ctab;
+        try
+        {
+            ctab = System.Convert.ToString(Application.GetSystemVariable("CTAB"), CultureInfo.InvariantCulture) ?? "";
+        }
+        catch
+        {
+            ctab = "";
+        }
+
+        return new LayoutState(ctab, Int("TILEMODE"), Int("CVPORT"), Int("DBMOD"));
+    }
+
+    /// <summary>Restores the layout (and paper/model space inside it) that was current before the plot, then reads it back.</summary>
+    private static void RestoreLayout(Document doc, LayoutState before, PlotLayoutReport report)
+    {
+        string? error = null;
+        try
+        {
+            if (before.Ctab.Length > 0 && !PlotLayoutMath.SameLayout(LayoutManager.Current.CurrentLayout, before.Ctab))
+            {
+                LayoutManager.Current.CurrentLayout = before.Ctab;
+            }
+
+            if (before.Tilemode == 0)
+            {
+                var cvport = ReadLayoutState().Cvport;
+                if (before.Cvport != 1 && cvport == 1)
+                {
+                    doc.Editor.SwitchToModelSpace();
+                }
+                else if (before.Cvport == 1 && cvport != 1)
+                {
+                    doc.Editor.SwitchToPaperSpace();
+                }
+            }
+        }
+        catch (System.Exception ex)
+        {
+            error = ex.Message;
+        }
+
+        var after = ReadLayoutState();
+        var mismatches = PlotLayoutMath.LayoutRestoreMismatches(before.Ctab, before.Tilemode, before.Cvport, after.Ctab, after.Tilemode, after.Cvport).ToList();
+        if (error is not null)
+        {
+            mismatches.Insert(0, $"restore failed: {error}");
+        }
+
+        report.After = after;
+        report.Restored = mismatches.Count == 0;
+        if (mismatches.Count > 0)
+        {
+            report.Warnings.Add($"layout_restore_mismatch: the layout state before the plot was not fully restored ({string.Join("; ", mismatches)}); '{after.Ctab}' is left current. The PDF itself is unaffected.");
+        }
+    }
+
+    /// <summary>Adds the D4 layout fields to a plot result's data (success or failure).</summary>
+    private static ForgeResult AttachLayoutReport(ForgeResult result, PlotLayoutReport report)
+    {
+        JsonObject obj;
+        if (result.Data is null)
+        {
+            obj = new JsonObject();
+        }
+        else
+        {
+            var node = JsonSerializer.SerializeToNode(result.Data, ForgeJson.Options);
+            obj = node as JsonObject ?? new JsonObject { ["result"] = node };
+        }
+
+        obj["layoutSwitched"] = report.Switched;
+        if (report.Switched)
+        {
+            obj["layoutSwitchKind"] = report.SwitchKind;
+            obj["layoutInitialized"] = report.Initialized;
+            obj["layoutAppendedCount"] = report.AppendedCount;
+            obj["layoutAppendedSample"] = JsonSerializer.SerializeToNode(report.AppendedSample, ForgeJson.Options);
+            obj["layoutRestored"] = report.Restored;
+            obj["layoutBefore"] = JsonSerializer.SerializeToNode(report.Before, ForgeJson.Options);
+            obj["layoutAfter"] = JsonSerializer.SerializeToNode(report.After, ForgeJson.Options);
+        }
+
+        obj["dbmodBefore"] = report.DbmodBefore;
+        obj["dbmodAfter"] = report.DbmodAfter;
+        if (report.Warnings.Count > 0)
+        {
+            var warnings = obj["warnings"] as JsonArray ?? new JsonArray();
+            foreach (var warning in report.Warnings)
+            {
+                warnings.Add(warning);
+            }
+
+            obj["warnings"] = warnings;
+        }
+
+        return result with { Data = obj };
+    }
+
+    /// <summary>EXTMIN/EXTMAX (Model) or PEXTMIN/PEXTMAX (paper) as [minX,minY,maxX,maxY]; null when unset.</summary>
+    private static double[]? HeaderExtents(Database db, bool isModel)
+    {
+        try
+        {
+            var min = isModel ? db.Extmin : db.Pextmin;
+            var max = isModel ? db.Extmax : db.Pextmax;
+            return min.X <= max.X && min.Y <= max.Y && Math.Abs(max.X - min.X) < 1e20
+                ? [min.X, min.Y, max.X, max.Y]
+                : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static void RunPlotEngine(Document doc, PlotInfo info, string outputPath)
@@ -607,7 +952,7 @@ public sealed partial class PluginCommandProcessor
         string? plotStyle,
         string outputPath)
     {
-        LayoutManager.Current.CurrentLayout = layoutName;
+        // The caller (PlotToPdf) already made the layout current and restores it afterwards (D4).
         var previousFileDia = Application.GetSystemVariable("FILEDIA");
         Application.SetSystemVariable("FILEDIA", 0);
         try
@@ -939,23 +1284,12 @@ public sealed partial class PluginCommandProcessor
     }
 
     /// <summary>
-    /// World box [minX,minY,maxX,maxY] of what prints in a space. Model uses the header extents
-    /// (cheap; AutoCAD's own EXTMIN/EXTMAX); a paper-space layout is scanned (its own viewport
-    /// excluded; frozen/off layers excluded).
+    /// World box [minX,minY,maxX,maxY] of what prints in a space, scanned from the entities (frozen/off
+    /// layers excluded; a paper layout's own viewport excluded). fix-smoke-20261029 D5: Model is scanned
+    /// too, because EXTMIN/EXTMAX only grow; the header box is used only past the scan cap.
     /// </summary>
     private static double[]? ComputeContentBox(Transaction tr, Database db, Layout layout, bool isModel, out string source)
     {
-        if (isModel)
-        {
-            var min = db.Extmin;
-            var max = db.Extmax;
-            if (min.X <= max.X && min.Y <= max.Y && Math.Abs(max.X - min.X) < 1e20)
-            {
-                source = "header_extents";
-                return [min.X, min.Y, max.X, max.Y];
-            }
-        }
-
         var btr = (BlockTableRecord)tr.GetObject(layout.BlockTableRecordId, OpenMode.ForRead);
         var hiddenLayers = new Dictionary<ObjectId, bool>();
         double minX = double.PositiveInfinity, minY = double.PositiveInfinity, maxX = double.NegativeInfinity, maxY = double.NegativeInfinity;
@@ -965,6 +1299,13 @@ public sealed partial class PluginCommandProcessor
         {
             if (++scanned > MaxExtentsScanEntities)
             {
+                // Past the cap Model falls back to the header box, labelled as not verified (it may be stale).
+                if (isModel && HeaderExtents(db, true) is { } header)
+                {
+                    source = "header_extents_unverified";
+                    return header;
+                }
+
                 source = "too_many_entities";
                 return null;
             }

@@ -203,7 +203,7 @@ Expected:
   5. `RotatedDimension`
   6. `Hatch`
   7. `Hatch`
-- **Live-only:** the ANSI31 hatch, step 7. Headless accoreconsole rejects every patterned hatch with `eInvalidInput`, in both the old and new builds. If live AutoCAD also fails step 7, report it.
+- Step 7 (ANSI31 hatch) is no longer live-only. The `eInvalidInput` seen headless was a Forge bug (pattern angle set before the pattern; fix-smoke-20261029 D2), not a headless limitation; it now succeeds headless and live, with the pattern, scale and first pattern line read back. A failure of step 7 is a FAIL.
 
 Read-back with `forge_entity_get handle=<result handle>`:
 
@@ -263,7 +263,7 @@ Per kind in (c):
 
 Every call uses `path="<S>\scene.dxf"`.
 
-The counts below are the headless ones, where the ANSI31 hatch of 7.4 was not created. Live, if that hatch succeeded, the source has 2 more entities on `A-ANNO`: one `HATCH` and its `LWPOLYLINE` boundary. That makes 24 entities, `A-ANNO` 19 and `X-ANNO` 19.
+The counts below were taken headless before fix-smoke-20261029, when the ANSI31 hatch of 7.4 was not created. With that hatch (D2) the source has 2 more entities on `A-ANNO`: one `HATCH` and its `LWPOLYLINE` boundary. Expect 24 entities (`HATCH` 2, `LWPOLYLINE` 2), `created=24`, `A-ANNO` 19 and `X-ANNO` 19.
 
 | # | Call | Expected |
 |---|---|---|
@@ -273,7 +273,8 @@ The counts below are the headless ones, where the ANSI31 hatch of 7.4 was not cr
 | d | `blockName="SCENE" replaceExisting=true insertReference=false` | ok; `replaced=true`, `existingReferences=1`; warnings name the kept nested block `TAGBUB` and suggest ATTSYNC |
 | e | `mode="merge" position=[0,-100000] layerMap={"A-*":"X-*"} layerPrefix="S-"` | ok; `created=22`; `countsByLayer={"X-ANNO":17,"X-DOOR":2,"X-WALL":1,"S-M-DUCT":2}`; `layersCreated` adds `S-M-TAG`. The `*` in the target takes what the key's `*` matched |
 | f | `mode="xref" blockName="XR_SCENE" xrefSavePath="<S>\scene-xref.dwg" overwriteAcknowledged=true position=[0,-150000]` | ok; `created=0`; `xrefPath` ends `scene-xref.dwg`; `layersCreated` are `XR_SCENE|…`; warning "DXF saved as DWG for the xref" |
-| g | `forge_undo` | `undone=true`; the XR_SCENE attach is gone (`forge_xref_list`, **live-only** check) |
+| g | `forge_undo` | Honest refusal in this sequence (fix-smoke D3, headless `docB-trace`/`xv3`): after step d (`replaceExisting`), AutoCAD's U of the xref attach also restores the nested `TAGBUB` circle and attribute definition, which the attach never reported. Expected: `ok=false`, `undo_target_not_reverted`, `foreign` names that `AcDbCircle` and `AcDbAttributeDefinition`, `redoCount=1`, `restored=true`; XR_SCENE is still attached (`forge_xref_list`) and nothing else changed. `undone=true` here would need that U to be attributed to the write, which Forge cannot prove |
+| g2 | on a fresh drawing: `blockName="SCENE" position=[0,-50000]`, then the call of f, then `forge_undo` | `undone=true` with `verification.passed=true`; `forge_xref_list` is empty and the XR_SCENE INSERT is gone (headless `xv1`) |
 | h | `path="<S>\nope.dxf"` / `path="<S>\scene.txt"` (need not exist) / `path="<S>\scene.dxf" mode="xref"` without `xrefSavePath` | `import_source_not_found` / `unsupported_format` / `xref_requires_dwg` |
 
 ### 7.9 `forge_block_insert_bulk`

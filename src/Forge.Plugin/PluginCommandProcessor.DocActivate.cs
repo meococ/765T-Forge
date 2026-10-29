@@ -19,14 +19,29 @@ public sealed partial class PluginCommandProcessor
         public string? Path { get; init; }
     }
 
-    /// <summary>Read-back payload; the pipe server reads <see cref="Target"/> to keep polling until AutoCAD reports the switch.</summary>
+    /// <summary>
+    /// Read-back payload; the pipe server keeps polling with <see cref="TargetDocument"/> (matched by
+    /// reference, never by name) until AutoCAD reports the switch. Shared by forge_doc_activate,
+    /// forge_doc_new and forge_doc_open (fix-smoke-20261029 D1).
+    /// </summary>
     internal sealed record DocActivateReadBack(
         string Target,
         string? ActiveBefore,
         string? Active,
         bool Confirmed,
         bool Switched,
-        object[] Documents);
+        object[] Documents)
+    {
+        public string? DwgName { get; init; }
+        public string? Template { get; init; }
+        public bool? AlreadyOpen { get; init; }
+
+        [System.Text.Json.Serialization.JsonIgnore]
+        public Document? TargetDocument { get; init; }
+
+        [System.Text.Json.Serialization.JsonIgnore]
+        public string UnconfirmedCode { get; init; } = DocActivateUnconfirmedCode;
+    }
 
     private static ForgeResult DocActivate(ForgeCommand command)
     {
@@ -77,37 +92,68 @@ public sealed partial class PluginCommandProcessor
             Documents.MdiActiveDocument = target;
         }
 
-        return ReadBackActiveDocument(command.Id, target.Name, before);
+        return ReadBackActiveDocument(command.Id, new DocActivateReadBack(target.Name, before, null, false, false, []) { TargetDocument = target });
     }
 
-    /// <summary>Builds the forge_doc_activate result from what AutoCAD reports as active right now.</summary>
-    internal static ForgeResult ReadBackActiveDocument(string commandId, string targetName, string? activeBefore)
+    /// <summary>
+    /// Builds the activation result from what AutoCAD reports as active right now: the active document
+    /// must be the target object (by reference) and DWGNAME must name its file.
+    /// </summary>
+    internal static ForgeResult ReadBackActiveDocument(string commandId, DocActivateReadBack pending)
     {
         var active = Documents.MdiActiveDocument;
-        var confirmed = active is not null && string.Equals(active.Name, targetName, StringComparison.OrdinalIgnoreCase);
-        var data = new DocActivateReadBack(
-            targetName,
-            activeBefore,
-            active?.Name,
-            confirmed,
-            !string.Equals(activeBefore, targetName, StringComparison.OrdinalIgnoreCase),
-            Documents.Cast<Document>().Select(d => (object)new { name = d.Name, isActive = ReferenceEquals(d, active) }).ToArray());
+        string? dwgName = null;
+        try
+        {
+            dwgName = Application.GetSystemVariable("DWGNAME") as string;
+        }
+        catch
+        {
+            // No document: DWGNAME is unreadable.
+        }
+
+        var targetName = pending.TargetDocument is { } targetDoc ? SafeName(targetDoc) ?? pending.Target : pending.Target;
+        var isTarget = pending.TargetDocument is { } t
+            ? ReferenceEquals(active, t)
+            : active is not null && string.Equals(active.Name, targetName, StringComparison.OrdinalIgnoreCase);
+        var confirmed = DocumentReadBack.IsConfirmed(isTarget, targetName, dwgName);
+        var data = pending with
+        {
+            Target = targetName,
+            Active = active?.Name,
+            Confirmed = confirmed,
+            Switched = !string.Equals(pending.ActiveBefore, targetName, StringComparison.OrdinalIgnoreCase),
+            Documents = Documents.Cast<Document>().Select(d => (object)new { name = d.Name, isActive = ReferenceEquals(d, active) }).ToArray(),
+            DwgName = dwgName
+        };
         var verification = new ForgeVerification
         {
             Attempted = true,
             Passed = confirmed,
-            Message = confirmed ? "Active document read back after activation." : "AutoCAD has not reported the target drawing as active.",
-            ReadBack = new { active = active?.Name }
+            Message = confirmed ? "Active document and DWGNAME read back as the target drawing." : "AutoCAD has not reported the target drawing as active.",
+            ReadBack = new { active = active?.Name, dwgName }
         };
 
         return confirmed
             ? ForgeResult.Success(commandId, data, verification: verification)
             : ForgeResult.Failure(
                 commandId,
-                DocActivateUnconfirmedCode,
-                $"Activation of '{targetName}' was requested but AutoCAD still reports '{active?.Name ?? "(none)"}' as active.",
-                "Call forge_doc_list_open to read the current state before working on either drawing.",
+                pending.UnconfirmedCode,
+                $"'{targetName}' is open but AutoCAD still reports '{active?.Name ?? "(none)"}' as active (DWGNAME '{dwgName ?? "?"}').",
+                "Call forge_doc_list_open to read the current state, then forge_doc_activate the drawing you want before working on it.",
                 data: data,
                 verification: verification);
+    }
+
+    private static string? SafeName(Document doc)
+    {
+        try
+        {
+            return doc.Name;
+        }
+        catch
+        {
+            return null;
+        }
     }
 }

@@ -1037,9 +1037,11 @@ public sealed partial class PluginCommandProcessor
             verification: new ForgeVerification { Attempted = true, Passed = updated > 0 && unknown.Count == 0 && locked.Count == 0, ReadBack = readBack });
     }
 
-    // forge_undo is the one handler allowed to call Editor.Command: AutoCAD's undo engine owns
-    // the group boundaries (the dispatcher wraps each typed write in one UNDO mark), so a single
-    // "_.U" pops exactly one Forge write group. No transaction, no dry-run.
+    // forge_undo is the one handler allowed to call Editor.Command("_.U"). fix-smoke-20261029 D3: AutoCAD
+    // leaves an undo unit for every command-context call (reads and dry runs too), so one "_.U" may pop
+    // the wrong unit. The ledger (PluginCommandProcessor.UndoLedger.cs) knows what the last tracked write
+    // changed; UndoVerifier runs "_.U" until it reaches that write, reverts it only when the drawing is
+    // proven unchanged since, verifies the revert from real state, and redoes every U on any failure.
     private static ForgeResult Undo(ForgeCommand command)
     {
         var args = Args<UndoArgs>(command); // empty record; kept for the Args<T> convention
@@ -1052,46 +1054,91 @@ public sealed partial class PluginCommandProcessor
                 return ForgeResult.Failure(command.Id, "undo_failed", "AutoCAD UNDO is disabled (UNDOCTL=0).", "Enable UNDO in AutoCAD before calling forge_undo.");
             }
 
-            var db = ActiveDb;
-            var trackedBefore = GetTrackedUndoDepth(db);
-            var dbmodBefore = System.Convert.ToInt32(Autodesk.AutoCAD.ApplicationServices.Application.GetSystemVariable("DBMOD"));
-            var handseedBefore = db.Handseed.Value;
-            if (trackedBefore <= 0 && dbmodBefore == 0)
+            if ((undoCtl & 2) != 0)
+            {
+                return ForgeResult.Failure(command.Id, "undo_failed", "AutoCAD UNDO is limited to one step (UNDOCTL 'One' is set).", "Run UNDO > All in AutoCAD before calling forge_undo.");
+            }
+
+            if ((undoCtl & 8) != 0)
+            {
+                return ForgeResult.Failure(command.Id, "undo_failed", "An UNDO group is active in AutoCAD.", "Close it with UNDO > End before calling forge_undo.");
+            }
+
+            var doc = ActiveDoc;
+            var ledger = ExistingLedger(doc);
+            var target = ledger?.State.Top;
+            if (ledger is null || target is null)
             {
                 return ForgeResult.Failure(
                     command.Id,
                     "undo_failed",
-                    "Nothing to undo in the active document.",
-                    "No Forge write groups or unsaved drawing modifications are present on the undo stack.");
+                    "Nothing to undo: no Forge write is recorded for the active document.",
+                    "forge_undo only reverts Forge's own tracked writes; it never undoes changes made outside Forge.",
+                    data: new { undone = false, remainingForgeUndoSteps = 0 });
             }
 
-            ActiveEditor.Command("_.U");
-            var hadTrackedGroup = TryDecrementTrackedUndoDepth(db, out var remainingForgeUndoSteps);
-            var dbmodAfter = System.Convert.ToInt32(Autodesk.AutoCAD.ApplicationServices.Application.GetSystemVariable("DBMOD"));
-            var handseedAfter = db.Handseed.Value;
-
-            if (!hadTrackedGroup && dbmodBefore == dbmodAfter && handseedBefore == handseedAfter)
+            Subscribe(ledger);
+            var outcome = UndoVerifier.Run(target, new AcadUndoHost(ledger.Db, doc.Editor));
+            if (outcome.MarkDirty is { } reason)
             {
-                return ForgeResult.Failure(
-                    command.Id,
-                    "undo_failed",
-                    "Nothing was undone (undo stack is already at the beginning of the session).",
-                    "Perform a drawing modification before calling forge_undo.");
+                target.MarkDirty(reason);
             }
 
-            return ForgeResult.Success(
-                command.Id,
-                new
-                {
-                    undone = true,
-                    undoCtl,
-                    remainingForgeUndoSteps,
-                    note = "AutoCAD executed one undo step."
-                });
+            if (outcome.PopEntry)
+            {
+                ledger.State.Pop();
+            }
+
+            var data = new
+            {
+                undone = outcome.Undone,
+                tool = target.Tool,
+                writeCommandId = target.CommandId,
+                outcome.NothingRecorded,
+                outcome.UCount,
+                outcome.RedoCount,
+                outcome.Restored,
+                outcome.SkippedEmptyUnits,
+                outcome.SkippedViewUnits,
+                outcome.SkippedSideEffectUnits,
+                remainingForgeUndoSteps = ledger.State.Depth,
+                droppedOldestSteps = ledger.State.DroppedOldest,
+                outcome.Reason,
+                foreign = outcome.Foreign,
+                notReverted = outcome.NotReverted,
+                notRestored = outcome.NotRestored,
+                unitClasses = outcome.Classes,
+                undoCtl
+            };
+            var verification = new ForgeVerification
+            {
+                Attempted = true,
+                Passed = outcome.Undone,
+                Message = outcome.Message,
+                ReadBack = new { outcome.Undone, outcome.Restored, outcome.NotReverted }
+            };
+
+            return outcome.Undone
+                ? ForgeResult.Success(command.Id, data, verification: verification)
+                : ForgeResult.Failure(
+                    command.Id,
+                    outcome.Code ?? "undo_failed",
+                    outcome.Message,
+                    outcome.Code switch
+                    {
+                        UndoVerifier.ChangedSinceWrite => "The drawing was changed after that Forge write. Use AutoCAD's own UNDO if you really want to go back past the later change, then forge_qa_readback to check.",
+                        UndoVerifier.NothingRecordedCode => "That write changed nothing; call forge_undo again for the write before it.",
+                        UndoVerifier.FootprintTooLarge => "Use AutoCAD's own UNDO for writes this large, then read back.",
+                        _ => outcome.Restored == false
+                            ? "The drawing state is uncertain: read it back (forge_qa_readback / forge_entity_list) before any further write."
+                            : "Nothing was changed by this call. Read back the drawing before deciding what to do."
+                    },
+                    data: data,
+                    verification: verification);
         }
         catch (System.Exception ex)
         {
-            return ForgeResult.Failure(command.Id, "undo_failed", ex.Message, "There may be nothing left to undo.");
+            return ForgeResult.Failure(command.Id, "undo_failed", ex.Message, "Read back the drawing (forge_qa_readback) before any further write.");
         }
     }
 
