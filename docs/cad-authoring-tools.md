@@ -125,7 +125,8 @@ Mutating entity tools check locked layers before upgrading to write (`layer_lock
 | `forge_draw_wall` | vertices `[[x,y],...]`, thickness (>0), justification? (`center`\|`left`\|`right`), closed?, openings? `[{segmentIndex, offsetFromStart, width}]`, hatchPattern?, hatchScale?, hatchAngleDeg?, layer?, hatchLayer?, colorIndex? | Draws mitered double-line walls with continuous corner turns, slices out door/window openings with jamb end-caps, optionally hatches wall loops, and returns opening `center` + `angleDeg` for door/window block insertion |
 
 Tool profile `authoring` (`forge_system_tool_profile name=authoring`) lists the whole C20–C30
-surface (**59 authoring tools**) for agents that want one allowlist instead of all **112 tools**.
+surface plus the reliability-wave tools (`forge_doc_activate`, `forge_text_list`) — **61 authoring tools** —
+for agents that want one allowlist instead of all **114 tools**.
 
 ## Implementation notes (API cookbook — 2025/2026 verified)
 

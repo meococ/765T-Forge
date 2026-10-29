@@ -12,6 +12,7 @@ Use this skill when an agent drives AutoCAD through **765T-Forge** for metro/AEC
 - If a tool returns a safety denial, do **not** retry via another executor; switch to a typed scoped tool or ask for a narrower target.
 - Treat `forge_exec_dotnet` as disabled unless the human explicitly enabled unsafe ops for this session (`FORGE_ENABLE_UNSAFE_OPS` + `unsafeAcknowledged`).
 - Never use executors for broad selections such as `ERASE ALL` or `ERASE *` (harmless `ZOOM *` / layer filters are OK).
+- `forge_exec_lisp` returns the evaluated value synchronously (`result`, `resultText`, `resultType`; a caught LISP error comes back as `lisp_error` with the message). Only `mode=queued_fallback` means it was queued and nothing was returned.
 - If `forge_exec_command` / `forge_exec_lisp` returns `queued=true` or `completed=false`, **do not** chain writes — read back first.
 - On `plugin_request_timeout` (the plugin watchdog answers; the pipe keeps serving), call **`forge_qa_readback_after_timeout`** — never retry the write blind; `plugin_request_stale` means nothing executed.
 - Prefer `forge_issue_set_validate` when an IssueSetContract / sheet inventory exists; do not invent the sheet set.
@@ -51,6 +52,15 @@ Prefer **`forge_recipe_issue_set`** for full issue-set runs.
 ## Safety expectations
 
 Every write should produce an audit record and, when a DWG path is available, a backup. On `plugin_request_timeout` (the plugin watchdog answers; the pipe keeps serving), call `forge_qa_readback_after_timeout` before any retry — `plugin_request_stale` means nothing executed. Use `forge_audit_summarize` for a redacted session overview.
+
+## Reading the drawing back (do not draw blind)
+
+- Several drawings open? Call `forge_doc_list_open`, then **`forge_doc_activate`** (`name` = exact file name, or `path` = full path) and check `data.active` before working. `ambiguous_document` → pass the full path; `doc_activate_unconfirmed` → read `forge_doc_list_open` again before touching either drawing. The per-call `document` argument still works for single calls.
+- Content inside blocks is invisible to plain reads. Use **`forge_text_list`** (TEXT / MTEXT / ATTRIB / ATTDEF / MLEADER, nested blocks included by default, world position/height/rotation, `effectiveLayer`, `insertPath`) to read room names, tags and titleblock values, and pass **`includeBlocks=true`** to `forge_entity_list` / `forge_linework_*` when the geometry lives in blocks (furniture, doors, unit blocks). Check `blockTraversal` for what was skipped (depth limit, bbox, xref, cycle) and raise `blockDepth` if needed.
+- `forge_linework_dump` defaults to a pipe-oriented layer filter; for architecture/structure pass `layerFilter="*"` (or the exact layers).
+- `forge_view_capture window=[[x1,y1],[x2,y2]]` zooms to a world box before the screenshot (`padding`, `cropToDrawing=true` to drop the ribbon/palettes); the result's `view.worldBox` says what you are looking at.
+- `forge_plot_to_pdf` never opens a PDF viewer (it plots through a Forge-owned no-viewer PC3 clone). To make the drawing fill the sheet use `plotArea=extents` or `plotArea=window` + `window`, with `scale=fit` (default). If the result has `coverageEstimate.looksTiny=true` or a warning, re-plot — do not ship a drawing sitting small in a corner. `dryRun=true` shows the plan (device, media, area, rotation, fit).
+- `forge_run_script` accepts `.lsp` directly (a loader `.scr` is generated) and returns readable stdout. It does not save the DWG for you, and QSAVE/SAVEAS inside the script are refused (`deny_save_wblock_overwrite`) — use it for headless checks/reports; persist edits with live tools + `forge_doc_save`.
 
 ## Linework (CAD ↔ Revit model QA)
 
