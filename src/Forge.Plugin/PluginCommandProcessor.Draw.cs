@@ -1042,103 +1042,197 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, "batch_too_large", $"forge_draw_batch accepts at most {DrawBatchMaxSteps} steps.", "Split the work into smaller batches.");
         }
 
-        var db = ActiveDb;
-        if (command.DryRun)
+        var resultMode = (args.ResultMode ?? "full").Trim().ToLowerInvariant();
+        if (resultMode is not ("full" or "errors" or "summary"))
         {
-            // Same per-step validation as the real run (tool type, required keys, geometry,
-            // layer/colour/dimstyle/block existence) — read-only, nothing is created.
-            using var vtr = db.TransactionManager.StartTransaction();
-            var checks = new List<object>();
-            var invalidCount = 0;
+            return ForgeResult.Failure(command.Id, "invalid_result_mode", $"Unknown resultMode '{args.ResultMode}'.", "Use full (default), errors, or summary.");
+        }
+
+        var db = ActiveDb;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        // Name → id lookups (layers, styles, blocks, model space) are cached for the whole batch;
+        // the per-step nested transactions still open every object they write themselves.
+        var previousCache = _drawCache;
+        _drawCache = new DrawIdCache(db);
+        try
+        {
+            if (command.DryRun || args.Atomic)
+            {
+                // Same per-step validation as the real run (tool type, required keys, geometry,
+                // layer/colour/style/block existence) — read-only, nothing is created.
+                using var vtr = db.TransactionManager.StartTransaction();
+                var checks = new List<object>();
+                var invalidCount = 0;
+                for (var index = 0; index < args.Steps.Length; index++)
+                {
+                    var step = args.Steps[index] ?? new DrawBatchStep();
+                    var tool = NormalizeStepTool(step.Tool);
+                    try
+                    {
+                        ValidateStep(db, vtr, step);
+                        if (command.DryRun && resultMode == "full")
+                        {
+                            checks.Add(new { index, tool, ok = true });
+                        }
+                    }
+                    catch (System.Exception ex) when (IsStepError(ex))
+                    {
+                        invalidCount++;
+                        var (code, message) = StepError(ex);
+                        checks.Add(new { index, tool, ok = false, error = new { code, message } });
+                    }
+                }
+
+                vtr.Commit();
+                if (command.DryRun)
+                {
+                    return DryRun(command, new
+                    {
+                        tool = "forge_draw_batch",
+                        steps = args.Steps.Length,
+                        valid = args.Steps.Length - invalidCount,
+                        invalid = invalidCount,
+                        atomic = args.Atomic,
+                        results = checks
+                    });
+                }
+
+                if (invalidCount > 0)
+                {
+                    return ForgeResult.Failure(
+                        command.Id,
+                        "batch_invalid",
+                        $"{invalidCount} of {args.Steps.Length} steps are invalid; the atomic batch created nothing.",
+                        "Fix the listed steps, or drop atomic=true to create the valid steps and skip the rest.",
+                        data: new { created = 0, failed = invalidCount, results = checks });
+                }
+            }
+
+            using var tr = db.TransactionManager.StartTransaction();
+            var results = new List<object>(resultMode == "full" ? args.Steps.Length : 8);
+            var createdHandles = new List<string>(args.Steps.Length);
+            var failedIndexes = new List<int>();
+            var typeCounts = new SortedDictionary<string, int>(StringComparer.Ordinal);
+            var succeeded = 0;
             for (var index = 0; index < args.Steps.Length; index++)
             {
                 var step = args.Steps[index] ?? new DrawBatchStep();
                 var tool = NormalizeStepTool(step.Tool);
                 try
                 {
-                    ValidateStep(db, vtr, step);
-                    checks.Add(new { index, tool, ok = true });
+                    StepOutcome outcome;
+                    if (args.Atomic)
+                    {
+                        // Validated up front; a runtime failure aborts the single transaction below.
+                        outcome = CreateStep(db, tr, step);
+                    }
+                    else
+                    {
+                        // Each step runs in its own nested transaction: a step that throws is aborted
+                        // on dispose, so it leaves nothing behind (no orphan boundary, no empty hatch).
+                        using var st = db.TransactionManager.StartTransaction();
+                        outcome = CreateStep(db, st, step);
+                        st.Commit();
+                    }
+
+                    var handle = outcome.Id.Handle.ToString();
+                    createdHandles.Add(handle);
+                    var extraHandles = outcome.Extra?.Select(extra => extra.Handle.ToString()).ToArray();
+                    if (extraHandles is not null)
+                    {
+                        createdHandles.AddRange(extraHandles);
+                    }
+
+                    // The class name comes from the ObjectId's runtime class — no extra object open.
+                    var type = ManagedTypeName(outcome.Id);
+                    typeCounts[type] = typeCounts.TryGetValue(type, out var n) ? n + 1 : 1;
+                    succeeded++;
+                    if (resultMode == "full" || (resultMode == "errors" && outcome.Warnings is { Length: > 0 }))
+                    {
+                        results.Add(new { index, tool, ok = true, handle, type, extraHandles, warnings = outcome.Warnings });
+                    }
                 }
-                catch (System.Exception ex) when (IsStepError(ex))
+                catch (System.Exception ex) when (!args.Atomic || IsStepError(ex))
                 {
-                    invalidCount++;
                     var (code, message) = StepError(ex);
-                    checks.Add(new { index, tool, ok = false, error = new { code, message } });
+                    if (args.Atomic)
+                    {
+                        // Returning before tr.Commit() aborts everything created so far.
+                        return ForgeResult.Failure(
+                            command.Id,
+                            "batch_aborted",
+                            $"Step {index} ({tool}) failed during an atomic batch; nothing was created: {message}",
+                            "Fix the step (dryRun=true validates every step) and resend.",
+                            data: new { created = 0, failedIndex = index, error = new { code, message } });
+                    }
+
+                    // Record the failed step and continue — the batch contract keeps going.
+                    failedIndexes.Add(index);
+                    results.Add(new { index, tool, ok = false, error = new { code, message } });
                 }
             }
 
-            return DryRun(command, new
+            var failed = args.Steps.Length - succeeded;
+            if (succeeded == 0)
             {
-                tool = "forge_draw_batch",
-                steps = args.Steps.Length,
-                valid = args.Steps.Length - invalidCount,
-                invalid = invalidCount,
-                results = checks
-            });
-        }
-
-        using var tr = db.TransactionManager.StartTransaction();
-        var results = new List<object>();
-        var createdHandles = new List<string>();
-        var succeeded = 0;
-        for (var index = 0; index < args.Steps.Length; index++)
-        {
-            var step = args.Steps[index] ?? new DrawBatchStep();
-            var tool = NormalizeStepTool(step.Tool);
-            try
-            {
-                // Each step runs in its own nested transaction: a step that throws is aborted
-                // on dispose, so it leaves nothing behind (no orphan boundary, no empty hatch).
-                StepOutcome outcome;
-                using (var st = db.TransactionManager.StartTransaction())
-                {
-                    outcome = CreateStep(db, st, step);
-                    st.Commit();
-                }
-
-                var handle = outcome.Id.Handle.ToString();
-                createdHandles.Add(handle);
-                var extraHandles = outcome.Extra?.Select(extra => extra.Handle.ToString()).ToArray();
-                if (extraHandles is not null)
-                {
-                    createdHandles.AddRange(extraHandles);
-                }
-
-                var type = tr.GetObject(outcome.Id, OpenMode.ForRead).GetType().Name;
-                succeeded++;
-                results.Add(new { index, tool, ok = true, handle, type, extraHandles, warnings = outcome.Warnings });
+                // Nothing was created; the outer transaction is disposed without commit.
+                return ForgeResult.Failure(
+                    command.Id,
+                    "batch_all_failed",
+                    $"All {args.Steps.Length} batch steps failed; nothing was created.",
+                    "Fix the per-step errors in data.results (forge_draw_batch with dryRun=true validates every step).",
+                    data: new { created = 0, failed, results, createdHandles });
             }
-            catch (System.Exception ex)
-            {
-                // Record the failed step and continue — the batch contract keeps going.
-                var (code, message) = StepError(ex);
-                results.Add(new { index, tool, ok = false, error = new { code, message } });
-            }
-        }
 
-        var failed = args.Steps.Length - succeeded;
-        if (succeeded == 0)
-        {
-            // Nothing was created; the outer transaction is disposed without commit.
-            return ForgeResult.Failure(
+            tr.Commit();
+            watch.Stop();
+            var elapsedMs = Math.Max(watch.Elapsed.TotalMilliseconds, 0.001);
+            return ForgeResult.Success(
                 command.Id,
-                "batch_all_failed",
-                $"All {args.Steps.Length} batch steps failed; nothing was created.",
-                "Fix the per-step errors in data.results (forge_draw_batch with dryRun=true validates every step).",
-                data: new { created = 0, failed, results, createdHandles });
-        }
+                new
+                {
+                    created = succeeded,
+                    failed,
+                    entities = createdHandles.Count,
+                    atomic = args.Atomic,
+                    resultMode,
+                    countsByType = typeCounts,
+                    results,
+                    createdHandles = resultMode == "summary" ? null : createdHandles,
+                    elapsedMs = Math.Round(elapsedMs, 1),
+                    entitiesPerSecond = Math.Round(createdHandles.Count / (elapsedMs / 1000.0), 0)
+                },
+                verification: new ForgeVerification
+                {
+                    Attempted = true,
+                    Passed = failed == 0,
+                    Message = args.Atomic
+                        ? "All steps were validated first and created in one transaction (all-or-nothing). Entity classes were read from the new object ids."
+                        : "Each step ran in its own nested transaction inside one outer transaction; failed steps were rolled back individually and the batch continued. Entity classes were read from the new object ids.",
 
-        tr.Commit();
-        return ForgeResult.Success(
-            command.Id,
-            new { created = succeeded, failed, entities = createdHandles.Count, results, createdHandles },
-            verification: new ForgeVerification
-            {
-                Attempted = true,
-                Passed = failed == 0,
-                Message = "Each step ran in its own nested transaction inside one outer transaction; failed steps were rolled back individually and the batch continued. Entity types were read back from the database.",
-                ReadBack = new { created = succeeded, failed, results }
-            });
+                    // Counts only: the per-step results are already in data (no duplicate payload).
+                    ReadBack = new { created = succeeded, failed, failedIndexes, countsByType = typeCounts }
+                });
+        }
+        finally
+        {
+            _drawCache = previousCache;
+        }
+    }
+    /// <summary>Managed type name (Line, DBText, MText, RotatedDimension …) from the id's RX class, without opening the object.</summary>
+    private static string ManagedTypeName(ObjectId id)
+    {
+        var rx = id.ObjectClass?.Name ?? "";
+        var name = rx.StartsWith("AcDb", StringComparison.Ordinal) ? rx[4..] : rx;
+        return name switch
+        {
+            "Text" => "DBText",
+            "3PointAngularDimension" => "Point3AngularDimension",
+            "2LineAngularDimension" => "LineAngularDimension2",
+            "" => "Entity",
+            _ => name
+        };
     }
 
     // ===================== creation cores =====================
@@ -1162,7 +1256,7 @@ public sealed partial class PluginCommandProcessor
         "mtext" => new StepOutcome(CreateMText(db, tr, step)),
         "hatch" => CreateHatchStep(db, tr, step),
         "dimension" => new StepOutcome(CreateDimension(db, tr, step)),
-        "leader" => new StepOutcome(CreateLeader(db, tr, step)),
+        "leader" => CreateLeaderStep(db, tr, step),
         "block_insert" => CreateBlockInsertStep(db, tr, step),
         _ => throw UnsupportedTool(step.Tool)
     };
@@ -1216,9 +1310,12 @@ public sealed partial class PluginCommandProcessor
                 break;
             case "text":
                 PlanText(step);
+                ResolveTextStyle(db, tr, step.TextStyle);
                 break;
             case "mtext":
                 PlanMText(step);
+                ValidateMaskScale(step.MaskScale);
+                ResolveTextStyle(db, tr, step.TextStyle);
                 break;
             case "hatch":
                 PlanHatch(step);
@@ -1229,6 +1326,15 @@ public sealed partial class PluginCommandProcessor
                 break;
             case "leader":
                 PlanLeader(step);
+                ValidateMaskScale(step.MaskScale);
+                ResolveMLeaderStyle(db, tr, step.LeaderStyle);
+                ResolveTextStyle(db, tr, step.TextStyle);
+                if (!string.IsNullOrWhiteSpace(step.ContentBlock))
+                {
+                    ResolveBlockId(db, tr, step.ContentBlock!);
+                    RequireAuthorizedAttributes(step.Attributes);
+                }
+
                 break;
             case "block_insert":
                 PlanBlockInsert(db, tr, step);
@@ -1279,8 +1385,13 @@ public sealed partial class PluginCommandProcessor
             configure?.Invoke(entity);
             if (layer is not null)
             {
-                var layerTable = (LayerTable)tr.GetObject(db.LayerTableId, OpenMode.ForRead);
-                entity.LayerId = layerTable[layer];
+                var layerId = LookupLayerId(db, tr, layer);
+                if (layerId.IsNull)
+                {
+                    throw new DrawStepException("layer_not_found", $"Layer not found: {layer}");
+                }
+
+                entity.LayerId = layerId;
             }
 
             ApplyColor(entity, colorIndex);
@@ -1345,8 +1456,14 @@ public sealed partial class PluginCommandProcessor
         RequireValidColor(step.ColorIndex);
         RequireLayer(db, tr, step.Layer);
         var position = PlanText(step);
+        var style = ResolveTextStyle(db, tr, step.TextStyle);
         return AppendNew(db, tr, new DBText(), step.Layer, step.ColorIndex, text =>
         {
+            if (!style.Id.IsNull)
+            {
+                text.TextStyleId = style.Id;
+            }
+
             text.Position = position;
             text.Height = step.Height!.Value;
             text.Rotation = DegreesToRadians(step.RotationDeg ?? 0);
@@ -1359,8 +1476,15 @@ public sealed partial class PluginCommandProcessor
         RequireValidColor(step.ColorIndex);
         RequireLayer(db, tr, step.Layer);
         var (position, attachment) = PlanMText(step);
-        return AppendNew(db, tr, new MText(), step.Layer, step.ColorIndex, mtext =>
+        ValidateMaskScale(step.MaskScale);
+        var style = ResolveTextStyle(db, tr, step.TextStyle);
+        var id = AppendNew(db, tr, new MText(), step.Layer, step.ColorIndex, mtext =>
         {
+            if (!style.Id.IsNull)
+            {
+                mtext.TextStyleId = style.Id;
+            }
+
             mtext.Location = position;
             mtext.Attachment = attachment;
             mtext.Contents = MTextContents(step.Text!);
@@ -1368,10 +1492,22 @@ public sealed partial class PluginCommandProcessor
             {
                 mtext.TextHeight = step.Height.Value;
             }
+            else if (style.FixedHeight > 0)
+            {
+                mtext.TextHeight = style.FixedHeight;
+            }
 
             mtext.Width = step.Width ?? 0;
             mtext.Rotation = DegreesToRadians(step.RotationDeg ?? 0);
         });
+
+        // The background mask is a resident-only override (set once the MText is in the database).
+        if (step.BackgroundMask == true)
+        {
+            ApplyBackgroundMask((MText)tr.GetObject(id, OpenMode.ForWrite), step.MaskScale);
+        }
+
+        return id;
     }
 
     private static ObjectId CreateRectangleStep(Database db, Transaction tr, DrawBatchStep step)
@@ -1474,8 +1610,7 @@ public sealed partial class PluginCommandProcessor
             hatch.SetDatabaseDefaults(db);
             if (layer is not null)
             {
-                var layerTable = (LayerTable)tr.GetObject(db.LayerTableId, OpenMode.ForRead);
-                hatch.LayerId = layerTable[layer];
+                hatch.LayerId = LookupLayerId(db, tr, layer);
             }
 
             ApplyColor(hatch, colorIndex);
@@ -1558,13 +1693,36 @@ public sealed partial class PluginCommandProcessor
         return id;
     }
 
-    private static ObjectId CreateLeader(Database db, Transaction tr, DrawBatchStep step)
+    private static StepOutcome CreateLeaderStep(Database db, Transaction tr, DrawBatchStep step)
+    {
+        var warnings = new List<string>();
+        var id = CreateLeader(db, tr, step, warnings);
+        return new StepOutcome(id, null, warnings.Count > 0 ? warnings.ToArray() : null);
+    }
+
+    private static ObjectId CreateLeader(Database db, Transaction tr, DrawBatchStep step, List<string>? warnings = null)
     {
         RequireValidColor(step.ColorIndex);
         RequireLayer(db, tr, step.Layer);
         var plan = PlanLeader(step);
-        return AppendNew(db, tr, new MLeader(), step.Layer, step.ColorIndex, mleader =>
+        ValidateMaskScale(step.MaskScale);
+        var styleId = ResolveMLeaderStyle(db, tr, step.LeaderStyle);
+        var textStyle = ResolveTextStyle(db, tr, step.TextStyle);
+        var contentBlockId = string.IsNullOrWhiteSpace(step.ContentBlock) ? ObjectId.Null : ResolveBlockId(db, tr, step.ContentBlock!);
+        if (!contentBlockId.IsNull)
         {
+            RequireAuthorizedAttributes(step.Attributes);
+        }
+
+        // With a multileader style and no explicit height the style's text height wins.
+        var keepStyleHeight = !styleId.IsNull && step.TextHeight is null && step.Height is null;
+        var id = AppendNew(db, tr, new MLeader(), step.Layer, step.ColorIndex, mleader =>
+        {
+            if (!styleId.IsNull)
+            {
+                mleader.MLeaderStyle = styleId;
+            }
+
             var leaderIndex = mleader.AddLeader();
             var lineIndex = mleader.AddLeaderLine(leaderIndex);
             foreach (var point in plan.Points)
@@ -1582,24 +1740,61 @@ public sealed partial class PluginCommandProcessor
                 mleader.ArrowSize = step.ArrowSize.Value;
             }
 
-            if (!string.IsNullOrWhiteSpace(step.Text))
+            if (!contentBlockId.IsNull)
+            {
+                // Tag bubble: block content placed at the landing point (attributes follow once resident).
+                mleader.ContentType = ContentType.BlockContent;
+                mleader.BlockContentId = contentBlockId;
+                mleader.BlockPosition = plan.Points[^1];
+            }
+            else if (!string.IsNullOrWhiteSpace(step.Text))
             {
                 mleader.ContentType = ContentType.MTextContent;
 
                 // MLeader.MText copies the MText, so the temporary is disposed here.
                 using var mtext = new MText();
                 mtext.SetDatabaseDefaults(db);
+                if (!textStyle.Id.IsNull)
+                {
+                    mtext.TextStyleId = textStyle.Id;
+                }
+
                 mtext.Contents = MTextContents(step.Text!);
-                mtext.TextHeight = plan.TextHeight;
+                if (!keepStyleHeight)
+                {
+                    mtext.TextHeight = plan.TextHeight;
+                }
+
                 mtext.Location = plan.Points[^1];
+                if (step.BackgroundMask == true)
+                {
+                    ApplyBackgroundMask(mtext, step.MaskScale);
+                }
+
                 mleader.MText = mtext;
-                mleader.TextHeight = plan.TextHeight;
+                if (!keepStyleHeight)
+                {
+                    mleader.TextHeight = plan.TextHeight;
+                }
             }
             else
             {
                 mleader.ContentType = ContentType.NoneContent;
             }
         });
+
+        if (!contentBlockId.IsNull)
+        {
+            var mleader = (MLeader)tr.GetObject(id, OpenMode.ForWrite);
+            var unknown = SetMLeaderBlockAttributes(tr, mleader, contentBlockId, step.Attributes);
+            if (unknown.Length > 0)
+            {
+                // Same contract as block_insert: an unknown tag is reported, the entity is kept.
+                warnings?.Add($"No non-constant attribute definition for tag(s): {string.Join(", ", unknown)}");
+            }
+        }
+
+        return id;
     }
 
     private static ObjectId CreateTable(Database db, Transaction tr, TablePlan plan, bool hasTitleRow, string? layer, int? colorIndex)
@@ -2109,13 +2304,20 @@ public sealed partial class PluginCommandProcessor
             return db.Dimstyle;
         }
 
-        var dimStyleTable = (DimStyleTable)tr.GetObject(db.DimStyleTableId, OpenMode.ForRead);
-        if (!dimStyleTable.Has(name))
+        var cache = CacheFor(db);
+        if (cache is null || !cache.DimStyles.TryGetValue(name, out var id))
         {
-            throw new DrawStepException("dimstyle_not_found", $"Dimension style not found: {name}. Create it first with forge_style_dim_create.");
+            var dimStyleTable = (DimStyleTable)tr.GetObject(db.DimStyleTableId, OpenMode.ForRead);
+            id = dimStyleTable.Has(name) ? dimStyleTable[name] : ObjectId.Null;
+            if (cache is not null)
+            {
+                cache.DimStyles[name] = id;
+            }
         }
 
-        return dimStyleTable[name];
+        return id.IsNull
+            ? throw new DrawStepException("dimstyle_not_found", $"Dimension style not found: {name}. Create it first with forge_style_dim_create.")
+            : id;
     }
 
     private static LeaderPlan PlanLeader(DrawBatchStep step)
@@ -2195,38 +2397,40 @@ public sealed partial class PluginCommandProcessor
             throw new DrawStepException("missing_block_name", "name/blockName is required for block_insert step.");
         }
 
-        var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
-        if (!blockTable.Has(blockName))
-        {
-            throw new DrawStepException("block_not_found", $"Block not found: {blockName}");
-        }
-
+        var blockId = ResolveBlockId(db, tr, blockName);
         if (step.Scale is { } scale && !(scale > 0 && double.IsFinite(scale)))
         {
             throw new DrawStepException("invalid_scale", "scale must be > 0.");
         }
 
-        if (step.Attributes is { Count: > 0 })
-        {
-            var registry = DrawingRegistryStore.Current;
-            var pack = StandardsPackStore.Current;
-            foreach (var pair in step.Attributes)
-            {
-                if (registry is not null && !registry.TryAuthorizeAttribute(pair.Key, pair.Value ?? "", out var code, out var message))
-                {
-                    throw new DrawStepException(code!, message!);
-                }
+        RequireAuthorizedAttributes(step.Attributes);
+        var position = PointArg(step.Position ?? step.Center, "position");
+        return (blockId, position, step.Scale ?? 1.0);
+    }
 
-                if (pack is not null && DrawingRegistry.IsDrawingNumberTag(pair.Key) &&
-                    !pack.TryValidateDrawingNo(pair.Value ?? "", out var packCode, out var packMessage))
-                {
-                    throw new DrawStepException(packCode!, packMessage!);
-                }
-            }
+    /// <summary>Drawing-registry and standards-pack rules for attribute values (block inserts and tag bubbles).</summary>
+    private static void RequireAuthorizedAttributes(IReadOnlyDictionary<string, string>? attributes)
+    {
+        if (attributes is not { Count: > 0 })
+        {
+            return;
         }
 
-        var position = PointArg(step.Position ?? step.Center, "position");
-        return (blockTable[blockName], position, step.Scale ?? 1.0);
+        var registry = DrawingRegistryStore.Current;
+        var pack = StandardsPackStore.Current;
+        foreach (var pair in attributes)
+        {
+            if (registry is not null && !registry.TryAuthorizeAttribute(pair.Key, pair.Value ?? "", out var code, out var message))
+            {
+                throw new DrawStepException(code!, message!);
+            }
+
+            if (pack is not null && DrawingRegistry.IsDrawingNumberTag(pair.Key) &&
+                !pack.TryValidateDrawingNo(pair.Value ?? "", out var packCode, out var packMessage))
+            {
+                throw new DrawStepException(packCode!, packMessage!);
+            }
+        }
     }
 
     // ===================== small helpers =====================
@@ -2346,7 +2550,7 @@ public sealed partial class PluginCommandProcessor
 
     private static void RequireLayer(Database db, Transaction tr, string? layer)
     {
-        if (layer is not null && !LayerExists(db, tr, layer))
+        if (layer is not null && LookupLayerId(db, tr, layer).IsNull)
         {
             throw new DrawStepException("layer_not_found", $"Layer not found: {layer}");
         }
@@ -2512,7 +2716,16 @@ public sealed partial class PluginCommandProcessor
     private sealed record DrawDimensionArgs { public string? Kind { get; init; } public double[]? P1 { get; init; } public double[]? P2 { get; init; } public double[]? Vertex { get; init; } public double[]? DimLinePoint { get; init; } public double RotationDeg { get; init; } public bool UseXAxis { get; init; } = true; public string? TextOverride { get; init; } public string? DimStyle { get; init; } public double? DimScale { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } }
     private sealed record DrawLeaderArgs { public double[][]? Points { get; init; } public string? Text { get; init; } public double? TextHeight { get; init; } public double? ArrowSize { get; init; } public bool HasArrowHead { get; init; } = true; public string? Layer { get; init; } public int? ColorIndex { get; init; } }
     private sealed record DrawTableArgs { public double[]? Position { get; init; } public string?[][]? Rows { get; init; } public string?[][]? Cells { get; init; } public string? Title { get; init; } public bool HasTitleRow { get; init; } public double? RowHeight { get; init; } public double? ColumnWidth { get; init; } public double[]? ColumnWidths { get; init; } public double? TextHeight { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } }
-    private sealed record DrawBatchArgs { public DrawBatchStep[]? Steps { get; init; } }
+    private sealed record DrawBatchArgs
+    {
+        public DrawBatchStep[]? Steps { get; init; }
+
+        /// <summary>true = validate every step first and create all-or-nothing in one transaction (no nested transactions).</summary>
+        public bool Atomic { get; init; }
+
+        /// <summary>full (default, per-step results), errors (failed steps + handles), summary (counts + failed steps only).</summary>
+        public string? ResultMode { get; init; }
+    }
 
     // Keep the property set identical to Forge.Server DrawStepDto (camelCase on the wire).
     private sealed record DrawBatchStep
@@ -2573,5 +2786,12 @@ public sealed partial class PluginCommandProcessor
         public Dictionary<string, string>? Attributes { get; init; }
         public string? Layer { get; init; }
         public int? ColorIndex { get; init; }
+
+        // Speed wave (2026-10-29): text style, background mask, multileader style/block content.
+        public string? TextStyle { get; init; }
+        public bool? BackgroundMask { get; init; }
+        public double? MaskScale { get; init; }
+        public string? LeaderStyle { get; init; }
+        public string? ContentBlock { get; init; }
     }
 }

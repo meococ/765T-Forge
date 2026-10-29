@@ -94,7 +94,8 @@ public sealed partial class PluginCommandProcessor
                     textString = text.TextString,
                     position = new[] { text.Position.X, text.Position.Y, text.Position.Z },
                     height = text.Height,
-                    rotationDeg = text.Rotation * 180.0 / Math.PI
+                    rotationDeg = text.Rotation * 180.0 / Math.PI,
+                    textStyle = text.TextStyleName
                 },
                 MText mtext => new
                 {
@@ -103,7 +104,9 @@ public sealed partial class PluginCommandProcessor
                     location = new[] { mtext.Location.X, mtext.Location.Y, mtext.Location.Z },
                     textHeight = mtext.TextHeight,
                     width = mtext.Width,
-                    rotationDeg = mtext.Rotation * 180.0 / Math.PI
+                    rotationDeg = mtext.Rotation * 180.0 / Math.PI,
+                    textStyle = mtext.TextStyleName,
+                    backgroundMask = mtext.BackgroundFill
                 },
                 Table table => BuildTableKindReadBack(table),
                 BlockReference blockRef => BuildBlockRefKindReadBack(tr, blockRef),
@@ -118,6 +121,10 @@ public sealed partial class PluginCommandProcessor
                 {
                     contentType = mleader.ContentType.ToString(),
                     text = mleader.ContentType == ContentType.MTextContent ? mleader.MText?.Contents : null,
+                    backgroundMask = mleader.ContentType == ContentType.MTextContent ? mleader.MText?.BackgroundFill : null,
+                    contentBlock = mleader.ContentType == ContentType.BlockContent && !mleader.BlockContentId.IsNull
+                        ? ((BlockTableRecord)tr.GetObject(mleader.BlockContentId, OpenMode.ForRead)).Name
+                        : null,
                     leaderCount = mleader.LeaderCount
                 },
                 Region region => new

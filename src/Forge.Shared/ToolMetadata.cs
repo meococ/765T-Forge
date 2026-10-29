@@ -143,6 +143,17 @@ public static class ForgeToolRegistry
         ["forge_linework_transform"] = new ToolMetadata("forge_linework_transform", "linework", false, false, true, false, false, RequiresAutoCad: false),
         ["forge_batch_run"] = new ToolMetadata("forge_batch_run", "batch", false, true, false, false, true, RequiresAutoCad: false),
         ["forge_batch_status"] = Read("forge_batch_status", "batch", requiresAutoCad: false),
+        // Speed wave (2026-10-29). forge_doc_import can redefine an existing block (replaceExisting)
+        // and rename/merge layers it brings in: destructive + backup. forge_standards_import follows
+        // the style-tool policy (overwrite restyles existing objects; same call → same state).
+        // forge_block_insert_bulk can replace block definitions from a library (redefine): destructive
+        // + backup. forge_plot_preset_apply rewrites layout plot settings / a named page setup like
+        // forge_layout_page_setup_apply. forge_qa_annotation_clash is a pure read.
+        ["forge_doc_import"] = new ToolMetadata("forge_doc_import", "document", false, true, false, false, true),
+        ["forge_qa_annotation_clash"] = Read("forge_qa_annotation_clash", "qa"),
+        ["forge_standards_import"] = new ToolMetadata("forge_standards_import", "style", false, true, true, false, true),
+        ["forge_block_insert_bulk"] = new ToolMetadata("forge_block_insert_bulk", "block", false, true, false, false, true),
+        ["forge_plot_preset_apply"] = Write("forge_plot_preset_apply", "plot", idempotent: true),
         ["forge_exec_command"] = Destructive("forge_exec_command", "exec", unsafeTool: true),
         ["forge_exec_lisp"] = Destructive("forge_exec_lisp", "exec", unsafeTool: true),
         ["forge_run_script"] = Destructive("forge_run_script", "exec", requiresAutoCad: false),

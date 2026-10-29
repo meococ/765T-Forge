@@ -30,6 +30,8 @@ public static class ToolProfiles
             "forge_plot_publish",
             "forge_recipe_issue_set",
             "forge_layout_page_setup_apply",
+            "forge_plot_preset_apply",
+            "forge_standards_import",
             "forge_layer_state_restore",
             "forge_xref_normalize_relative"
         ],
@@ -42,6 +44,8 @@ public static class ToolProfiles
             "forge_qa_audit_layers",
             "forge_qa_readback",
             "forge_qa_readback_after_timeout",
+            "forge_qa_annotation_clash",
+            "forge_text_list",
             "forge_audit_summarize",
             "forge_issue_set_diff",
             "forge_xref_list",
@@ -74,6 +78,8 @@ public static class ToolProfiles
             "forge_doc_new",
             "forge_doc_save",
             "forge_doc_export_dxf",
+            "forge_doc_import",
+            "forge_standards_import",
             "forge_layer_create",
             "forge_layer_set",
             "forge_layer_list",
@@ -124,9 +130,12 @@ public static class ToolProfiles
             "forge_undo",
             "forge_block_create",
             "forge_block_insert",
+            "forge_block_insert_bulk",
             "forge_block_list",
             "forge_layout_create",
             "forge_viewport_add",
+            "forge_plot_preset_apply",
+            "forge_qa_annotation_clash",
             "forge_view_capture"
         ]
     };

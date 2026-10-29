@@ -348,12 +348,12 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_draw_dimension", new { kind, p1, p2, dimLinePoint, vertex, rotationDeg, useXAxis, dimStyle, dimScale, textOverride, layer, colorIndex }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_draw_batch", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
-    [Description("Draw up to 1000 entities in ONE call: steps[] of {tool: line|polyline|rectangle|polygon|circle|arc|ellipse|spline|revcloud|text|mtext|hatch|dimension|leader|block_insert, ...params}. Each step runs in its own nested transaction so a failed step never leaves partial geometry; if all steps fail returns batch_all_failed. Example: [{\"tool\":\"rectangle\",\"p1\":[0,0],\"p2\":[100,50]},{\"tool\":\"dimension\",\"kind\":\"linear\",\"p1\":[0,0],\"p2\":[100,0],\"dimLinePoint\":[50,-10]}].")]
-    public static Task<ForgeResult> DrawBatch(ForgeToolRunner runner, DrawStepDto[] steps, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_draw_batch", new { steps }, dryRun, cancellationToken: cancellationToken);
+    [Description("Draw up to 1000 entities in ONE call: steps[] of {tool: line|polyline|rectangle|polygon|circle|arc|ellipse|spline|revcloud|text|mtext|hatch|dimension|leader|block_insert, ...params}. Annotation keys: textStyle (text/mtext/leader), backgroundMask + maskScale 1–5 (mtext and leader text), leaderStyle (multileader style name), contentBlock + attributes (leader with a block tag bubble at the landing point), dimStyle (dimension kind linear|aligned|radius|diameter|angular|ordinate; rotationDeg rotates a linear dim), pattern/scale/angleDeg (hatch inside the given vertices; the closed boundary polyline is kept). Default: each step runs in its own nested transaction so a failed step never leaves partial geometry and the rest continue; all failing returns batch_all_failed. atomic=true validates every step first and creates everything in one transaction (all-or-nothing: batch_invalid / batch_aborted create nothing) — fastest for large batches. resultMode: full (default, per-step results), errors (failed steps + warnings only), summary (counts only, no handle list). Every result carries countsByType, elapsedMs and entitiesPerSecond. Example: [{\"tool\":\"rectangle\",\"p1\":[0,0],\"p2\":[100,50]},{\"tool\":\"leader\",\"points\":[[10,10],[30,25]],\"text\":\"SD-1\",\"backgroundMask\":true}].")]
+    public static Task<ForgeResult> DrawBatch(ForgeToolRunner runner, DrawStepDto[] steps, bool atomic = false, string? resultMode = null, bool dryRun = false, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_draw_batch", new { steps, atomic, resultMode }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_entity_get", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
-    [Description("Read one entity by handle: returns {entity, kind, kindError?} with common summary (type, layer, color, linetype, lineweight, bbox) plus rich kind geometry (Line, Polyline with per-vertex widths up to 1000 vertices + truncated flag, Polyline2d/3d, Circle, Arc, Ellipse, Spline, DBText, MText, MLeader, Table cells, Hatch area, Dimension measurement, BlockReference attributes + dynamic effectiveName, Region area, Xline/Ray).")]
+    [Description("Read one entity by handle: returns {entity, kind, kindError?} with common summary (type, layer, color, linetype, lineweight, bbox) plus rich kind geometry (Line, Polyline with per-vertex widths up to 1000 vertices + truncated flag, Polyline2d/3d, Circle, Arc, Ellipse, Spline, DBText/MText with textStyle (+ MText backgroundMask), MLeader with backgroundMask/contentBlock, Table cells, Hatch area, Dimension measurement + dimStyleName, BlockReference attributes + dynamic effectiveName, Region area, Xline/Ray).")]
     public static Task<ForgeResult> EntityGet(ForgeToolRunner runner, string handle, CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_entity_get", new { handle }, cancellationToken: cancellationToken);
 
@@ -986,6 +986,115 @@ public sealed class ForgeMcpTools
         CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_text_list", new { window, layer, contains, regex, types, layout, includeBlocks, blockDepth, includeXrefs, maxResults }, document: document, cancellationToken: cancellationToken);
 
+    // ── Speed wave (2026-10-29): fast import, annotation QA, standards, bulk insert, plot preset ──
+
+    [McpServerTool(Name = "forge_doc_import", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false)]
+    [Description("Import a DXF or DWG file into the ACTIVE drawing in ONE call (one side-database read + one native insert, no per-entity round trips; built for 5–20k entities). mode: block (default; one block definition named blockName, default = file name, plus one INSERT unless insertReference=false), merge (the source model space exploded into ours; layer forces every new entity onto one layer), xref (attach, or overlay=true; a DXF source is first saved as DWG to xrefSavePath). position (default origin), scale, rotationDeg, basePoint (source point that lands on position; default the source INSBASE). Units: with matchUnits=true (default) the source INSUNITS is scaled to ours. layerMap {\"SRC\":\"DST\", \"A-*\":\"M-*\"} renames/merges source layers (exact key first, then the most specific wildcard; a * in the target takes what the key's * matched, so A-WALL becomes M-WALL, or the whole name for exact keys); layerPrefix prefixes every unmapped layer; 0 and Defpoints are never renamed. An existing block of the same name fails block_exists unless replaceExisting=true, which redefines it in place (every existing INSERT updates). dryRun returns the inventory (counts by type/layer, units, layer plan, conflicts) without writing. Returns counts by type and layer, layersCreated/layersReused, extents (world), handles (returnHandles=true, max 5000), warnings and timingsMs.")]
+    public static Task<ForgeResult> DocImport(
+        ForgeToolRunner runner,
+        string path,
+        string? mode = null,
+        string? blockName = null,
+        double[]? position = null,
+        double? scale = null,
+        double? rotationDeg = null,
+        double[]? basePoint = null,
+        string? layer = null,
+        string? layerPrefix = null,
+        Dictionary<string, string>? layerMap = null,
+        bool replaceExisting = false,
+        bool insertReference = true,
+        bool matchUnits = true,
+        bool overlay = false,
+        string? xrefSavePath = null,
+        bool overwriteAcknowledged = false,
+        bool returnHandles = false,
+        bool dryRun = false,
+        string? document = null,
+        CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_doc_import", new { path, mode, blockName, position, scale, rotationDeg, basePoint, layer, layerPrefix, layerMap, replaceExisting, insertReference, matchUnits, overlay, xrefSavePath, overwriteAcknowledged, returnHandles }, dryRun, document: document, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_qa_annotation_clash", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("Read-only presentation QA (replaces eyeballing PNGs). One block-aware walk collects WORLD text boxes (TEXT, ATTRIB, MTEXT, MLEADER content, dimension text) and linework (lines, polylines with bulges, arcs, circles, ellipses, splines, leader and dimension lines), then checks: text_overlap (text boxes overlapping each other, area ratio >= minOverlapRatio, default 0.02), text_crossing (linework through a text box; masked MTEXT/MLEADER/DIMTFILL text is exempt unless reportMaskedCrossings=true), door_swing (a tag/leader landing inside a door swing: arcs on doorLayers or inside doorBlocks), wall_straddle (a text box cut by wall linework on wallLayers), min_height (plotted text height < minTextHeightMm at plotScale, e.g. plotScale=100 for 1:100; paper layouts are 1:1). Defaults: checks = all; doorLayers \"*DOOR*\"; doorBlocks \"*DOOR*,*DR-*\"; wallLayers \"*WALL*\"; minTextHeightMm 2.0. Filters: layout (default Model), window [[x1,y1],[x2,y2]] (world), textLayers / curveLayers / excludeLayers (comma-separated wildcards, own or effective layer). Off/frozen/non-plot layers are ignored. Text and linework of the same small block (a tag bubble, a dimension) are not reported against each other. Each finding: check, severity, message, handles, layers, texts, at [x,y], overlap/ratio, masked, insert paths. Returns passed, summary counts per check, findings (maxFindings default 200), findingsTruncated, elapsedMs.")]
+    public static Task<ForgeResult> QaAnnotationClash(
+        ForgeToolRunner runner,
+        string? layout = null,
+        double[][]? window = null,
+        string[]? checks = null,
+        string? textLayers = null,
+        string? curveLayers = null,
+        string? excludeLayers = null,
+        string? doorLayers = null,
+        string? doorBlocks = null,
+        string? wallLayers = null,
+        double? plotScale = null,
+        double? minTextHeightMm = null,
+        string? drawingUnits = null,
+        double? minOverlapRatio = null,
+        double? padding = null,
+        bool reportMaskedCrossings = false,
+        bool includeBlocks = true,
+        int? blockDepth = null,
+        bool includeXrefs = true,
+        int? maxFindings = null,
+        string? document = null,
+        CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_qa_annotation_clash", new { layout, window, checks, textLayers, curveLayers, excludeLayers, doorLayers, doorBlocks, wallLayers, plotScale, minTextHeightMm, drawingUnits, minOverlapRatio, padding, reportMaskedCrossings, includeBlocks, blockDepth, includeXrefs, maxFindings }, document: document, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_standards_import", ReadOnly = false, Destructive = true, Idempotent = true, OpenWorld = false)]
+    [Description("Copy drawing standards from a template DWG/DWT into the ACTIVE drawing in one call: include = any of linetypes, textStyles, layers, dimStyles, mleaderStyles, tableStyles, pageSetups (default all). Copied in dependency order (linetypes and text styles before the layers and dim styles that use them), one WblockCloneObjects per kind. onConflict: skip (default — existing definitions are kept) or overwrite (replaced in place; everything using them restyles). filter = comma-separated wildcards on names. Layer 0, Defpoints and the ByLayer/ByBlock/Continuous linetypes are never overwritten; xref-dependent and anonymous names are never copied. dryRun returns the per-item plan (add/overwrite/skip_existing/skip_protected/skip_filtered). The result is a change report per kind (added, overwritten, skipped with reasons) read back from the drawing.")]
+    public static Task<ForgeResult> StandardsImport(
+        ForgeToolRunner runner,
+        string templatePath,
+        string[]? include = null,
+        string? filter = null,
+        string? onConflict = null,
+        bool dryRun = false,
+        string? document = null,
+        CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_standards_import", new { templatePath, include, filter, onConflict }, dryRun, document: document, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_block_insert_bulk", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false)]
+    [Description("Insert up to 2000 block references in ONE call and ONE transaction: items[] of {name?, position [x,y(,z)], rotationDeg?, scale?, layer?, colorIndex?, attributes? {TAG: value}, leader? {points [[tip],[landing]] or [[landing]] (tip = insert position), text, textHeight?, layer?, style?, backgroundMask?}}. Item fields fall back to blockName / scale / rotationDeg / layer / leaderLayer / leaderStyle / leaderTextHeight. Blocks missing from the drawing are loaded by name from libraryPath (one read, one clone); redefine=true replaces drawing definitions with the library's (existing INSERTs update). All-or-nothing: every item is validated first (numbers, block, layers, multileader styles, drawing-registry attribute rules) and nothing is created if any item fails (data.errors lists them); an attribute tag the block does not have is a warning. dryRun validates only. Returns created, leaders, blocks, library (loaded/redefined), items [{index, handle, leader}] (returnHandles=true), warnings and elapsedMs.")]
+    public static Task<ForgeResult> BlockInsertBulk(
+        ForgeToolRunner runner,
+        BulkInsertItem[] items,
+        string? blockName = null,
+        string? libraryPath = null,
+        bool redefine = false,
+        double? scale = null,
+        double? rotationDeg = null,
+        string? layer = null,
+        string? leaderLayer = null,
+        string? leaderStyle = null,
+        double? leaderTextHeight = null,
+        bool returnHandles = true,
+        bool dryRun = false,
+        string? document = null,
+        CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_block_insert_bulk", new { items, blockName, libraryPath, redefine, scale, rotationDeg, layer, leaderLayer, leaderStyle, leaderTextHeight, returnHandles }, dryRun, document: document, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_plot_preset_apply", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("Apply one plot configuration to one or many layouts in a single call (and optionally save it as the named page setup setupName). layouts: names or wildcards (\"*\" = every paper layout; Model only when named; default the current layout). device (default \"DWG To PDF.pc3\"; with noViewer=true, the default, the Forge no-viewer PC3 clone is used so no plot ever opens a viewer), paperSize (localized or canonical media name), plotStyle (CTB/STB, e.g. \"monochrome.ctb\"), plotArea layout|extents|display|limits|window (window=[[x1,y1],[x2,y2]]), scale \"fit\" or \"1:100\", units mm|inches, centered, orientation auto|landscape|portrait. Every layout is validated with PlotSettingsValidator before anything is written; one rejection aborts the whole call. dryRun resolves the layouts and the device without writing anything. Returns per-layout read-back (device, media, paper mm, area, scale, centring, rotation, style sheet) and the saved setup.")]
+    public static Task<ForgeResult> PlotPresetApply(
+        ForgeToolRunner runner,
+        string[]? layouts = null,
+        string? setupName = null,
+        string? device = null,
+        string? paperSize = null,
+        string? plotStyle = null,
+        string? plotArea = null,
+        double[][]? window = null,
+        string? scale = null,
+        string? units = null,
+        bool? centered = null,
+        string? orientation = null,
+        bool noViewer = true,
+        bool dryRun = false,
+        string? document = null,
+        CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_plot_preset_apply", new { layouts, setupName, device, paperSize, plotStyle, plotArea, window, scale, units, centered, orientation, noViewer }, dryRun, document: document, cancellationToken: cancellationToken);
+
     [McpServerTool(Name = "forge_entity_search_text", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Search for text across DBText, MText (with formatting codes stripped), BlockReference attributes, Dimension measurement/override text, MLeader text, and Table cells. Optional filters: layer, 2D bounding window [[minX,minY],[maxX,maxY]], layout, caseSensitive, exactMatch, useRegex, maxResults (default 200). Returns matching handles, entity/source kinds, plain text, raw text, and WCS coordinates.")]
     public static Task<ForgeResult> EntitySearchText(
@@ -1133,6 +1242,13 @@ public sealed record DrawStepDto
     public Dictionary<string, string>? Attributes { get; init; }
     public string? Layer { get; init; }
     public int? ColorIndex { get; init; }
+
+    // Speed wave (2026-10-29): text style, background mask, multileader style / block content.
+    public string? TextStyle { get; init; }
+    public bool? BackgroundMask { get; init; }
+    public double? MaskScale { get; init; }
+    public string? LeaderStyle { get; init; }
+    public string? ContentBlock { get; init; }
 }
 
 public sealed record BlockAttributeDefDto
