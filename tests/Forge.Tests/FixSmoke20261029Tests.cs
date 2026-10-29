@@ -392,4 +392,113 @@ public sealed class FixSmoke20261029SourceGuards
         var restore = MethodBody(plot, "private static void RestoreLayout(");
         Assert.Matches(@"CurrentLayout\s*=[^=]", restore);
     }
+
+    [Fact]
+    public void D8_DocCloseDecidesEveryRefusalBeforeSavingOrClosingAndNeverTouchesTheClosedDocument()
+    {
+        var body = MethodCode(PluginSource("PluginCommandProcessor.DocClose.cs"), "private ForgeResult DocClose(");
+        var refusal = body.IndexOf("DocClosePolicy.Refusal(", StringComparison.Ordinal);
+        var appContext = body.IndexOf("Documents.IsApplicationContext", StringComparison.Ordinal);
+        var save = body.IndexOf("SaveAs(path, true, DwgVersion.Current", StringComparison.Ordinal);
+        var close = body.IndexOf("doc.CloseAndDiscard()", StringComparison.Ordinal);
+        Assert.True(refusal >= 0 && refusal < appContext && appContext < save && save < close, "refusals, then the app-context guard, then save, then close");
+        Assert.DoesNotMatch(@"\.Save\(\)", body);
+        Assert.DoesNotMatch(@"CloseAndSave", body);
+        Assert.DoesNotMatch(@"\bdoc\.", body[(close + "doc.CloseAndDiscard()".Length)..]);
+
+        var readBack = MethodCode(PluginSource("PluginCommandProcessor.DocClose.cs"), "internal static ForgeResult ReadBackClosedDocument(");
+        Assert.Contains("ReferenceEquals(d, pending.TargetDocument)", readBack, StringComparison.Ordinal);
+        Assert.DoesNotMatch(@"TargetDocument\.", readBack);
+    }
+
+    [Fact]
+    public void D8_DbmodCountsOnlyWhenDwgnameNamesTheTargetAndTheComFlagIsAlwaysRead()
+    {
+        var body = MethodCode(PluginSource("PluginCommandProcessor.DocClose.cs"), "private static bool? ReadUnsaved(");
+        var confirm = body.IndexOf("DocumentReadBack.IsConfirmed(true, target.Name, dwgName)", StringComparison.Ordinal);
+        var dbmod = body.IndexOf("\"DBMOD\"", StringComparison.Ordinal);
+        Assert.True(confirm >= 0 && confirm < dbmod, "DBMOD is read only after DWGNAME confirms the target");
+        Assert.Contains("com.Saved", body, StringComparison.Ordinal);
+        Assert.Contains("DocClosePolicy.Unsaved(dbmodSaysModified, comSaved)", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void D8_TheUndoScopeNeverReadsTheDocumentAfterTheCall()
+    {
+        var ledger = PluginSource("PluginCommandProcessor.UndoLedger.cs");
+        Assert.DoesNotMatch(@"scope\.Doc\??\.", ledger);
+    }
+
+    [Fact]
+    public void D8_DocCloseIsPolledOnTheIdleLane()
+    {
+        var server = PluginSource("NamedPipePluginServer.cs");
+        Assert.Contains("PluginCommandProcessor.ReadBackClosedDocument(command.Id, closing)", server, StringComparison.Ordinal);
+    }
+}
+
+/// <summary>fix-smoke-20261029 D8: forge_doc_close refusals are a pure decision taken before anything is saved or closed.</summary>
+public sealed class DocClosePolicyTests
+{
+    [Theory]
+    [InlineData(0, 3, false, false, false, false, false, false, true, "document_not_found")]
+    [InlineData(2, 3, false, false, false, false, false, false, true, "ambiguous_document")]
+    [InlineData(1, 1, false, false, false, true, false, false, true, "last_document")]
+    [InlineData(1, 2, true, false, false, true, false, false, true, "command_active")]
+    [InlineData(1, 2, false, true, false, false, false, false, true, "discard_not_acknowledged")]
+    [InlineData(1, 2, false, null, false, false, false, false, true, "discard_not_acknowledged")] // unknown counts as unsaved
+    [InlineData(1, 2, false, true, false, true, false, false, true, null)]
+    [InlineData(1, 2, false, null, false, true, false, false, true, null)]
+    [InlineData(1, 2, false, false, false, false, false, false, true, null)]
+    [InlineData(1, 2, false, true, true, false, true, false, true, "save_requires_path")]
+    [InlineData(1, 2, false, true, true, false, false, true, true, "document_read_only")]
+    [InlineData(1, 2, false, true, true, false, false, false, false, "invalid_path")]
+    [InlineData(1, 2, false, true, true, false, false, false, true, null)]
+    [InlineData(1, 2, false, null, false, false, true, false, false, "discard_not_acknowledged")]
+    public void RefusalsComeInPlanOrder(int matches, int open, bool commandActive, bool? unsaved, bool save, bool ack, bool untitled, bool readOnly, bool isDwg, string? expected)
+        => Assert.Equal(expected, DocClosePolicy.Refusal(matches, open, commandActive, unsaved, save, ack, untitled, readOnly, isDwg));
+
+    [Theory]
+    [InlineData(true, true, true)]      // DBMOD says modified: unsaved even if COM says saved
+    [InlineData(false, false, true)]    // COM says not saved: unsaved even if DBMOD says clean
+    [InlineData(null, false, true)]
+    [InlineData(true, null, true)]
+    [InlineData(false, true, false)]
+    [InlineData(null, true, false)]     // DBMOD not trusted (DWGNAME names another drawing): COM decides
+    [InlineData(false, null, false)]
+    [InlineData(null, null, null)]      // nothing readable: unknown, which the refusal treats as unsaved
+    public void UnsavedIfEitherSourceSaysSoAndUnknownWhenNeitherIsReadable(bool? dbmodModified, bool? comSaved, bool? expected)
+        => Assert.Equal(expected, DocClosePolicy.Unsaved(dbmodModified, comSaved));
+
+    [Fact]
+    public void DocCloseRunsInApplicationContextAndPollsLikeTheOtherLifecycleTools()
+    {
+        Assert.True(DocumentContextPolicy.RunsInApplicationContext("forge_doc_close"));
+        Assert.Contains("doc_close_unconfirmed", DocumentContextPolicy.UnconfirmedCodes);
+        Assert.Equal(55_000, DocumentContextPolicy.PollWindowMs("forge_doc_close", 60_000));
+    }
+
+    [Fact]
+    public void DocCloseIsDestructiveHasNoPreCallBackupAndIsInTheAuthoringProfile()
+    {
+        var meta = ForgeToolRegistry.Get("forge_doc_close");
+        Assert.False(meta.ReadOnly);
+        Assert.True(meta.Destructive);
+        Assert.False(meta.RequiresBackup);
+        Assert.False(meta.Unsafe);
+        Assert.True(ToolProfiles.TryGet("authoring", out var authoring));
+        Assert.Contains("forge_doc_close", authoring);
+    }
+
+    [Theory]
+    [InlineData(true, 10, 0, true)]
+    [InlineData(true, 10, -1, true)] // coarse file-system tolerance (2 s)
+    [InlineData(true, 10, -5, false)]
+    [InlineData(true, 0, 0, false)]
+    [InlineData(false, 10, 0, false)]
+    public void TheSaveBeforeCloseCountsOnlyAFileWrittenDuringTheCall(bool exists, long length, int secondsFromStart, bool expected)
+    {
+        var start = new DateTime(2026, 10, 30, 3, 0, 0, DateTimeKind.Utc);
+        Assert.Equal(expected, DocumentReadBack.FileWritten(exists, length, start.AddSeconds(secondsFromStart), start));
+    }
 }

@@ -11,6 +11,7 @@ See [docs/versioning.md](docs/versioning.md).
 ## [Unreleased]
 
 ### Added
+- `forge_doc_close` (fix-smoke-20261029 D8): close one open drawing by exact name or path, in application context. Refuses the last drawing, a running command, and unsaved changes unless `save=true` (backup, save to its own .dwg, file readback) or `discardAcknowledged=true`; `ok` only when AutoCAD no longer lists the Document. Authoring profile.
 
 - Speed wave (2026-10-29, 119 total MCP tools, 66 in the `authoring` profile) — fewer round trips, smaller payloads, presentation QA without screenshots:
   - `forge_doc_import`: DXF/DWG into the active drawing in one call — `mode=block` (one definition + one INSERT; `replaceExisting` redefines in place so existing INSERTs update), `merge` (`Database.Insert` with a position/scale/rotation/basePoint matrix) or `xref` (attach/overlay; a DXF is first saved as DWG to `xrefSavePath`). Side-database read (`DxfIn`/`ReadDwgFile`), INSUNITS matching (`matchUnits`), `layerMap` (exact names then wildcards, a `*` in the target takes what the key's `*` matched so `{"A-*":"M-*"}` maps A-WALL to M-WALL, swaps and merges handled) and `layerPrefix` applied in the side database (layers 0/Defpoints never renamed), counts by type and layer, `layersCreated`/`layersReused`, world extents, optional handles (≤5000), nested-block conflict warnings, `timingsMs`; `dryRun` returns the inventory and plan. Destructive + backup (block redefinition); failures roll back through the UNDO group

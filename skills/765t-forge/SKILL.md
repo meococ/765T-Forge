@@ -55,6 +55,7 @@ Every write should produce an audit record and, when a DWG path is available, a 
 
 ## Reading the drawing back (do not draw blind)
 
+- Done with a scratch drawing? **`forge_doc_close`** (`name`/`path`) with `discardAcknowledged=true` to drop it, or `save=true` to save it to its own file first. It refuses the last open drawing (`forge_doc_new` first) and unsaved changes without one of the two flags; `ok=true` means AutoCAD no longer lists it.
 - Several drawings open? Call `forge_doc_list_open`, then **`forge_doc_activate`** (`name` = exact file name, or `path` = full path) and check `data.active` before working. `ambiguous_document` → pass the full path; `doc_activate_unconfirmed` → read `forge_doc_list_open` again before touching either drawing. The per-call `document` argument still works for single calls.
 - Content inside blocks is invisible to plain reads. Use **`forge_text_list`** (TEXT / MTEXT / ATTRIB / ATTDEF / MLEADER, nested blocks included by default, world position/height/rotation, `effectiveLayer`, `insertPath`) to read room names, tags and titleblock values, and pass **`includeBlocks=true`** to `forge_entity_list` / `forge_linework_*` when the geometry lives in blocks (furniture, doors, unit blocks). Check `blockTraversal` for what was skipped (depth limit, bbox, xref, cycle) and raise `blockDepth` if needed.
 - `forge_linework_dump` defaults to a pipe-oriented layer filter; for architecture/structure pass `layerFilter="*"` (or the exact layers).

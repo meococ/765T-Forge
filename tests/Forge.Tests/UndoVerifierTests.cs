@@ -340,6 +340,8 @@ public sealed class UndoVerifierTests
         Assert.Equal(1, host.MredoTotal);
         Assert.Equal("undo_step_failed", outcome.MarkDirty);
         Assert.False(outcome.PopEntry);
+        Assert.False(outcome.Restored); // the failed step itself was never read back
+        Assert.Contains(outcome.NotRestored, p => p.Contains("not read back", StringComparison.Ordinal));
     }
 
     [Fact]

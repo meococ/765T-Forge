@@ -23,6 +23,9 @@ public static class ForgeToolRegistry
         ["forge_doc_list_open"] = Read("forge_doc_list_open", "document"),
         // Switches the active drawing (session state only — no database write, no backup, no undo mark).
         ["forge_doc_activate"] = new ToolMetadata("forge_doc_activate", "document", false, false, true, false, false),
+        // fix-smoke-20261029 D8: closing can discard unsaved work (Destructive). No pre-call backup: the
+        // drawing is not modified; with save=true the tool backs up the file itself before overwriting it.
+        ["forge_doc_close"] = new ToolMetadata("forge_doc_close", "document", false, true, false, false, false),
         ["forge_doc_list_layouts"] = Read("forge_doc_list_layouts", "document"),
         ["forge_doc_open"] = Write("forge_doc_open", "document", idempotent: true),
         ["forge_doc_save"] = Write("forge_doc_save", "document", idempotent: true),

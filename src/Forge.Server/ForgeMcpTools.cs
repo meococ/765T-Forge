@@ -59,6 +59,11 @@ public sealed class ForgeMcpTools
     public static Task<ForgeResult> DocSave(ForgeToolRunner runner, string? path = null, bool overwriteAcknowledged = false, bool dryRun = false, CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_doc_save", new { path, overwriteAcknowledged }, dryRun, cancellationToken: cancellationToken);
 
+    [McpServerTool(Name = "forge_doc_close", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false)]
+    [Description("Close one open drawing by exact file name (name) or full path (path), then read back that it is gone from AutoCAD's document list. Runs in application context. Unsaved changes are refused (discard_not_acknowledged) unless save=true (saves to its own .dwg first, backed up, file readback) or discardAcknowledged=true (closes without saving). A drawing saved by forge_doc_save can still read as modified, so it needs one of the two. Refusals: missing_document, document_not_found, ambiguous_document, last_document (forge_doc_new first), command_active, save_requires_path (never saved), document_read_only, invalid_path (not a .dwg). ok=true only when the drawing is no longer listed; otherwise doc_close_unconfirmed, doc_close_busy or doc_close_failed; a failed save (save_failed / save_unconfirmed) leaves the drawing open.")]
+    public static Task<ForgeResult> DocClose(ForgeToolRunner runner, string? name = null, string? path = null, bool save = false, bool discardAcknowledged = false, bool dryRun = false, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_doc_close", new { name, path, save, discardAcknowledged }, dryRun, cancellationToken: cancellationToken);
+
     [McpServerTool(Name = "forge_xref_list", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("List xrefs with names, paths, load state, and unresolved path hints.")]
     public static Task<ForgeResult> XrefList(ForgeToolRunner runner, CancellationToken cancellationToken)

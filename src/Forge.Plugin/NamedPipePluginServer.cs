@@ -409,7 +409,7 @@ public sealed class NamedPipePluginServer : IDisposable
     }
 
     /// <summary>
-    /// forge_doc_activate / forge_doc_new / forge_doc_open: run on the Idle marshal (application
+    /// forge_doc_activate / forge_doc_new / forge_doc_open / forge_doc_close: run on the Idle marshal (application
     /// context). The first idle tick runs the processor (safety, audit, the action and a first
     /// read-back); if AutoCAD has not reported the switch yet, later idle ticks re-read the active
     /// document — matched by reference to the target Document — for up to two seconds (activate) or
@@ -447,7 +447,7 @@ public sealed class NamedPipePluginServer : IDisposable
 
                     first = _processor.Process(command);
                     if (first.Ok || first.Error?.Code is not { } code || !DocumentContextPolicy.UnconfirmedCodes.Contains(code) ||
-                        first.Data is not PluginCommandProcessor.DocActivateReadBack)
+                        first.Data is not (PluginCommandProcessor.DocActivateReadBack or PluginCommandProcessor.DocCloseReadBack))
                     {
                         Finish(first);
                         return;
@@ -457,8 +457,9 @@ public sealed class NamedPipePluginServer : IDisposable
                     return;
                 }
 
-                var pending = (PluginCommandProcessor.DocActivateReadBack)first.Data!;
-                var reread = PluginCommandProcessor.ReadBackActiveDocument(command.Id, pending) with { AuditId = first.AuditId };
+                var reread = (first.Data is PluginCommandProcessor.DocCloseReadBack closing
+                    ? PluginCommandProcessor.ReadBackClosedDocument(command.Id, closing)
+                    : PluginCommandProcessor.ReadBackActiveDocument(command.Id, (PluginCommandProcessor.DocActivateReadBack)first.Data!)) with { AuditId = first.AuditId };
                 if (reread.Ok || Environment.TickCount64 >= pollUntil)
                 {
                     Finish(reread);

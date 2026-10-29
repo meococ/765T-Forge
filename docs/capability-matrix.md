@@ -22,6 +22,7 @@ Honest status of MCP tools. AutoCAD targets: **2025 and 2026** through the typed
 | Tool | Status | Notes |
 |------|--------|-------|
 | `forge_doc_*` (list/open/save/layouts) | implemented | SaveAs overwrite ack. `forge_doc_open` runs in application context and is `ok` only when the opened drawing reads back as active (`doc_open_unconfirmed` otherwise; an already-open drawing is activated). `forge_doc_save path=` renames the open document (`SaveAs` with bak-and-rename) and is `ok` only when the fresh file, document name, database file name and DWGNAME agree (`saveas_not_renamed` / `save_unconfirmed`) — fix-smoke-20261029 D1/D7 |
+| `forge_doc_close` | implemented | Close one open drawing by exact file name or full path (fix-smoke-20261029 D8). Application context (Idle lane); refuses `last_document`, `command_active`, `discard_not_acknowledged` (unsaved changes; unknown counts as unsaved), `save_requires_path`, `document_read_only`, `invalid_path`. `save=true` backs up and saves the drawing to its own .dwg and reads the file back before closing; `discardAcknowledged=true` closes without saving. `ok` only when the Document is gone from the document list (by reference); `doc_close_unconfirmed` / `doc_close_busy` / `doc_close_failed`. **Live AutoCAD smoke pending** |
 | `forge_doc_activate` | implemented | Switch the active drawing among open ones by exact file name or full path (no suffix match; `ambiguous_document` fails closed); runs in application context via the Idle marshal and reads the active document back (`doc_activate_unconfirmed` when AutoCAD has not switched within ~2 s). **Live AutoCAD smoke pending** |
 | `forge_xref_list` / `_reload` / `_repath` | implemented | |
 | `forge_xref_normalize_relative` | implemented | Absolute → host-relative + optional reload |
@@ -60,7 +61,7 @@ Honest status of MCP tools. AutoCAD targets: **2025 and 2026** through the typed
 | `forge_layer_set` / `forge_doc_new` / `forge_doc_export_dxf` | implemented | Layer state (freeze refused on current), template document (runs in application context; `ok` only when the new drawing reads back as active, else `doc_new_unconfirmed`), 16-digit DXF out |
 | `forge_draw_polyline_from_csv` / `forge_viewport_add` | implemented | CSV point lists → one polyline; model-space viewport on a layout tab |
 
-Tool profile `authoring` bundles the whole **66-tool** authoring surface (out of **119** total tools) via `forge_system_tool_profile`.
+Tool profile `authoring` bundles the whole **67-tool** authoring surface (out of **120** total tools; `forge_doc_close` added by fix-smoke-20261029 D8) via `forge_system_tool_profile`.
 
 Authoring contract ([docs/cad-authoring-tools.md](cad-authoring-tools.md)): WCS + drawing units, degrees at the boundary, handles as the object currency, verification read-back on every write, dry-run everywhere, no dialogs.
 

@@ -10,13 +10,15 @@ public static class DocumentContextPolicy
     public static readonly IReadOnlySet<string> ApplicationContextTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "forge_doc_activate",
+        "forge_doc_close",
         "forge_doc_new",
         "forge_doc_open"
     };
 
-    /// <summary>Tools that create or open a drawing: they may need longer than a plain switch to settle.</summary>
+    /// <summary>Tools that create, open or close a drawing: they may need longer than a plain switch to settle.</summary>
     public static readonly IReadOnlySet<string> LifecycleTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
+        "forge_doc_close",
         "forge_doc_new",
         "forge_doc_open"
     };
@@ -25,6 +27,7 @@ public static class DocumentContextPolicy
     public static readonly IReadOnlySet<string> UnconfirmedCodes = new HashSet<string>(StringComparer.Ordinal)
     {
         "doc_activate_unconfirmed",
+        "doc_close_unconfirmed",
         "doc_new_unconfirmed",
         "doc_open_unconfirmed"
     };
@@ -73,8 +76,7 @@ public static class DocumentReadBack
         DateTime fileWriteUtc,
         DateTime callStartUtc)
     {
-        // File times on NTFS are precise, but allow for coarse file systems.
-        if (!fileExists || fileLength <= 0 || fileWriteUtc < callStartUtc.AddSeconds(-2))
+        if (!FileWritten(fileExists, fileLength, fileWriteUtc, callStartUtc))
         {
             return SaveNotWritten;
         }
@@ -85,6 +87,11 @@ public static class DocumentReadBack
             ? SaveConfirmed
             : SaveNotRenamed;
     }
+
+    /// <summary>The file exists, is non-empty and was written during this call.</summary>
+    public static bool FileWritten(bool fileExists, long fileLength, DateTime fileWriteUtc, DateTime callStartUtc)
+        // File times on NTFS are precise, but allow for coarse file systems.
+        => fileExists && fileLength > 0 && fileWriteUtc >= callStartUtc.AddSeconds(-2);
 
     public static bool SamePath(string? a, string? b)
     {
@@ -108,5 +115,86 @@ public static class DocumentReadBack
         var trimmed = path.Trim();
         var cut = trimmed.LastIndexOfAny(['\\', '/']);
         return cut >= 0 ? trimmed[(cut + 1)..] : trimmed;
+    }
+}
+
+/// <summary>
+/// fix-smoke-20261029 D8: the refusals of forge_doc_close, decided before anything is saved or closed.
+/// Unsaved state that could not be read counts as unsaved.
+/// </summary>
+public static class DocClosePolicy
+{
+    public const string NotFound = "document_not_found";
+    public const string Ambiguous = "ambiguous_document";
+    public const string LastDocument = "last_document";
+    public const string CommandActive = "command_active";
+    public const string DiscardNotAcknowledged = "discard_not_acknowledged";
+    public const string SaveRequiresPath = "save_requires_path";
+    public const string ReadOnly = "document_read_only";
+    public const string NotDwg = "invalid_path";
+
+    /// <summary>
+    /// Unsaved state of the drawing to close, from two sources: DBMOD (only when DWGNAME read on the same
+    /// tick names the target, because sysvars can still belong to the previous drawing right after a
+    /// switch) and the target's own COM Saved flag. Unsaved if either says so; null if neither could be read.
+    /// </summary>
+    public static bool? Unsaved(bool? dbmodSaysModified, bool? comSaved)
+    {
+        if (dbmodSaysModified == true || comSaved == false)
+        {
+            return true;
+        }
+
+        return dbmodSaysModified == false || comSaved == true ? false : null;
+    }
+
+    /// <returns>The refusal code, or null when the close may go ahead.</returns>
+    public static string? Refusal(
+        int matchCount,
+        int openCount,
+        bool commandActive,
+        bool? unsaved,
+        bool save,
+        bool discardAcknowledged,
+        bool untitled,
+        bool readOnly,
+        bool isDwg)
+    {
+        if (matchCount == 0)
+        {
+            return NotFound;
+        }
+
+        if (matchCount > 1)
+        {
+            return Ambiguous;
+        }
+
+        if (openCount <= 1)
+        {
+            return LastDocument;
+        }
+
+        if (commandActive)
+        {
+            return CommandActive;
+        }
+
+        if (save)
+        {
+            if (untitled)
+            {
+                return SaveRequiresPath;
+            }
+
+            if (readOnly)
+            {
+                return ReadOnly;
+            }
+
+            return isDwg ? null : NotDwg;
+        }
+
+        return unsaved != false && !discardAcknowledged ? DiscardNotAcknowledged : null;
     }
 }

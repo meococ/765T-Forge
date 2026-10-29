@@ -720,7 +720,7 @@ public static class UndoVerifier
         var consumed = new HashSet<int>();
         int empty = 0, view = 0, side = 0;
 
-        UndoOutcome Fail(string code, string message, IReadOnlyList<string>? foreign = null, IReadOnlyList<string>? notReverted = null, string? dirty = null)
+        UndoOutcome Fail(string code, string message, IReadOnlyList<string>? foreign = null, IReadOnlyList<string>? notReverted = null, string? dirty = null, bool unreadStep = false)
         {
             var count = uEvents.Count;
             List<string> restoreProblems;
@@ -732,6 +732,11 @@ public static class UndoVerifier
             catch (Exception ex)
             {
                 restoreProblems = [$"MREDO {count} failed: {ex.Message}"];
+            }
+
+            if (unreadStep)
+            {
+                restoreProblems.Add("the failed undo step's own changes were not read back");
             }
 
             var restored = restoreProblems.Count == 0;
@@ -774,7 +779,7 @@ public static class UndoVerifier
             {
                 // The failed step may have changed the drawing without reporting it: redo the U's that did
                 // report, read back, and refuse this write from now on whatever the readback says.
-                return Fail(StepFailed, $"An undo step failed while undoing the Forge write '{fp.Tool}': {ex.Message}.", dirty: "undo_step_failed");
+                return Fail(StepFailed, $"An undo step failed while undoing the Forge write '{fp.Tool}': {ex.Message}.", dirty: "undo_step_failed", unreadStep: true);
             }
 
             uEvents.Add(u);

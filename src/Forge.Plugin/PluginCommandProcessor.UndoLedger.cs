@@ -40,10 +40,12 @@ public sealed partial class PluginCommandProcessor
         {
             Tool = tool;
             Doc = doc;
+            Db = doc?.Database; // captured now: the call may close this document (forge_doc_close)
         }
 
         public string Tool { get; }
         public Document? Doc { get; }
+        public Database? Db { get; }
         public bool Tracked { get; set; }
         public bool TrackedSucceeded { get; set; }
         public UndoFootprint? Footprint { get; set; }
@@ -417,7 +419,7 @@ public sealed partial class PluginCommandProcessor
             }
             else
             {
-                if (SameDb(scope.Doc?.Database, ledger.Db))
+                if (SameDb(scope.Db, ledger.Db))
                 {
                     foreach (var name in scope.Sysvars)
                     {

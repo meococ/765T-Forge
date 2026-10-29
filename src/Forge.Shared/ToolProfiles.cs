@@ -77,6 +77,7 @@ public static class ToolProfiles
             "forge_drawing_summary",
             "forge_doc_new",
             "forge_doc_save",
+            "forge_doc_close",
             "forge_doc_export_dxf",
             "forge_doc_import",
             "forge_standards_import",
