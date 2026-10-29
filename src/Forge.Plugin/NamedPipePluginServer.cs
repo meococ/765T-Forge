@@ -235,6 +235,13 @@ public sealed class NamedPipePluginServer : IDisposable
 
     private Task<ForgeResult> ExecuteOnMainThreadAsync(ForgeCommand command)
     {
+        if (command.Tool.Equals(PluginCommandProcessor.DocActivateTool, StringComparison.OrdinalIgnoreCase))
+        {
+            // Switching the active drawing must happen in application context, never inside a
+            // document command context — and it must work from the Start tab too.
+            return ExecuteDocActivateWhenIdleAsync(command);
+        }
+
         if (Application.DocumentManager.MdiActiveDocument is null)
         {
             if (DocumentFreeTools.Contains(command.Tool))
@@ -400,49 +407,80 @@ public sealed class NamedPipePluginServer : IDisposable
         return tcs.Task;
     }
 
-    private static IReadOnlyList<Document> ResolveDocuments(string document)
+    /// <summary>
+    /// forge_doc_activate: runs on the Idle marshal (application context). The first idle tick runs
+    /// the processor (safety, audit, the switch itself and a first read-back); if AutoCAD has not
+    /// reported the switch yet, later idle ticks re-read the active document for up to two seconds
+    /// before answering, so the reply states what is really active.
+    /// </summary>
+    private Task<ForgeResult> ExecuteDocActivateWhenIdleAsync(ForgeCommand command)
     {
-        // Match by full path when the caller gave a rooted path, otherwise by exact file
-        // name. A loose suffix match (EndsWith) could silently select the wrong drawing
-        // (e.g. "1.dwg" matching "plan1.dwg"), so we never do that. If more than one open
-        // document matches, the caller reports ambiguity instead of guessing.
-        var matches = new List<Document>();
-        var rooted = Path.IsPathRooted(document);
-        var targetFull = rooted ? TryGetFullPath(document) : null;
-        var targetLeaf = Path.GetFileName(document);
+        var tcs = new TaskCompletionSource<ForgeResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var startedAt = Environment.TickCount64;
+        var staleAfterMs = (long)RequestDeadline.TotalMilliseconds;
+        ForgeResult? first = null;
+        long pollUntil = 0;
 
-        foreach (Document doc in Application.DocumentManager)
+        void Finish(ForgeResult result)
         {
-            var name = doc.Name;
-            var match = rooted
-                ? string.Equals(TryGetFullPath(name) ?? name, targetFull, StringComparison.OrdinalIgnoreCase)
-                : !string.IsNullOrEmpty(targetLeaf) &&
-                  string.Equals(Path.GetFileName(name), targetLeaf, StringComparison.OrdinalIgnoreCase);
+            Application.Idle -= OnIdle;
+            tcs.TrySetResult(result);
+        }
 
-            if (match || string.Equals(name, document, StringComparison.OrdinalIgnoreCase))
+        void OnIdle(object? sender, EventArgs e)
+        {
+            try
             {
-                matches.Add(doc);
+                if (first is null)
+                {
+                    if (Environment.TickCount64 - startedAt >= staleAfterMs)
+                    {
+                        Finish(ForgeResult.Failure(
+                            command.Id,
+                            "plugin_request_stale",
+                            "The request was abandoned by the plugin watchdog before AutoCAD went idle; nothing was executed."));
+                        return;
+                    }
+
+                    first = _processor.Process(command);
+                    if (first.Ok || first.Error?.Code != PluginCommandProcessor.DocActivateUnconfirmedCode ||
+                        first.Data is not PluginCommandProcessor.DocActivateReadBack)
+                    {
+                        Finish(first);
+                        return;
+                    }
+
+                    pollUntil = Environment.TickCount64 + 2000;
+                    return;
+                }
+
+                var pending = (PluginCommandProcessor.DocActivateReadBack)first.Data!;
+                var reread = PluginCommandProcessor.ReadBackActiveDocument(command.Id, pending.Target, pending.ActiveBefore) with { AuditId = first.AuditId };
+                if (reread.Ok || Environment.TickCount64 >= pollUntil)
+                {
+                    Finish(reread);
+                }
+            }
+            catch (Exception ex)
+            {
+                Finish(ForgeResult.Failure(command.Id, "plugin_exception", ex.Message));
             }
         }
 
-        return matches;
+        Application.Idle += OnIdle;
+        return tcs.Task;
     }
 
-    private static string? TryGetFullPath(string? path)
+    private static IReadOnlyList<Document> ResolveDocuments(string document)
     {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return null;
-        }
-
-        try
-        {
-            return Path.GetFullPath(path);
-        }
-        catch
-        {
-            return null;
-        }
+        // Match by full path when the caller gave a rooted path, otherwise by exact file
+        // name (DocumentMatcher, shared with forge_doc_activate). A loose suffix match could
+        // silently select the wrong drawing (e.g. "1.dwg" matching "plan1.dwg"), so we never do
+        // that. If more than one open document matches, the caller reports ambiguity instead of
+        // guessing.
+        var docs = Application.DocumentManager.Cast<Document>().ToList();
+        var indices = DocumentMatcher.Match(docs.Select(d => d.Name).ToList(), document);
+        return indices.Select(i => docs[i]).ToList();
     }
 
     private static async Task<string?> ReadBoundedLineAsync(StreamReader reader, int maxChars, CancellationToken cancellationToken)

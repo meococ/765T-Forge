@@ -394,6 +394,11 @@ public sealed partial class PluginCommandProcessor
         var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
         var modelSpace = (BlockTableRecord)tr.GetObject(blockTable[BlockTableRecord.ModelSpace], OpenMode.ForRead);
 
+        if (args.IncludeBlocks)
+        {
+            return EntityListWithBlocks(command, args, tr, modelSpace, hasWindow ? [minX, minY, maxX, maxY] : null, maxEntities);
+        }
+
         var entities = new List<object>();
         foreach (ObjectId id in modelSpace)
         {
@@ -435,6 +440,61 @@ public sealed partial class PluginCommandProcessor
         }
 
         return ForgeResult.Success(command.Id, new { count = entities.Count, truncated = entities.Count == maxEntities, entities });
+    }
+
+    /// <summary>
+    /// forge_entity_list with includeBlocks=true: the INSERTs themselves plus everything nested inside
+    /// them (world bbox, effective layer, depth, insert/block path). The window prunes INSERTs whose
+    /// world extents miss it; the layer filter matches the entity's own or effective layer.
+    /// </summary>
+    private static ForgeResult EntityListWithBlocks(ForgeCommand command, EntityListArgs args, Transaction tr, BlockTableRecord modelSpace, double[]? window, int maxEntities)
+    {
+        var options = new BlockWalkOptions(true, BlockWalk.ClampDepth(args.BlockDepth), window, IncludeXrefs: true);
+        var stats = new BlockWalkStats();
+        var entities = new List<object>();
+        WalkBlockSpace(tr, modelSpace, options, stats, (entity, _, frame) =>
+        {
+            var effectiveLayer = BlockWalk.EffectiveLayer(entity.Layer, frame.ParentEffectiveLayer);
+            if (!string.IsNullOrWhiteSpace(args.Layer) &&
+                !entity.Layer.Equals(args.Layer, StringComparison.OrdinalIgnoreCase) &&
+                !effectiveLayer.Equals(args.Layer, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(args.Type) && !entity.GetType().Name.Equals(args.Type, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var bbox = WorldBox(entity, frame);
+            if (window is not null && (bbox is null || !BlockWalk.BoxesIntersect(bbox, window)))
+            {
+                return true;
+            }
+
+            entities.Add(new
+            {
+                handle = HandleString(entity),
+                type = entity.GetType().Name,
+                layer = entity.Layer,
+                effectiveLayer,
+                depth = frame.Depth,
+                insertPath = frame.Path.Count > 0 ? BlockWalk.InsertPathLabel(frame.Path) : null,
+                blockPath = frame.Path.Count > 0 ? frame.Path.Select(p => p.BlockName).ToArray() : null,
+                bbox
+            });
+            return entities.Count < maxEntities;
+        });
+
+        tr.Commit();
+        return ForgeResult.Success(command.Id, new
+        {
+            count = entities.Count,
+            truncated = stats.Truncated,
+            blockTraversal = BlockTraversalReport(options, stats),
+            entities
+        });
     }
 
     private static ForgeResult EntityMove(ForgeCommand command)
@@ -2422,7 +2482,7 @@ public sealed partial class PluginCommandProcessor
     }
 
     private sealed record EntityGetArgs { public string? Handle { get; init; } }
-    private sealed record EntityListArgs { public double[][]? Window { get; init; } public string? Layer { get; init; } public string? Type { get; init; } public int? MaxEntities { get; init; } }
+    private sealed record EntityListArgs { public double[][]? Window { get; init; } public string? Layer { get; init; } public string? Type { get; init; } public int? MaxEntities { get; init; } public bool IncludeBlocks { get; init; } public int? BlockDepth { get; init; } }
     private sealed record EntityMoveArgs { public string[]? Handles { get; init; } public double[]? Delta { get; init; } }
     private sealed record EntityCopyArgs { public string[]? Handles { get; init; } public double[]? Delta { get; init; } public int Copies { get; init; } = 1; }
     private sealed record EntityRotateArgs { public string[]? Handles { get; init; } public double[]? BasePoint { get; init; } public double AngleDeg { get; init; } }

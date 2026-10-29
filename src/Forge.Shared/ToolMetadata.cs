@@ -21,6 +21,8 @@ public static class ForgeToolRegistry
         ["forge_system_setvar"] = Write("forge_system_setvar", "system", idempotent: true),
         ["forge_system_capabilities"] = Read("forge_system_capabilities", "system"),
         ["forge_doc_list_open"] = Read("forge_doc_list_open", "document"),
+        // Switches the active drawing (session state only — no database write, no backup, no undo mark).
+        ["forge_doc_activate"] = new ToolMetadata("forge_doc_activate", "document", false, false, true, false, false),
         ["forge_doc_list_layouts"] = Read("forge_doc_list_layouts", "document"),
         ["forge_doc_open"] = Write("forge_doc_open", "document", idempotent: true),
         ["forge_doc_save"] = Write("forge_doc_save", "document", idempotent: true),
@@ -107,6 +109,7 @@ public static class ForgeToolRegistry
         // C29–C30 — AI spatial perception, text search, OSNAP intelligence, and high-level AEC generators.
         ["forge_drawing_summary"] = Read("forge_drawing_summary", "document"),
         ["forge_entity_search_text"] = Read("forge_entity_search_text", "entity"),
+        ["forge_text_list"] = Read("forge_text_list", "entity"),
         ["forge_entity_snap"] = Read("forge_entity_snap", "entity"),
         ["forge_draw_grid"] = new ToolMetadata("forge_draw_grid", "draw", false, false, false, false, false),
         ["forge_draw_wall"] = new ToolMetadata("forge_draw_wall", "draw", false, false, false, false, false),

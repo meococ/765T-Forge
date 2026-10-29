@@ -106,15 +106,68 @@ public sealed partial class PluginCommandProcessor
 
         var skipped = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         List<LineworkEntity> extracted;
+        object? blockTraversal = null;
         using (var tr = ActiveDb.TransactionManager.StartTransaction())
         {
-            extracted = ExtractFromDrawing(tr, ActiveDb, args, skipped);
+            if (args.IncludeBlocks)
+            {
+                var options = new BlockWalkOptions(true, BlockWalk.ClampDepth(args.BlockDepth), NormalizeFilterBox(args.Bbox), args.IncludeXrefContents);
+                var stats = new BlockWalkStats();
+                extracted = ExtractWithBlocks(tr, ActiveDb, options, stats, skipped);
+                blockTraversal = BlockTraversalReport(options, stats);
+            }
+            else
+            {
+                extracted = ExtractFromDrawing(tr, ActiveDb, args, skipped);
+            }
+
             tr.Commit();
         }
 
         var unitsPerMeter = args.UnitsPerMeter > 0 ? args.UnitsPerMeter : InsUnitsToUnitsPerMeter(insunits);
         return new LineworkLoadResult(null, extracted,
-            new LineworkLocal.SourceInfo("drawing", ActiveDocumentPath(), null, insunits, unitsPerMeter));
+            new LineworkLocal.SourceInfo("drawing", ActiveDocumentPath(), null, insunits, unitsPerMeter, blockTraversal));
+    }
+
+    /// <summary>Hard ceiling on entities gathered by a block-aware walk before filtering (memory guard).</summary>
+    private const int MaxBlockWalkLinework = 1_000_000;
+
+    /// <summary>
+    /// includeBlocks=true: model space plus everything reachable through INSERTs (xrefs included via
+    /// their INSERTs when includeXrefContents), each entity transformed to world coordinates.
+    /// </summary>
+    private static List<LineworkEntity> ExtractWithBlocks(Transaction tr, Database db, BlockWalkOptions options, BlockWalkStats stats, Dictionary<string, int> skipped)
+    {
+        var list = new List<LineworkEntity>();
+        var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+        var modelSpace = (BlockTableRecord)tr.GetObject(blockTable[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+        WalkBlockSpace(tr, modelSpace, options, stats, (ent, id, frame) =>
+        {
+            if (ent is BlockReference)
+            {
+                return true;
+            }
+
+            var le = TryMakeEntity(tr, ent, id, frame.IsIdentity ? null : frame.Matrix);
+            if (le is null)
+            {
+                Bump(skipped, frame.Depth > 0 ? $"block:{ent.GetType().Name}" : ent.GetType().Name);
+                return true;
+            }
+
+            var effectiveLayer = BlockWalk.EffectiveLayer(ent.Layer, frame.ParentEffectiveLayer);
+            list.Add(le with
+            {
+                Id = list.Count,
+                Layer = effectiveLayer,
+                OwnLayer = string.Equals(effectiveLayer, ent.Layer, StringComparison.Ordinal) ? null : ent.Layer,
+                Container = BlockWalk.ContainerLabel(frame.Path),
+                InsertPath = frame.Path.Count > 0 ? BlockWalk.InsertPathLabel(frame.Path) : null
+            });
+            return list.Count < MaxBlockWalkLinework;
+        });
+
+        return list;
     }
 
     /// <summary>INSUNITS → drawing units per meter. Unknown/unitless defaults to mm (1000) per dump convention.</summary>
@@ -206,6 +259,11 @@ public sealed partial class PluginCommandProcessor
         return list;
     }
 
+    /// <summary>
+    /// One linework entity in world coordinates. Curves are tessellated in their own space first and
+    /// the chord points are then transformed, so arcs/bulges stay correct under any block transform
+    /// (mirror, non-uniform scale, rotation) and under a -Z extrusion normal.
+    /// </summary>
     private static LineworkEntity? TryMakeEntity(Transaction tr, Entity ent, ObjectId id, Matrix3d? xf)
     {
         switch (ent)
@@ -219,14 +277,25 @@ public sealed partial class PluginCommandProcessor
                 var nv = pl.NumberOfVertices;
                 var verts = new Vec2[nv];
                 var bulges = new double[nv];
+                var normalUp = pl.Normal.Z > 0;
                 for (var i = 0; i < nv; i++)
                 {
-                    var p = pl.GetPoint2dAt(i);
-                    verts[i] = Xf(new Point3d(p.X, p.Y, 0), xf);
-                    bulges[i] = pl.GetBulgeAt(i);
+                    if (normalUp)
+                    {
+                        var p2d = pl.GetPoint2dAt(i);
+                        verts[i] = new Vec2(p2d.X, p2d.Y);
+                        bulges[i] = pl.GetBulgeAt(i);
+                    }
+                    else
+                    {
+                        // OCS with a -Z normal: world XY comes from the 3D point and arcs turn the other way.
+                        var p3d = pl.GetPoint3dAt(i);
+                        verts[i] = new Vec2(p3d.X, p3d.Y);
+                        bulges[i] = -pl.GetBulgeAt(i);
+                    }
                 }
 
-                return MakeEntity(id, LineworkKind.Polyline, ent.Layer, ExpandBulges(verts, bulges, pl.Closed), pl.Closed);
+                return MakeEntity(id, LineworkKind.Polyline, ent.Layer, XfAll(ExpandBulges(verts, bulges, pl.Closed), xf), pl.Closed);
             }
             case Polyline2d p2:
             {
@@ -236,14 +305,14 @@ public sealed partial class PluginCommandProcessor
                 {
                     if (tr.GetObject(vid, OpenMode.ForRead) is Vertex2d v && v.VertexType == Vertex2dType.SimpleVertex)
                     {
-                        verts.Add(Xf(v.Position, xf));
+                        verts.Add(new Vec2(v.Position.X, v.Position.Y));
                         bulges.Add(v.Bulge);
                     }
                 }
 
                 return verts.Count < 2
                     ? null
-                    : MakeEntity(id, LineworkKind.Polyline, ent.Layer, ExpandBulges(verts.ToArray(), bulges.ToArray(), p2.Closed), p2.Closed);
+                    : MakeEntity(id, LineworkKind.Polyline, ent.Layer, XfAll(ExpandBulges(verts.ToArray(), bulges.ToArray(), p2.Closed), xf), p2.Closed);
             }
             case Polyline3d p3:
             {
@@ -262,19 +331,77 @@ public sealed partial class PluginCommandProcessor
             }
             case Arc arc:
             {
-                var c = Xf(arc.Center, xf);
-                var pts = LineworkGeometry.TessellateArc(c.X, c.Y, arc.Radius, arc.StartAngle, arc.EndAngle);
-                return MakeEntity(id, LineworkKind.Arc, ent.Layer, pts, closed: false, radius: arc.Radius);
+                if (xf is null && arc.Normal.Z > 0)
+                {
+                    var pts = LineworkGeometry.TessellateArc(arc.Center.X, arc.Center.Y, arc.Radius, arc.StartAngle, arc.EndAngle);
+                    return MakeEntity(id, LineworkKind.Arc, ent.Layer, pts, closed: false, radius: arc.Radius);
+                }
+
+                var sampled = SampleCurve(arc, arc.StartParam, arc.EndParam, xf);
+                return MakeEntity(id, LineworkKind.Arc, ent.Layer, sampled, closed: false, radius: arc.Radius * RadiusScale(xf));
             }
             case Circle circle:
             {
-                var c = Xf(circle.Center, xf);
-                var pts = LineworkGeometry.TessellateArc(c.X, c.Y, circle.Radius, 0, Math.PI * 2);
-                return MakeEntity(id, LineworkKind.Circle, ent.Layer, pts, closed: true, radius: circle.Radius);
+                if (xf is null && circle.Normal.Z > 0)
+                {
+                    var pts = LineworkGeometry.TessellateArc(circle.Center.X, circle.Center.Y, circle.Radius, 0, Math.PI * 2);
+                    return MakeEntity(id, LineworkKind.Circle, ent.Layer, pts, closed: true, radius: circle.Radius);
+                }
+
+                var sampled = SampleCurve(circle, circle.StartParam, circle.EndParam, xf);
+                return MakeEntity(id, LineworkKind.Circle, ent.Layer, sampled, closed: true, radius: circle.Radius * RadiusScale(xf));
             }
             default:
                 return null;
         }
+    }
+
+    /// <summary>Chord points of a circular curve between two parameters (radians), in world space.</summary>
+    private static Vec2[] SampleCurve(Curve curve, double startParam, double endParam, Matrix3d? xf)
+    {
+        var sweep = endParam - startParam;
+        if (sweep <= 0)
+        {
+            sweep += Math.PI * 2;
+        }
+
+        var n = BlockWalk.ArcSampleCount(sweep);
+        var pts = new Vec2[n + 1];
+        for (var i = 0; i <= n; i++)
+        {
+            var t = i == n && endParam > startParam ? endParam : startParam + sweep * i / n;
+            pts[i] = Xf(curve.GetPointAtParameter(t), xf);
+        }
+
+        return pts;
+    }
+
+    /// <summary>Radius scale of a transform (sqrt of the XY area factor; exact for uniform scale).</summary>
+    private static double RadiusScale(Matrix3d? xf)
+    {
+        if (xf is null)
+        {
+            return 1.0;
+        }
+
+        var m = xf.Value;
+        return Math.Sqrt(Math.Abs(m[0, 0] * m[1, 1] - m[0, 1] * m[1, 0]));
+    }
+
+    private static Vec2[] XfAll(Vec2[] pts, Matrix3d? xf)
+    {
+        if (xf is null)
+        {
+            return pts;
+        }
+
+        var result = new Vec2[pts.Length];
+        for (var i = 0; i < pts.Length; i++)
+        {
+            result[i] = Xf(new Point3d(pts[i].X, pts[i].Y, 0), xf);
+        }
+
+        return result;
     }
 
     private static Vec2 Xf(Point3d p, Matrix3d? xf)

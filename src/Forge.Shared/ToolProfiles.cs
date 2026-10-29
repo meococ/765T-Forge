@@ -11,8 +11,10 @@ public static class ToolProfiles
             "forge_system_version",
             "forge_system_capabilities",
             "forge_doc_list_open",
+            "forge_doc_activate",
             "forge_doc_list_layouts",
             "forge_drawing_summary",
+            "forge_text_list",
             "forge_registry_load",
             "forge_registry_lookup",
             "forge_pack_load",
@@ -57,12 +59,16 @@ public static class ToolProfiles
             "forge_linework_compare",
             "forge_linework_transform",
             "forge_doc_list_open",
+            "forge_doc_activate",
+            "forge_text_list",
+            "forge_entity_list",
             "forge_layer_list"
         ],
         // Authoring wave C20–C30 (docs/cad-authoring-tools.md): the complete draw-and-modify surface.
         ["authoring"] =
         [
             "forge_system_health",
+            "forge_doc_activate",
             "forge_doc_list_layouts",
             "forge_drawing_summary",
             "forge_doc_new",
@@ -96,6 +102,7 @@ public static class ToolProfiles
             "forge_entity_get",
             "forge_entity_list",
             "forge_entity_search_text",
+            "forge_text_list",
             "forge_entity_snap",
             "forge_entity_intersect",
             "forge_entity_move",

@@ -177,6 +177,41 @@ public sealed class ToolMetadataTests
     }
 
     [Fact]
+    public void ReliabilityWaveToolsContract()
+    {
+        // forge_doc_activate switches the active drawing only: it writes nothing to any DWG (no backup,
+        // not destructive), repeating it lands in the same state (idempotent), typed params only.
+        var activate = ForgeToolRegistry.Get("forge_doc_activate");
+        Assert.Equal("document", activate.Group);
+        Assert.False(activate.ReadOnly);
+        Assert.False(activate.Destructive);
+        Assert.True(activate.Idempotent);
+        Assert.False(activate.OpenWorld);
+        Assert.False(activate.RequiresBackup);
+        Assert.False(activate.Unsafe);
+
+        // forge_text_list is a pure read (block-aware text content).
+        var textList = ForgeToolRegistry.Get("forge_text_list");
+        Assert.True(textList.ReadOnly);
+        Assert.False(textList.RequiresBackup);
+
+        var policy = new SafetyPolicy();
+        Assert.True(policy.Evaluate(new ForgeCommand { Tool = "forge_doc_activate", Args = ForgeJson.ToElement(new { name = "Plan1.dwg" }) }).Allowed);
+        Assert.True(policy.Evaluate(new ForgeCommand { Tool = "forge_text_list", Args = ForgeJson.ToElement(new { includeBlocks = true }) }).Allowed);
+
+        // exec_lisp stays behind the unsafe acknowledgement even though it now returns its value synchronously.
+        Assert.True(ForgeToolRegistry.Get("forge_exec_lisp").Unsafe);
+        Assert.False(policy.Evaluate(new ForgeCommand { Tool = "forge_exec_lisp", Args = ForgeJson.ToElement(new { lisp = "(+ 1 2)" }) }).Allowed);
+
+        foreach (var profile in new[] { "core", "linework", "authoring" })
+        {
+            Assert.True(ToolProfiles.TryGet(profile, out var tools));
+            Assert.Contains("forge_doc_activate", tools);
+            Assert.Contains("forge_text_list", tools);
+        }
+    }
+
+    [Fact]
     public void McpToolAnnotationsAreConsistent()
     {
         foreach (var meta in ForgeToolRegistry.All)

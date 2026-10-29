@@ -39,6 +39,11 @@ public sealed class ForgeMcpTools
     public static Task<ForgeResult> DocListOpen(ForgeToolRunner runner, CancellationToken cancellationToken)
         => runner.InvokeAsync("forge_doc_list_open", new { }, cancellationToken: cancellationToken);
 
+    [McpServerTool(Name = "forge_doc_activate", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("Make an already-open drawing the active document, by exact file name (name) or full path (path), then read back which document AutoCAD reports as active. Runs in application context (works from the Start tab). Exact match only: more than one match fails as ambiguous_document; a drawing that is not open fails as document_not_found (use forge_doc_open). Fails with doc_activate_unconfirmed if AutoCAD does not report the switch.")]
+    public static Task<ForgeResult> DocActivate(ForgeToolRunner runner, string? name = null, string? path = null, bool dryRun = false, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_doc_activate", new { name, path }, dryRun, cancellationToken: cancellationToken);
+
     [McpServerTool(Name = "forge_doc_list_layouts", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("List layouts in the active or specified AutoCAD document.")]
     public static Task<ForgeResult> DocListLayouts(ForgeToolRunner runner, string? document = null, CancellationToken cancellationToken = default)
@@ -120,7 +125,7 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_layout_page_setup_apply", new { setupName, layout }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_plot_to_pdf", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
-    [Description("Plot one layout to PDF with configurable device, paper, CTB/STB plot style, area, and overwrite acknowledgement.")]
+    [Description("Plot one layout (or Model) to PDF through the PlotEngine API. Never opens a PDF viewer: the plot always goes through a Forge-owned copy of the device PC3 with View_New_File=FALSE (\"765T-Forge <device> (no viewer).pc3\"). Defaults: device \"DWG To PDF.pc3\"; a layout keeps its own paper and plots plotArea=layout; when paperSize differs from the layout's paper the area defaults to extents + fit + centered so the drawing fills the sheet; Model defaults to ISO A1 + extents + fit. plotArea: layout|extents|display|limits|window (window=[[x1,y1],[x2,y2]] in the plotted space). scale: fit or \"1:100\". orientation: auto (default, long side to long side)|landscape|portrait, honoured against the real paper. paperSize accepts the localized or canonical media name; an unknown one fails with candidates. Read-back: device actually used, viewer suppression, media, paper/printable mm, PDF sheet size from /MediaBox, fit + coverage estimates and warnings (e.g. content would be small in a corner). engine=\"command\" is the legacy -PLOT fallback.")]
     public static Task<ForgeResult> PlotToPdf(
         ForgeToolRunner runner,
         string outputPath,
@@ -129,13 +134,16 @@ public sealed class ForgeMcpTools
         string? paperSize = null,
         string? plotStyle = null,
         string? plotArea = null,
+        double[][]? window = null,
         string? orientation = null,
         string? scale = null,
         string? units = null,
+        bool? centered = null,
+        string? engine = null,
         bool overwriteAcknowledged = false,
         bool dryRun = false,
         CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_plot_to_pdf", new { outputPath, layout, device, paperSize, plotStyle, plotArea, orientation, scale, units, overwriteAcknowledged }, dryRun, cancellationToken: cancellationToken);
+        => runner.InvokeAsync("forge_plot_to_pdf", new { outputPath, layout, device, paperSize, plotStyle, plotArea, window, orientation, scale, units, centered, engine, overwriteAcknowledged }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_plot_publish", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
     [Description("Publish layouts to PDF via real DSD + Publisher.PublishDsd; returns PublishReceipt with PDF probe. Preflight gate unless force=true.")]
@@ -350,9 +358,9 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_entity_get", new { handle }, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_entity_list", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
-    [Description("List model-space entities: exactly one of window [[x1,y1],[x2,y2]] or layer, optional exact type name (Line, Polyline, Circle, DBText...), maxEntities (default 1000). There is no select-all.")]
-    public static Task<ForgeResult> EntityList(ForgeToolRunner runner, double[][]? window = null, string? layer = null, string? type = null, int? maxEntities = null, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_entity_list", new { window, layer, type, maxEntities }, cancellationToken: cancellationToken);
+    [Description("List model-space entities: exactly one of window [[x1,y1],[x2,y2]] or layer, optional exact type name (Line, Polyline, Circle, DBText...), maxEntities (default 1000). There is no select-all. includeBlocks=true also walks into block INSERTs (nested, transforms applied, xrefs via their INSERTs, blockDepth default 8 / max 32): nested rows add effectiveLayer (layer 0 shows on the INSERT's layer), depth, insertPath, blockPath and a world bbox; the window is tested in world coordinates and prunes INSERTs that miss it; the layer filter matches own or effective layer.")]
+    public static Task<ForgeResult> EntityList(ForgeToolRunner runner, double[][]? window = null, string? layer = null, string? type = null, int? maxEntities = null, bool includeBlocks = false, int? blockDepth = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_entity_list", new { window, layer, type, maxEntities, includeBlocks, blockDepth }, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_entity_move", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false)]
     [Description("Move entities by explicit handles: delta [dx,dy,(dz)]. Pre-write backup + undo mark apply; read-back echoes the moved geometry.")]
@@ -460,9 +468,9 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_entity_array", new { handles, kind, rows, columns, rowSpacing, colSpacing, center, count, angleTotalDeg, rotateItems }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_view_capture", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
-    [Description("Capture AutoCAD's main window to a PNG so the agent can LOOK at the drawing (PrintWindow works while the window is in the background, not minimized). fit=true zooms extents first. Read the returned PNG path to visually verify work.")]
-    public static Task<ForgeResult> ViewCapture(ForgeToolRunner runner, string outputPath, bool fit = false, bool overwriteAcknowledged = false, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_view_capture", new { outputPath, fit, overwriteAcknowledged }, dryRun, cancellationToken: cancellationToken);
+    [Description("Capture AutoCAD's main window to a PNG so the agent can LOOK at the drawing (PrintWindow works while the window is in the background, not minimized). fit=true zooms extents first; window=[[x1,y1],[x2,y2]] (world coordinates of the current space) zooms to that box instead, with padding (fraction per side, default 0.05). cropToDrawing=true crops to the drawing area (no ribbon/palettes). The zoom never runs _.ZOOM (undo untouched); the applied view (world box, center, size) is read back. Read the returned PNG path to visually verify work.")]
+    public static Task<ForgeResult> ViewCapture(ForgeToolRunner runner, string outputPath, bool fit = false, double[][]? window = null, double? padding = null, bool cropToDrawing = false, bool overwriteAcknowledged = false, bool dryRun = false, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_view_capture", new { outputPath, fit, window, padding, cropToDrawing, overwriteAcknowledged }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_entity_fillet", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false)]
     [Description("Fillet EITHER two coplanar Line handles (handle1, handle2, radius >= 0; radius=0 trims/extends both lines to a sharp corner) OR all straight corners of one Polyline handle (handle or handle1, radius > 0, preserving per-vertex widths and reporting filletedCorners/skippedCorners). When a line crosses the corner (X-intersection), pass pickPoint1/pickPoint2 [x,y] on the side to keep; otherwise the far endpoint survives.")]
@@ -740,7 +748,7 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_viewport_set_layer_freeze", new { handle, layer, freeze }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_linework_dump", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
-    [Description("Extract CAD linework entities (line/polyline/arc[/circle]) as ordered vertices with handles. Source: live drawing (model space + xref contents) or a pl_dump.txt file via source=dumpFile. Layer matching is xref-prefix aware; use layerSuffix/layerMatch for explicit modes.")]
+    [Description("Extract CAD linework entities (line/polyline/arc[/circle]) as ordered vertices with handles. Source: live drawing (model space + xref contents) or a pl_dump.txt file via source=dumpFile. Layer matching is xref-prefix aware; use layerSuffix/layerMatch for explicit modes. The DEFAULT layerFilter keeps only pipe-like layers; pass layerFilter=\"*\" to read architecture/everything. includeBlocks=true walks into block INSERTs (nested, world transforms applied, MINSERT expanded, xrefs via their INSERTs; blockDepth default 8 / max 32; bbox [x1,y1,x2,y2] is world and prunes INSERTs that miss it; layer 0 content reports the INSERT's layer, ownLayer keeps the original); each entity then carries container (block:A>B) and insertPath, and blockTraversal reports what was walked/skipped.")]
     public static Task<ForgeResult> LineworkDump(
         ForgeToolRunner runner,
         string? source = null,
@@ -752,12 +760,14 @@ public sealed class ForgeMcpTools
         string? entityTypes = null,
         double[]? bbox = null,
         bool includeXrefContents = true,
+        bool includeBlocks = false,
+        int? blockDepth = null,
         double unitsPerMeter = 0,
         int maxEntities = 50000,
         string? outputPath = null,
         string? document = null,
         CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_linework_dump", new { source, dumpPath, layerFilter, layerSuffix, layerMatch, excludeLayerFilter, entityTypes, bbox, includeXrefContents, unitsPerMeter, maxEntities, outputPath }, document: document, cancellationToken: cancellationToken);
+        => runner.InvokeAsync("forge_linework_dump", new { source, dumpPath, layerFilter, layerSuffix, layerMatch, excludeLayerFilter, entityTypes, bbox, includeXrefContents, includeBlocks, blockDepth, unitsPerMeter, maxEntities, outputPath }, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_linework_trace", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Trace a point (or handle) to the exact CAD line/polyline it belongs to: ordered vertices, nearest segment index, layer, and both end coordinates for junction/branch queries.")]
@@ -778,12 +788,14 @@ public sealed class ForgeMcpTools
         string? entityTypes = null,
         double[]? bbox = null,
         bool includeXrefContents = true,
+        bool includeBlocks = false,
+        int? blockDepth = null,
         double unitsPerMeter = 0,
         int maxEntities = 50000,
         string? outputPath = null,
         string? document = null,
         CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_linework_trace", new { x, y, units, tolerance, contextRadius, handle, source, dumpPath, layerFilter, layerSuffix, layerMatch, excludeLayerFilter, entityTypes, bbox, includeXrefContents, unitsPerMeter, maxEntities, outputPath }, document: document, cancellationToken: cancellationToken);
+        => runner.InvokeAsync("forge_linework_trace", new { x, y, units, tolerance, contextRadius, handle, source, dumpPath, layerFilter, layerSuffix, layerMatch, excludeLayerFilter, entityTypes, bbox, includeXrefContents, includeBlocks, blockDepth, unitsPerMeter, maxEntities, outputPath }, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_linework_topology", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Build the connectivity graph of CAD linework: shared-vertex nodes, edges, T-junctions, X-crossings, continuous runs, and dead-end vs junction endpoint classification.")]
@@ -801,12 +813,14 @@ public sealed class ForgeMcpTools
         string? entityTypes = null,
         double[]? bbox = null,
         bool includeXrefContents = true,
+        bool includeBlocks = false,
+        int? blockDepth = null,
         double unitsPerMeter = 0,
         int maxEntities = 50000,
         string? outputPath = null,
         string? document = null,
         CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_linework_topology", new { vertexTolerance, junctionTolerance, includeCrossings, source, dumpPath, layerFilter, layerSuffix, layerMatch, excludeLayerFilter, entityTypes, bbox, includeXrefContents, unitsPerMeter, maxEntities, outputPath }, document: document, cancellationToken: cancellationToken);
+        => runner.InvokeAsync("forge_linework_topology", new { vertexTolerance, junctionTolerance, includeCrossings, source, dumpPath, layerFilter, layerSuffix, layerMatch, excludeLayerFilter, entityTypes, bbox, includeXrefContents, includeBlocks, blockDepth, unitsPerMeter, maxEntities, outputPath }, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_linework_coverage", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Compare CAD linework against modeled pipe centerlines (meters): report CAD segments with no modeled pipe (missing), modeled pipes with no CAD segment (extra), and partial-coverage sub-ranges.")]
@@ -827,12 +841,14 @@ public sealed class ForgeMcpTools
         string? entityTypes = null,
         double[]? bbox = null,
         bool includeXrefContents = true,
+        bool includeBlocks = false,
+        int? blockDepth = null,
         double unitsPerMeter = 0,
         int maxEntities = 50000,
         string? outputPath = null,
         string? document = null,
         CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_linework_coverage", new { modelSegments, modelSegmentsPath, toleranceMeters, stepMeters, minCoverageFraction, modelUnitsPerMeter, source, dumpPath, layerFilter, layerSuffix, layerMatch, excludeLayerFilter, entityTypes, bbox, includeXrefContents, unitsPerMeter, maxEntities, outputPath }, document: document, cancellationToken: cancellationToken);
+        => runner.InvokeAsync("forge_linework_coverage", new { modelSegments, modelSegmentsPath, toleranceMeters, stepMeters, minCoverageFraction, modelUnitsPerMeter, source, dumpPath, layerFilter, layerSuffix, layerMatch, excludeLayerFilter, entityTypes, bbox, includeXrefContents, includeBlocks, blockDepth, unitsPerMeter, maxEntities, outputPath }, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_linework_segments", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Flatten CAD linework to individual segments: stable seg index, precise endpoints, layer, and length — the canonical feed for route/QA scripts. units=meters scales to meters; transform/transformPath also emits transformed sT/eT endpoints.")]
@@ -850,12 +866,14 @@ public sealed class ForgeMcpTools
         string? entityTypes = null,
         double[]? bbox = null,
         bool includeXrefContents = true,
+        bool includeBlocks = false,
+        int? blockDepth = null,
         double unitsPerMeter = 0,
         int maxEntities = 50000,
         string? outputPath = null,
         string? document = null,
         CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_linework_segments", new { units, transformPath, transform, source, dumpPath, layerFilter, layerSuffix, layerMatch, excludeLayerFilter, entityTypes, bbox, includeXrefContents, unitsPerMeter, maxEntities, outputPath }, document: document, cancellationToken: cancellationToken);
+        => runner.InvokeAsync("forge_linework_segments", new { units, transformPath, transform, source, dumpPath, layerFilter, layerSuffix, layerMatch, excludeLayerFilter, entityTypes, bbox, includeXrefContents, includeBlocks, blockDepth, unitsPerMeter, maxEntities, outputPath }, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_linework_compare", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Mark CAD linework vs Revit pipe segments: per-item classification (cad: matched/partial/missing_in_revit; model: matched/partial/extra_off_cad) with nearest counterpart + distanceM, plus matched pairs and optional SVG overlay at overlayPath (green=matched, red=missing, orange=extra, purple=partial).")]
@@ -928,12 +946,12 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_exec_command", new { command }, dryRun, unsafeAcknowledged: unsafeAcknowledged, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_exec_lisp", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
-    [Description("Execute an AutoLISP expression after denylist, backup, audit, and UTF-8-safe transport. Disabled unless FORGE_ENABLE_UNSAFE_OPS=true and unsafeAcknowledged=true. Prefers sync; if queued, completed=false.")]
+    [Description("Evaluate an AutoLISP expression synchronously and return its value (after denylist, backup, audit, UTF-8-safe transport). Disabled unless FORGE_ENABLE_UNSAFE_OPS=true and unsafeAcknowledged=true. Several top-level forms run in order; the last value is returned as result (JSON: nil->null, T->true, ints, reals, strings, points->arrays, lists, dotted pairs->{car,cdr}, enames->{ename:handle}, selection sets->handles) plus resultText (AutoLISP printed form) and resultType. A LISP runtime error returns lisp_error (completed=true, message in data.lispError). Comments are stripped; unbalanced parentheses/strings are refused before evaluation. mode=sync_eval normally; queued=true/completed=false only if this AutoCAD build has no evaluator entry point.")]
     public static Task<ForgeResult> ExecLisp(ForgeToolRunner runner, string lisp, bool unsafeAcknowledged = false, bool dryRun = false, CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_exec_lisp", new { lisp }, dryRun, unsafeAcknowledged: unsafeAcknowledged, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_run_script", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
-    [Description("Run a .scr or .lsp script against a DWG through accoreconsole.exe with pre-run backup.")]
+    [Description("Run a .scr or .lsp script against a DWG through accoreconsole.exe (headless, separate process) with pre-run backup. A .lsp is copied to a temp file and loaded by a generated .scr ((load \"...\") with a correctly escaped path) because accoreconsole /s only runs .scr; the safety scan runs on the user's script content. stdout/stderr are decoded (UTF-16LE/UTF-8) and cleaned of NUL/control characters; result.scriptKind says how it ran.")]
     public static Task<ForgeResult> RunScript(ForgeToolRunner runner, string dwgPath, string scriptPath, int? timeoutSeconds = null, bool dryRun = false, CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_run_script", new { dwgPath, scriptPath, timeoutSeconds }, dryRun, cancellationToken: cancellationToken);
 
@@ -949,6 +967,24 @@ public sealed class ForgeMcpTools
         string? layout = null,
         CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_drawing_summary", new { layout }, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_text_list", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("Block-aware text read: TEXT, MTEXT (formatting stripped; rawText kept), ATTRIB (block attribute values with tag), constant ATTDEF and MLEADER text, walking into nested block INSERTs and xrefs by default (includeBlocks=true, blockDepth default 8 / max 32). Each row: text, type, tag, handle, layer, effectiveLayer, style, WORLD position/alignmentPoint/center/bbox, world height and rotationDeg (block scale/rotation applied), depth, insertPath, blockPath, invisible. Filters: window [[x1,y1],[x2,y2]] (world), layer (comma-separated wildcards, own or effective layer), contains (case-insensitive), regex, types (text,mtext,attrib,attdef,mleader), layout (default Model), maxResults (default 500, max 5000).")]
+    public static Task<ForgeResult> TextList(
+        ForgeToolRunner runner,
+        double[][]? window = null,
+        string? layer = null,
+        string? contains = null,
+        string? regex = null,
+        string? types = null,
+        string? layout = null,
+        bool includeBlocks = true,
+        int? blockDepth = null,
+        bool includeXrefs = true,
+        int? maxResults = null,
+        string? document = null,
+        CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_text_list", new { window, layer, contains, regex, types, layout, includeBlocks, blockDepth, includeXrefs, maxResults }, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_entity_search_text", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Search for text across DBText, MText (with formatting codes stripped), BlockReference attributes, Dimension measurement/override text, MLeader text, and Table cells. Optional filters: layer, 2D bounding window [[minX,minY],[maxX,maxY]], layout, caseSensitive, exactMatch, useRegex, maxResults (default 200). Returns matching handles, entity/source kinds, plain text, raw text, and WCS coordinates.")]

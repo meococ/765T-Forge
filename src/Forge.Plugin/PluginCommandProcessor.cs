@@ -35,6 +35,7 @@ public sealed partial class PluginCommandProcessor
         "forge_pack_load",
         "forge_pack_and_go",
         "forge_doc_open",
+        "forge_doc_activate",
         "forge_doc_new",
         "forge_doc_save",
         "forge_doc_export_dxf",
@@ -128,6 +129,7 @@ public sealed partial class PluginCommandProcessor
             "forge_system_setvar" => SetVar(command),
             "forge_system_capabilities" => SystemCapabilities(command),
             "forge_doc_list_open" => ListOpenDocuments(command),
+            "forge_doc_activate" => DocActivate(command),
             "forge_doc_list_layouts" => ListLayouts(command),
             "forge_doc_open" => OpenDocument(command),
             "forge_doc_save" => SaveDocument(command),
@@ -198,6 +200,7 @@ public sealed partial class PluginCommandProcessor
             "forge_style_dim_create" => StyleDimCreate(command),
             "forge_drawing_summary" => DrawingSummary(command),
             "forge_entity_search_text" => EntitySearchText(command),
+            "forge_text_list" => TextList(command),
             "forge_entity_snap" => EntitySnap(command),
             "forge_draw_grid" => DrawGrid(command),
             "forge_draw_wall" => DrawWall(command),
@@ -1116,151 +1119,6 @@ public sealed partial class PluginCommandProcessor
         }
     }
 
-    private static ForgeResult PlotToPdf(ForgeCommand command)
-    {
-        var args = Args<PlotArgs>(command);
-        if (string.IsNullOrWhiteSpace(args.OutputPath))
-        {
-            return ForgeResult.Failure(command.Id, "missing_output_path", "outputPath is required.");
-        }
-
-        if (RejectControlChars(command, ("outputPath", args.OutputPath), ("layout", args.Layout), ("device", args.Device), ("paperSize", args.PaperSize), ("plotStyle", args.PlotStyle)) is { } reject)
-        {
-            return reject;
-        }
-
-        var outputPath = Path.GetFullPath(args.OutputPath!);
-        var device = string.IsNullOrWhiteSpace(args.Device) ? "DWG To PDF.pc3" : args.Device!;
-        var paperSize = string.IsNullOrWhiteSpace(args.PaperSize) ? "ISO A1 (841.00 x 594.00 MM)" : args.PaperSize!;
-        var orientation = string.IsNullOrWhiteSpace(args.Orientation) ? "Landscape" : args.Orientation!;
-        var scale = string.IsNullOrWhiteSpace(args.Scale) ? "Fit" : args.Scale!;
-        var plotStyle = string.IsNullOrWhiteSpace(args.PlotStyle) ? "." : args.PlotStyle!;
-        var units = string.IsNullOrWhiteSpace(args.Units) ? (paperSize.Contains("MM", StringComparison.OrdinalIgnoreCase) ? "Millimeters" : "Inches") : args.Units!;
-
-        if (command.DryRun)
-        {
-            return DryRun(command, new
-            {
-                outputPath,
-                args.Layout,
-                device,
-                paperSize,
-                orientation,
-                scale,
-                plotStyle,
-                units,
-                args.PlotArea,
-                args.OverwriteAcknowledged,
-                pstyleMode = Application.GetSystemVariable("PSTYLEMODE")
-            });
-        }
-
-        if (File.Exists(outputPath) && !args.OverwriteAcknowledged)
-        {
-            return ForgeResult.Failure(
-                command.Id,
-                "plot_overwrite_not_acknowledged",
-                $"Refusing to overwrite existing PDF: {outputPath}",
-                "Pass overwriteAcknowledged=true after confirming the previous issue PDF is archived.");
-        }
-
-        if (!string.IsNullOrWhiteSpace(args.Layout))
-        {
-            try
-            {
-                LayoutManager.Current.CurrentLayout = args.Layout;
-            }
-            catch (Autodesk.AutoCAD.Runtime.Exception)
-            {
-                return ForgeResult.Failure(command.Id, "layout_not_found", $"Layout not found: {args.Layout}", "Call forge_doc_list_layouts to see available layouts.");
-            }
-        }
-
-        var layoutName = LayoutManager.Current.CurrentLayout;
-        var isModel = string.Equals(layoutName, "Model", StringComparison.OrdinalIgnoreCase);
-        var plotArea = string.IsNullOrWhiteSpace(args.PlotArea)
-            ? (isModel ? "Extents" : "Layout")
-            : args.PlotArea!;
-
-        var plotStartedUtc = DateTimeOffset.UtcNow;
-        var previousFileDia = Application.GetSystemVariable("FILEDIA");
-        var previousBgPlot = Application.GetSystemVariable("BACKGROUNDPLOT");
-        Application.SetSystemVariable("FILEDIA", 0);
-        Application.SetSystemVariable("BACKGROUNDPLOT", 0);
-
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
-            var tokens = new List<object>
-            {
-                "-PLOT",
-                "Yes",
-                layoutName,
-                device,
-                paperSize,
-                units,
-                orientation,
-                "No",
-                plotArea,
-                scale,
-                "0,0",
-                "Yes",
-                plotStyle,
-                "Yes",
-            };
-
-            if (isModel)
-            {
-                tokens.Add("As displayed");
-            }
-            else
-            {
-                tokens.Add("No");
-                tokens.Add("No");
-                tokens.Add("No");
-            }
-
-            tokens.Add(outputPath);
-            tokens.Add("No");
-            tokens.Add("Yes");
-
-            ActiveEditor.Command(tokens.ToArray());
-        }
-        catch (System.Exception ex)
-        {
-            return ForgeResult.Failure(
-                command.Id,
-                "plot_failed",
-                $"Plot command failed: {ex.Message}",
-                "Verify device/paper/plot style via forge_system_capabilities and that the layout is plottable.");
-        }
-        finally
-        {
-            Application.SetSystemVariable("FILEDIA", previousFileDia);
-            Application.SetSystemVariable("BACKGROUNDPLOT", previousBgPlot);
-        }
-
-        if (!File.Exists(outputPath))
-        {
-            return ForgeResult.Failure(command.Id, "plot_no_output", $"Plot ran but no PDF was produced at {outputPath}.", "Check the output directory is writable and the layout has plottable content.");
-        }
-
-        var probe = PdfProbeResult.Probe(outputPath, expectedPages: 1, notBeforeUtc: plotStartedUtc);
-        return PlotPdfGate.FromProbe(
-            command.Id,
-            probe,
-            new
-            {
-                outputPath,
-                layout = layoutName,
-                device,
-                paperSize,
-                plotStyle,
-                bytes = probe.Bytes,
-                pdfProbe = probe
-            });
-    }
-
     private static ForgeResult PlotPublish(ForgeCommand command)
     {
         var args = Args<PublishArgs>(command);
@@ -1609,49 +1467,6 @@ public sealed partial class PluginCommandProcessor
         return ForgeResult.Success(command.Id, new { queued = true, completed = false, mode = "queued", args.Command });
     }
 
-    private static ForgeResult ExecLisp(ForgeCommand command)
-    {
-        var args = Args<ExecLispArgs>(command);
-        if (string.IsNullOrWhiteSpace(args.Lisp))
-        {
-            return ForgeResult.Failure(command.Id, "missing_lisp", "lisp is required.");
-        }
-
-        if (!command.UnsafeAcknowledged)
-        {
-            return ForgeResult.Failure(command.Id, "unsafe_not_acknowledged", "forge_exec_lisp requires unsafeAcknowledged=true.");
-        }
-
-        if (command.DryRun)
-        {
-            return DryRun(command, new { args.Lisp });
-        }
-
-        var lisp = args.Lisp.Trim();
-        try
-        {
-            // Synchronous when AutoCAD accepts the expression as a command-line token.
-            ActiveEditor.Command(lisp);
-            return ForgeResult.Success(command.Id, new
-            {
-                queued = false,
-                completed = true,
-                mode = "editor_command"
-            });
-        }
-        catch (System.Exception ex)
-        {
-            ActiveDoc.SendStringToExecute(lisp + " ", true, false, false);
-            return ForgeResult.Success(command.Id, new
-            {
-                queued = true,
-                completed = false,
-                mode = "queued_fallback",
-                fallbackReason = ex.Message
-            });
-        }
-    }
-
     private static string[] TokenizeAutoCadCommand(string command)
     {
         var tokens = new List<string>();
@@ -1799,6 +1614,9 @@ public sealed partial class PluginCommandProcessor
         public string? Orientation { get; init; }
         public string? Scale { get; init; }
         public string? Units { get; init; }
+        public double[][]? Window { get; init; }
+        public bool? Centered { get; init; }
+        public string? Engine { get; init; }
         public bool OverwriteAcknowledged { get; init; }
     }
     private sealed record PublishArgs
