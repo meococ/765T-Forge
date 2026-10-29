@@ -1,0 +1,305 @@
+using System.Globalization;
+using System.Text;
+using System.Text.RegularExpressions;
+
+namespace Forge.Shared;
+
+/// <summary>What part of the layout/model forge_plot_to_pdf sends to the sheet.</summary>
+public enum PlotAreaKind
+{
+    Layout,
+    Extents,
+    Display,
+    Limits,
+    Window
+}
+
+/// <summary>Parsed plot scale: fit-to-sheet, or paper units : drawing units.</summary>
+public readonly record struct PlotScaleSpec(bool Fit, double PaperUnits, double DrawingUnits)
+{
+    public static PlotScaleSpec FitToSheet => new(true, 1, 1);
+
+    public override string ToString() => Fit
+        ? "fit"
+        : $"{PaperUnits.ToString("0.######", CultureInfo.InvariantCulture)}:{DrawingUnits.ToString("0.######", CultureInfo.InvariantCulture)}";
+}
+
+/// <summary>Fit read-back: the scale that maps the plotted area onto the printable area and how much of the sheet it fills.</summary>
+public sealed record PlotFitResult(double PaperUnitsPerDrawingUnit, double FillX, double FillY, bool Rotated)
+{
+    /// <summary>Fraction of the printable sheet the plotted area occupies along its tighter axis (1.0 = touches both margins on one axis).</summary>
+    public double FillMax => Math.Max(FillX, FillY);
+}
+
+/// <summary>Content-vs-area coverage: how much of the plotted area the drawing's own geometry actually occupies.</summary>
+public sealed record PlotCoverage(double ContentFillX, double ContentFillY, double AreaFraction, bool LooksTiny, string? Warning);
+
+/// <summary>
+/// Pure plot planning for forge_plot_to_pdf (no AutoCAD types): media-name resolution, orientation
+/// that does not depend on how a PC3 defines its media, fit math, and the "drawing came out tiny in
+/// one corner" detector.
+/// </summary>
+public static class PlotLayoutMath
+{
+    /// <summary>Below this fraction of the plotted area (on BOTH axes) the content is reported as tiny.</summary>
+    public const double TinyContentThreshold = 0.5;
+
+    public static bool TryParseArea(string? value, out PlotAreaKind kind)
+    {
+        kind = PlotAreaKind.Extents;
+        switch (value?.Trim().ToLowerInvariant())
+        {
+            case "layout":
+                kind = PlotAreaKind.Layout;
+                return true;
+            case "extents":
+            case "extent":
+                kind = PlotAreaKind.Extents;
+                return true;
+            case "display":
+            case "view":
+                kind = PlotAreaKind.Display;
+                return true;
+            case "limits":
+                kind = PlotAreaKind.Limits;
+                return true;
+            case "window":
+                kind = PlotAreaKind.Window;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>Parses "fit", "1:100", "1=100", "1:1", "2:1" (paper units : drawing units).</summary>
+    public static bool TryParseScale(string? value, out PlotScaleSpec scale)
+    {
+        scale = PlotScaleSpec.FitToSheet;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return true;
+        }
+
+        var text = value.Trim();
+        if (text.Equals("fit", StringComparison.OrdinalIgnoreCase) || text.Equals("scaled to fit", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var match = Regex.Match(text, @"^\s*(?<p>\d+(?:\.\d+)?)\s*(?:[a-z""']*)\s*[:=]\s*(?<d>\d+(?:\.\d+)?)\s*(?:[a-z""']*)\s*$", RegexOptions.IgnoreCase);
+        if (!match.Success)
+        {
+            return false;
+        }
+
+        var p = double.Parse(match.Groups["p"].Value, CultureInfo.InvariantCulture);
+        var d = double.Parse(match.Groups["d"].Value, CultureInfo.InvariantCulture);
+        if (p <= 0 || d <= 0)
+        {
+            return false;
+        }
+
+        scale = new PlotScaleSpec(false, p, d);
+        return true;
+    }
+
+    /// <summary>
+    /// Resolves a requested paper size to a device's canonical media name. Accepts the canonical
+    /// name ("ISO_A1_(841.00_x_594.00_MM)"), the localized name ("ISO A1 (841.00 x 594.00 MM)"), or
+    /// the same with spaces/underscores/case differing. Exact matches win over normalized ones.
+    /// </summary>
+    public static string? ResolveMedia(string? requested, IEnumerable<(string Canonical, string? Locale)> media)
+    {
+        if (string.IsNullOrWhiteSpace(requested))
+        {
+            return null;
+        }
+
+        var list = media.ToList();
+        var wanted = requested.Trim();
+        foreach (var (canonical, locale) in list)
+        {
+            if (string.Equals(canonical, wanted, StringComparison.Ordinal) || string.Equals(locale, wanted, StringComparison.Ordinal))
+            {
+                return canonical;
+            }
+        }
+
+        var key = NormalizeMedia(wanted);
+        foreach (var (canonical, locale) in list)
+        {
+            if (NormalizeMedia(canonical) == key || (locale is not null && NormalizeMedia(locale) == key))
+            {
+                return canonical;
+            }
+        }
+
+        return null;
+    }
+
+    private static string NormalizeMedia(string name)
+    {
+        var sb = new StringBuilder(name.Length);
+        foreach (var ch in name)
+        {
+            if (char.IsLetterOrDigit(ch) || ch == '.' || ch == '(' || ch == ')')
+            {
+                sb.Append(char.ToLowerInvariant(ch));
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Plot rotation in degrees (0 or 90) relative to the media as the device defines it.
+    /// "landscape"/"portrait" are honoured against the media's real width/height (a PC3 may define
+    /// an A1 sheet either way round); "auto" lines the area's long side up with the sheet's long side.
+    /// Returns null for an unknown orientation word.
+    /// </summary>
+    public static int? ChooseRotation(string? orientation, double paperWidth, double paperHeight, double areaWidth, double areaHeight)
+    {
+        var paperLandscape = paperWidth >= paperHeight;
+        var mode = string.IsNullOrWhiteSpace(orientation) ? "auto" : orientation.Trim().ToLowerInvariant();
+        if (mode == "auto")
+        {
+            mode = areaWidth >= areaHeight ? "landscape" : "portrait";
+        }
+
+        return mode switch
+        {
+            "landscape" => paperLandscape ? 0 : 90,
+            "portrait" => paperLandscape ? 90 : 0,
+            _ => null
+        };
+    }
+
+    /// <summary>Fit-to-sheet scale (paper units per drawing unit) and fill fractions for an area on a printable sheet.</summary>
+    public static PlotFitResult ComputeFit(double areaWidth, double areaHeight, double printableWidth, double printableHeight, int rotationDegrees, PlotScaleSpec scale)
+    {
+        var rotated = rotationDegrees % 180 != 0;
+        var pw = rotated ? printableHeight : printableWidth;
+        var ph = rotated ? printableWidth : printableHeight;
+        if (areaWidth <= 0 || areaHeight <= 0 || pw <= 0 || ph <= 0)
+        {
+            return new PlotFitResult(0, 0, 0, rotated);
+        }
+
+        var factor = scale.Fit
+            ? Math.Min(pw / areaWidth, ph / areaHeight)
+            : scale.PaperUnits / scale.DrawingUnits;
+        return new PlotFitResult(factor, areaWidth * factor / pw, areaHeight * factor / ph, rotated);
+    }
+
+    /// <summary>
+    /// How much of the plotted area the drawing's geometry fills. The classic failure — a layout
+    /// plotted with plotArea=layout onto a bigger sheet than its page setup — leaves the content in
+    /// one corner; this flags it so the agent re-plots with extents/window + fit instead of shipping it.
+    /// </summary>
+    public static PlotCoverage ComputeCoverage(double[] area, double[]? content)
+    {
+        if (area is not { Length: 4 } || content is not { Length: 4 })
+        {
+            return new PlotCoverage(0, 0, 0, false, null);
+        }
+
+        var aw = area[2] - area[0];
+        var ah = area[3] - area[1];
+        if (aw <= 0 || ah <= 0)
+        {
+            return new PlotCoverage(0, 0, 0, false, null);
+        }
+
+        var minX = Math.Max(area[0], content[0]);
+        var minY = Math.Max(area[1], content[1]);
+        var maxX = Math.Min(area[2], content[2]);
+        var maxY = Math.Min(area[3], content[3]);
+        var cw = Math.Max(0, maxX - minX);
+        var ch = Math.Max(0, maxY - minY);
+        var fx = cw / aw;
+        var fy = ch / ah;
+        var tiny = fx < TinyContentThreshold && fy < TinyContentThreshold;
+        var warning = tiny
+            ? $"Drawing content fills only {fx:P0} x {fy:P0} of the plotted area — it will look small in a corner of the sheet. Re-plot with plotArea=extents (scale=fit) or plotArea=window."
+            : null;
+        return new PlotCoverage(Math.Round(fx, 4), Math.Round(fy, 4), Math.Round(fx * fy, 4), tiny, warning);
+    }
+
+    /// <summary>Normalizes a window given as [[x1,y1],[x2,y2]] or [x1,y1,x2,y2] to [minX,minY,maxX,maxY].</summary>
+    public static bool TryNormalizeWindow(double[][]? nested, double[]? flat, out double[] box, out string? error)
+    {
+        box = [];
+        error = null;
+        double x1, y1, x2, y2;
+        if (nested is { Length: > 0 })
+        {
+            if (nested.Length != 2 || nested[0] is not { Length: >= 2 } a || nested[1] is not { Length: >= 2 } b)
+            {
+                error = "window must be [[x1,y1],[x2,y2]].";
+                return false;
+            }
+
+            (x1, y1, x2, y2) = (a[0], a[1], b[0], b[1]);
+        }
+        else if (flat is { Length: > 0 })
+        {
+            if (flat.Length != 4)
+            {
+                error = "bbox must be [x1,y1,x2,y2].";
+                return false;
+            }
+
+            (x1, y1, x2, y2) = (flat[0], flat[1], flat[2], flat[3]);
+        }
+        else
+        {
+            error = "window is required.";
+            return false;
+        }
+
+        if (!double.IsFinite(x1) || !double.IsFinite(y1) || !double.IsFinite(x2) || !double.IsFinite(y2))
+        {
+            error = "window coordinates must be finite numbers.";
+            return false;
+        }
+
+        box = [Math.Min(x1, x2), Math.Min(y1, y2), Math.Max(x1, x2), Math.Max(y1, y2)];
+        if (box[2] - box[0] <= 0 || box[3] - box[1] <= 0)
+        {
+            error = "window has zero width or height.";
+            box = [];
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Best-effort read of the first page's /MediaBox from a PDF (points → millimetres) so the plot
+    /// read-back can state the real sheet size and orientation that came out.
+    /// </summary>
+    public static bool TryReadFirstMediaBox(byte[] pdf, out double widthMm, out double heightMm)
+    {
+        widthMm = 0;
+        heightMm = 0;
+        if (pdf is null || pdf.Length < 16)
+        {
+            return false;
+        }
+
+        var text = Encoding.Latin1.GetString(pdf);
+        var match = Regex.Match(
+            text,
+            @"/MediaBox\s*\[\s*(?<x0>-?\d+(?:\.\d+)?)\s+(?<y0>-?\d+(?:\.\d+)?)\s+(?<x1>-?\d+(?:\.\d+)?)\s+(?<y1>-?\d+(?:\.\d+)?)\s*\]");
+        if (!match.Success)
+        {
+            return false;
+        }
+
+        double P(string g) => double.Parse(match.Groups[g].Value, CultureInfo.InvariantCulture);
+        const double MmPerPoint = 25.4 / 72.0;
+        widthMm = Math.Round(Math.Abs(P("x1") - P("x0")) * MmPerPoint, 1);
+        heightMm = Math.Round(Math.Abs(P("y1") - P("y0")) * MmPerPoint, 1);
+        return widthMm > 0 && heightMm > 0;
+    }
+}

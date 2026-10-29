@@ -16,7 +16,8 @@ public static class LineworkLocal
         string? Document,
         string? DumpPath,
         int Insunits,
-        double UnitsPerMeter);
+        double UnitsPerMeter,
+        object? BlockTraversal = null);
 
     public static bool IsLineworkTool(string tool)
         => tool.StartsWith("forge_linework_", StringComparison.OrdinalIgnoreCase);
@@ -127,6 +128,7 @@ public static class LineworkLocal
             layerSuffix = filtered.SuffixPatterns,
             skipped = filtered.SkippedByKind,
             layerCounts = filtered.Entities.GroupBy(e => e.Layer).ToDictionary(g => g.Key, g => g.Count()),
+            blockTraversal = source.BlockTraversal,
             entities = filtered.Entities.Select(ToEntityDto).ToArray()
         };
 
@@ -484,7 +486,9 @@ public static class LineworkLocal
         e.Closed,
         e.Radius,
         e.Length,
-        e.SegCount
+        e.SegCount,
+        e.InsertPath,
+        e.OwnLayer
     };
 
     internal static bool IsAllowedArtifactPath(string path, params string[] allowedExtensions)
