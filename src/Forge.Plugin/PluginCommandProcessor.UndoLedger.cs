@@ -241,7 +241,40 @@ public sealed partial class PluginCommandProcessor
         }
         catch
         {
-            // An event handler must never throw into AutoCAD.
+            // An event handler must never throw into AutoCAD. An event that cannot be read must still fail
+            // closed: it counts as a change nobody owns.
+            try
+            {
+                OnUnreadableLedgerEvent(ledger, kind);
+            }
+            catch
+            {
+                // Never throw into AutoCAD.
+            }
+        }
+    }
+
+    private static void OnUnreadableLedgerEvent(DocLedger ledger, UndoEventKind kind)
+    {
+        var unreadable = new UndoObjectEvent(kind, -1, "unreadable");
+        if (_undoScope is not { } scope)
+        {
+            ledger.State.MarkAllDirty("external_change: unreadable event");
+            return;
+        }
+
+        if (scope.Capture is { } capture && SameDb(scope.CaptureDb, ledger.Db))
+        {
+            capture.Objects.Add(unreadable); // handle -1 is owned by no write: the U is classed foreign
+        }
+
+        if (scope.FootprintOpen && scope.Footprint is { } fp && SameDb(scope.FootprintDb, ledger.Db))
+        {
+            fp.MarkDirty("unreadable_event_during_write");
+        }
+        else
+        {
+            scope.EventsFor(ledger.Db).Objects.Add(unreadable);
         }
     }
 

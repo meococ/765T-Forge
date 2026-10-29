@@ -26,7 +26,8 @@ pinned coordinates, no dialogs, serialized execution.
 - **Dry-run:** all writes accept `dryRun=true`, run full parameter/layer/geometry validation, and return the plan without touching the drawing.
 - **No dialogs, no prompts:** pure DB API for all C20–C28 geometry/edit/style handlers (`forge_undo` invokes `Editor.Command("_.U")` and verifies the revert by readback).
 - **No-document state:** all authoring tools need a drawing; on the Start tab they return
-  `no_command_context` like every other document tool.
+  `no_command_context` like every other document tool. Exception: `forge_doc_new` and
+  `forge_doc_open` run in application context and work from the Start tab (fix-smoke-20261029 D1).
 
 ## C20 & C25 — forge_draw_* (group `draw`)
 
@@ -134,7 +135,7 @@ all **119 tools**.
 
 - Entity creation & defaults: call `entity.SetDatabaseDefaults(db)` **immediately** after `new`, configure style/layer/color/overrides, then append via `AppendExistingToModelSpace(db, tr, entity)` (or `AppendToOwner` for edits) so `SetDatabaseDefaults` never wipes caller overrides. Dispose any non-DB-resident entity (`entity.ObjectId.IsNull`) on exception paths.
 - Polyline: LWPolyline vertices are 2D on the entity plane (`Elevation`/`Normal`); bulge = tan(θ/4) on the segment starting at that vertex, positive CCW. Read widths per vertex (`GetStartWidthAt`/`GetEndWidthAt`), never `ConstantWidth` (which throws `eInvalidInput` on variable-width polylines).
-- Hatch: `SetDatabaseDefaults(db)` → append to BTR → set `PatternScale` and `PatternAngle` **before** `SetHatchPattern` → `Associative = true` → `AppendLoop` → `EvaluateHatch(true)`.
+- Hatch: `SetDatabaseDefaults(db)` → append to BTR → `SetHatchPattern` → `PatternScale` → `PatternAngle` → `SetHatchPattern` again (applies scale and angle) → `Associative = true` → `AppendLoop` → `EvaluateHatch(true)`, then the pattern is read back (fix-smoke-20261029 D2: setting the angle before any pattern threw `eInvalidInput`).
 - Dimensions: construct (`RotatedDimension`, `AlignedDimension`, `RadialDimension`, `DiametricDimension(chordPt, farChordPt, ...)`, `Point3AngularDimension(vertex, p1, p2, arcPt, ...)`, `OrdinateDimension`), call `SetDatabaseDefaults(db)`, set `DimensionStyle = styleId`, apply `Dimscale`/`DimensionText`, append, and call `RecomputeDimensionBlock(true)`.
 - Blocks: entities cannot be re-parented — append clones transformed by −basePoint, erase the originals last, all in one transaction; `SetAttributesFromBlock` overwrites attribute values, so set values only after it.
 - Undo marks: the dispatcher already groups every non-read-only typed write (`WithUndoMark`) and records what it changed; `forge_undo` reverts the last one and reads it back.

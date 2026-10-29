@@ -37,11 +37,18 @@ public sealed class UndoVerifierTests
         public int UCalls { get; private set; }
         public int MredoTotal { get; private set; }
         public long MsPerU { get; set; } = 1;
+        public int ThrowOnU { get; set; }
+        public bool MredoThrows { get; set; }
 
         public UndoEventSet RunU()
         {
             UCalls++;
             _now += MsPerU;
+            if (UCalls == ThrowOnU)
+            {
+                throw new InvalidOperationException("U failed");
+            }
+
             var set = new UndoEventSet();
             if (_stack.Count == 0)
             {
@@ -73,6 +80,11 @@ public sealed class UndoVerifierTests
         public void RunMredo(int count)
         {
             MredoTotal += count;
+            if (MredoThrows)
+            {
+                throw new InvalidOperationException("MREDO failed");
+            }
+
             for (var i = 0; i < count && _undone.Count > 0; i++)
             {
                 var unit = _undone.Pop();
@@ -285,6 +297,65 @@ public sealed class UndoVerifierTests
         var outcome = UndoVerifier.Run(fp, host);
 
         Assert.Equal(UndoVerifier.TargetNotReverted, outcome.Code);
+    }
+
+    [Fact]
+    public void ASysvarOnlyUnitNeverMatchesASideEffectRecordEvenWhenTheRecordListsThatSysvar()
+    {
+        // Plan review r2 minor 1: a side-effect match needs a shared handle, so a user's REGENMODE change
+        // above the write is not stepped over just because a plot also touched REGENMODE.
+        var regen = new FakeUnit();
+        regen.Sysvars.Add("REGENMODE");
+        regen.SysvarsOnUndo["REGENMODE"] = "1";
+        regen.SysvarsOnRedo["REGENMODE"] = "0";
+        var (fp, _, host) = DrawLine(regen);
+        host.Vars["REGENMODE"] = "0";
+        var record = new UndoEventSet();
+        record.Objects.Add(Ev(UndoEventKind.Modified, 0x701, "AcDbLayout"));
+        record.Sysvars.Add("REGENMODE");
+        fp.SideEffects.Add(record);
+
+        var outcome = UndoVerifier.Run(fp, host);
+
+        Assert.False(outcome.Undone);
+        Assert.Equal(UndoVerifier.TargetNotReverted, outcome.Code);
+        Assert.Equal(new[] { "Foreign" }, outcome.Classes);
+        Assert.Equal(1, host.MredoTotal);
+        Assert.True(outcome.Restored);
+        Assert.Equal("0", host.Vars["REGENMODE"]);
+        Assert.Equal(UndoObjectState.Live, host.State[Seed]);
+    }
+
+    [Fact]
+    public void AnUndoStepThatThrowsRedoesTheStepsAlreadyRunAndRefusesTheWriteFromNowOn()
+    {
+        var (fp, _, host) = DrawLine(new FakeUnit());
+        host.ThrowOnU = 2;
+
+        var outcome = UndoVerifier.Run(fp, host);
+
+        Assert.False(outcome.Undone);
+        Assert.Equal(UndoVerifier.StepFailed, outcome.Code);
+        Assert.Equal(1, outcome.UCount);
+        Assert.Equal(1, host.MredoTotal);
+        Assert.Equal("undo_step_failed", outcome.MarkDirty);
+        Assert.False(outcome.PopEntry);
+    }
+
+    [Fact]
+    public void AMredoThatThrowsLeavesTheRestoreUnverifiedAndTheWriteDirty()
+    {
+        var foreign = new FakeUnit();
+        foreign.Events.Add(Ev(UndoEventKind.Modified, 0x999, "AcDbLine"));
+        var (fp, _, host) = DrawLine(foreign);
+        host.MredoThrows = true;
+
+        var outcome = UndoVerifier.Run(fp, host);
+
+        Assert.Equal(UndoVerifier.TargetNotReverted, outcome.Code);
+        Assert.False(outcome.Restored);
+        Assert.Equal("restore_unverified", outcome.MarkDirty);
+        Assert.Contains(outcome.NotRestored, p => p.Contains("MREDO 1 failed", StringComparison.Ordinal));
     }
 
     [Fact]

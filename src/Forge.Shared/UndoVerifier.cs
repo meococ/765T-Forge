@@ -443,6 +443,7 @@ public static class UndoVerifier
     public const string TargetNotReverted = "undo_target_not_reverted";
     public const string Incomplete = "undo_incomplete";
     public const string NoEffect = "undo_no_effect";
+    public const string StepFailed = "undo_step_failed";
 
     private static bool NotLive(UndoObjectState s) => s != UndoObjectState.Live;
 
@@ -719,17 +720,29 @@ public static class UndoVerifier
         var consumed = new HashSet<int>();
         int empty = 0, view = 0, side = 0;
 
-        UndoOutcome Fail(string code, string message, IReadOnlyList<string>? foreign = null, IReadOnlyList<string>? notReverted = null)
+        UndoOutcome Fail(string code, string message, IReadOnlyList<string>? foreign = null, IReadOnlyList<string>? notReverted = null, string? dirty = null)
         {
             var count = uEvents.Count;
-            host.RunMredo(count);
-            var restoreProblems = VerifyRestored(fp, uEvents, host);
+            List<string> restoreProblems;
+            try
+            {
+                host.RunMredo(count);
+                restoreProblems = VerifyRestored(fp, uEvents, host);
+            }
+            catch (Exception ex)
+            {
+                restoreProblems = [$"MREDO {count} failed: {ex.Message}"];
+            }
+
             var restored = restoreProblems.Count == 0;
+
+            // What the restore check reads back: objects created/erased by the write or by the U's (live or
+            // erased) and the write's sysvars. Objects the U's only modified are not compared after MREDO.
             return new UndoOutcome
             {
                 Code = code,
                 Message = message + (restored
-                    ? $" All {count} U step(s) were redone (MREDO {count}) and the drawing was read back as restored."
+                    ? $" All {count} U step(s) were redone (MREDO {count}); the created/erased objects and the write's sysvars read back as before the U's (modified-only objects are not compared)."
                     : $" MREDO {count} ran but the restore could not be confirmed; forge_undo will refuse this write from now on."),
                 Restored = restored,
                 UCount = count,
@@ -737,7 +750,7 @@ public static class UndoVerifier
                 SkippedEmptyUnits = empty,
                 SkippedViewUnits = view,
                 SkippedSideEffectUnits = side,
-                MarkDirty = restored ? null : "restore_unverified",
+                MarkDirty = dirty ?? (restored ? null : "restore_unverified"),
                 Foreign = foreign ?? [],
                 NotReverted = notReverted ?? [],
                 NotRestored = restoreProblems,
@@ -752,7 +765,18 @@ public static class UndoVerifier
                 return Fail(NoEffect, $"The Forge write '{fp.Tool}' was not reached within {UndoPolicy.LoopBudgetMs / 1000} s of undo steps.");
             }
 
-            var u = host.RunU();
+            UndoEventSet u;
+            try
+            {
+                u = host.RunU();
+            }
+            catch (Exception ex)
+            {
+                // The failed step may have changed the drawing without reporting it: redo the U's that did
+                // report, read back, and refuse this write from now on whatever the readback says.
+                return Fail(StepFailed, $"An undo step failed while undoing the Forge write '{fp.Tool}': {ex.Message}.", dirty: "undo_step_failed");
+            }
+
             uEvents.Add(u);
             var cls = Classify(u, fp, fp.SideEffects, consumed, out var sideIndex);
             classes.Add(cls.ToString());

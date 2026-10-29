@@ -1046,6 +1046,7 @@ public sealed partial class PluginCommandProcessor
     {
         var args = Args<UndoArgs>(command); // empty record; kept for the Args<T> convention
         _ = args;
+        UndoFootprint? undoTarget = null;
         try
         {
             var undoCtl = System.Convert.ToInt32(Autodesk.AutoCAD.ApplicationServices.Application.GetSystemVariable("UNDOCTL"));
@@ -1067,6 +1068,7 @@ public sealed partial class PluginCommandProcessor
             var doc = ActiveDoc;
             var ledger = ExistingLedger(doc);
             var target = ledger?.State.Top;
+            undoTarget = target;
             if (ledger is null || target is null)
             {
                 return ForgeResult.Failure(
@@ -1138,6 +1140,8 @@ public sealed partial class PluginCommandProcessor
         }
         catch (System.Exception ex)
         {
+            // The state of AutoCAD's undo stack is unknown after an exception: never undo this write later.
+            undoTarget?.MarkDirty("undo_exception");
             return ForgeResult.Failure(command.Id, "undo_failed", ex.Message, "Read back the drawing (forge_qa_readback) before any further write.");
         }
     }
