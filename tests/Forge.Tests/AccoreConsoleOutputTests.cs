@@ -46,4 +46,41 @@ public sealed class AccoreConsoleOutputTests
         Assert.Equal("", AccoreConsoleScriptCheck.DecodeOutput(null));
         Assert.Equal("", AccoreConsoleScriptCheck.DecodeOutput(Array.Empty<byte>()));
     }
+
+    [Fact]
+    public void DecodeOutputRealignsUtf16AfterOneStrayByte()
+    {
+        const string text = "Command: _QSAVE\r\nRegenerating model.";
+        var shifted = new byte[] { (byte)'X' }.Concat(Encoding.Unicode.GetBytes(text)).ToArray();
+        var decoded = AccoreConsoleScriptCheck.DecodeOutput(shifted);
+        Assert.Equal("X" + text, decoded);
+        Assert.DoesNotContain('\0', decoded);
+    }
+
+    [Fact]
+    public void CleanForReportDropsControlCharsAndDoubledLineEnds()
+    {
+        var raw = "Command:\b\b\b _QSAVE\r\r\n\f\u0007Done\u007f\tok\r\r\r\n\uFFFD\uFFFD\uFFFDend";
+        Assert.Equal("Command: _QSAVE\r\nDone\tok\r\n\uFFFDend", AccoreConsoleScriptCheck.CleanForReport(raw));
+        Assert.Equal("", AccoreConsoleScriptCheck.CleanForReport(null));
+    }
+
+    [Fact]
+    public void CleanForReportKeepsHeadAndTailOfLongOutput()
+    {
+        var raw = new string('a', 100) + new string('b', 100);
+        var cleaned = AccoreConsoleScriptCheck.CleanForReport(raw, maxChars: 40);
+        Assert.StartsWith(new string('a', 20), cleaned);
+        Assert.EndsWith(new string('b', 20), cleaned);
+        Assert.Contains("[160 chars omitted]", cleaned);
+        Assert.Equal(raw, AccoreConsoleScriptCheck.CleanForReport(raw, maxChars: 0));
+    }
+
+    [Fact]
+    public void Utf16ConsoleOutputBecomesReadableReportText()
+    {
+        // The full path forge_run_script now uses: decode, then clean.
+        var bytes = Encoding.Unicode.GetBytes("Command: (load \"C:/t/a.lsp\")\r\r\nOK\r\r\n");
+        Assert.Equal("Command: (load \"C:/t/a.lsp\")\r\nOK\r\n", AccoreConsoleScriptCheck.CleanForReport(AccoreConsoleScriptCheck.DecodeOutput(bytes)));
+    }
 }
