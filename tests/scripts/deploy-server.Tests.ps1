@@ -113,6 +113,11 @@ New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
 $nonRepo = Join-Path $testRoot 'notarepo'
 New-Item -ItemType Directory -Force -Path $nonRepo | Out-Null
 
+# A process fixture with no Forge.Server.exe: keeps child -File runs
+# deterministic even when a real server process is running on this machine.
+$fxEmpty = Join-Path $testRoot 'procs-empty.json'
+'[]' | Set-Content -LiteralPath $fxEmpty -Encoding UTF8
+
 $srcA = New-FakeSource 'a' ([ordered]@{
     'Forge.Server.exe'  = 'fake server exe v1'
     'Forge.Server.dll'  = 'fake dll v1'
@@ -427,6 +432,21 @@ Test-Case 'dirty check: tracked changes anywhere, untracked under src or root bu
         & $deploy -SourceDir $srcB -Destination $dest -RepoRoot $repo | Out-Null
     } 'extra\.slnf' 'an untracked *.slnf must refuse and be listed'
     Remove-Item -LiteralPath (Join-Path $repo 'extra.slnf')
+    [IO.File]::WriteAllText((Join-Path $repo 'Directory.Build.targets'), '<Project/>')
+    Assert-Throws {
+        & $deploy -SourceDir $srcB -Destination $dest -RepoRoot $repo | Out-Null
+    } 'Directory\.Build\.targets' 'an untracked Directory.Build.targets must refuse and be listed'
+    Remove-Item -LiteralPath (Join-Path $repo 'Directory.Build.targets')
+    [IO.File]::WriteAllText((Join-Path $repo 'extra.rsp'), '/nowarn:1701')
+    Assert-Throws {
+        & $deploy -SourceDir $srcB -Destination $dest -RepoRoot $repo | Out-Null
+    } 'extra\.rsp' 'an untracked root *.rsp must refuse and be listed'
+    Remove-Item -LiteralPath (Join-Path $repo 'extra.rsp')
+    # A build input nested below the repo root does not count.
+    [IO.File]::WriteAllText((Join-Path $repo 'docs\note.rsp'), 'x')
+    & $deploy -SourceDir $srcB -Destination $dest -RepoRoot $repo | Out-Null
+    $dep = Get-Content -LiteralPath (Join-Path $dest 'DEPLOYED.json') -Raw | ConvertFrom-Json
+    Assert-True ($dep.dirty -eq $false) 'an untracked .rsp under docs\ must not count as dirty'
 
     # Modified tracked file outside src\ -> dirty.
     [IO.File]::WriteAllText((Join-Path $repo 'docs\cap.md'), 'cap v2')
@@ -560,6 +580,108 @@ Test-Case 'each run gets a unique build/staging stamp' {
 Test-Case '.gitignore anchors deploy/ at the repo root' {
     $gi = Get-Content -LiteralPath (Join-Path $repoRoot '.gitignore') -Raw
     Assert-Match $gi '(?m)^/deploy/\r?$' '.gitignore must contain a root-anchored /deploy/ entry'
+}
+
+Test-Case 'powershell -File / pwsh -File resolve the default RepoRoot and exit non-zero on any error' {
+    # Under `powershell -File` (5.1) $PSScriptRoot is empty while parameter
+    # defaults are bound, so the old RepoRoot default died during binding and
+    # exited 0 - a silent no-op. These runs pass no -RepoRoot at all.
+    $expectedRoot = (Resolve-Path -LiteralPath $repoRoot).Path.TrimEnd('\')
+    $dest = Join-Path $testRoot 'filemode\server'
+    $engines = @(
+        @{ exe = 'powershell'; args = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File') },
+        @{ exe = 'pwsh';       args = @('-NoProfile', '-File') }
+    )
+    foreach ($e in $engines) {
+        if (-not (Get-Command $e.exe -ErrorAction SilentlyContinue)) { continue }
+        $eap = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $dryOut = (& $e.exe @($e.args) $deploy -DryRun -SourceDir $srcA -Destination $dest -ProcessFixture $fxEmpty 2>&1) | Out-String
+            $dryCode = $LASTEXITCODE
+            $cfgOut = (& $e.exe @($e.args) $deploy -DryRun -SourceDir $srcA -Destination $dest -ProcessFixture $fxEmpty -Configuration Bogus 2>&1) | Out-String
+            $cfgCode = $LASTEXITCODE
+            $rootOut = (& $e.exe @($e.args) $deploy -DryRun -SourceDir $srcA -Destination 'X:\' -ProcessFixture $fxEmpty 2>&1) | Out-String
+            $rootCode = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $eap }
+        Assert-Equal $dryCode 0 "$($e.exe) -File -DryRun without -RepoRoot must exit 0`n$dryOut"
+        # The console wraps long lines mid-path; match on whitespace-free text.
+        Assert-Match ($dryOut -replace '\s+', '') ('RepoRoot:' + [regex]::Escape($expectedRoot)) "$($e.exe) -File must resolve the default RepoRoot`n$dryOut"
+        Assert-True ($cfgCode -ne 0) "$($e.exe) -File with an invalid -Configuration must exit non-zero`n$cfgOut"
+        Assert-Match ($cfgOut -replace '\s+', '') 'mustbeDebugorRelease' "$($e.exe) must report the bad configuration`n$cfgOut"
+        Assert-True ($rootCode -ne 0) "$($e.exe) -File with a drive-root destination must exit non-zero`n$rootOut"
+        Assert-Match ($rootOut -replace '\s+', '') 'driveroot' "$($e.exe) must report the drive-root refusal`n$rootOut"
+    }
+}
+
+Test-Case 'leftover staging/prev-pending/prev-old siblings are listed, never deleted' {
+    $dest = Join-Path $testRoot 'orphans\server'
+    $oStage = "$dest.staging-19990101T000000000Z-deadbeef"
+    $oPend  = "$dest.prev-pending-19990101T000000000Z-deadbeef"
+    $oOld   = "$dest.prev-old-19990101T000000000Z-deadbeef"
+    New-Item -ItemType Directory -Force -Path $oStage, $oPend, $oOld | Out-Null
+    [IO.File]::WriteAllText((Join-Path $oStage 'DEPLOYED.json'), '{"deployedBy":"scripts/deploy-server.ps1","commit":"0123456789abcdef0123456789abcdef01234567","utc":"2026-01-02T03:04:05.0000000Z","files":[]}')
+    [IO.File]::WriteAllText((Join-Path $oStage 'payload.dll'), 'x')
+    [IO.File]::WriteAllText((Join-Path $oPend 'payload.dll'), 'y')
+    [IO.File]::WriteAllText((Join-Path $oOld 'DEPLOYED.json'), 'not json')
+
+    $eap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = (& $deploy -SourceDir $srcA -Destination $dest -RepoRoot $nonRepo -DryRun -ProcessFixture $fxEmpty 3>&1) | Out-String
+    } finally { $ErrorActionPreference = $eap }
+    # The console wraps long warning lines mid-path; match whitespace-free.
+    $flat = $out -replace '\s+', ''
+    foreach ($o in @($oStage, $oPend, $oOld)) {
+        Assert-Match $flat ([regex]::Escape($o)) 'every leftover folder must be listed'
+    }
+    Assert-Match $flat 'removebyhand' 'the listing must say the folders are removed by hand'
+    Assert-Match $flat '0123456789abcdef0123456789abcdef01234567' 'the leftover DEPLOYED.json commit must be listed'
+    Assert-Match $flat '2026-01-02T03:04:05' 'the leftover DEPLOYED.json utc must be listed'
+
+    # A real deploy still never deletes them.
+    & $deploy -SourceDir $srcA -Destination $dest -RepoRoot $nonRepo -ProcessFixture $fxEmpty 3>$null | Out-Null
+    Assert-True (Test-Path -LiteralPath (Join-Path $dest 'Forge.Server.exe')) 'the deploy itself must still succeed'
+    foreach ($o in @($oStage, $oPend, $oOld)) {
+        Assert-True (Test-Path -LiteralPath $o) "leftover '$o' must survive a deploy"
+    }
+}
+
+Test-Case 'a locked file inside .prev leaves .prev complete and keeps the pending copy' {
+    $dest = Join-Path $testRoot 'prevlock\server'
+    & $deploy -SourceDir $srcA -Destination $dest -RepoRoot $nonRepo | Out-Null
+    & $deploy -SourceDir $srcB -Destination $dest -RepoRoot $nonRepo | Out-Null
+    $prevDir = "$dest.prev"
+    $destBefore = Get-TreeHashes $dest
+    $prevBefore = Get-TreeHashes $prevDir
+
+    # A file locked inside .prev makes the .prev -> .prev-old rename fail, so
+    # the rotation aborts: .prev must stay complete (the old code deleted its
+    # contents first) and the old destination must be kept at .prev-pending.
+    $fs = [IO.File]::Open((Join-Path $prevDir 'Forge.Server.dll'), [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    $eap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = (& $deploy -SourceDir $srcC -Destination $dest -RepoRoot $nonRepo 3>&1) | Out-String
+    } finally {
+        $ErrorActionPreference = $eap
+        $fs.Dispose()
+    }
+    Assert-Match $out '=== Forge server deployed ===' 'the deploy must succeed even when .prev cannot be rotated'
+    Assert-Match ($out -replace '\s+', ' ') 'prev-pending' 'the warning must name the kept pending folder'
+    Assert-TreeEqual $prevBefore (Get-TreeHashes $prevDir) '.prev must be complete and byte-identical after the failed rotation'
+    $pend = @(Get-DeploySiblings $dest '.prev-pending-*')
+    Assert-Equal $pend.Count 1 'the pre-deploy destination must be kept at exactly one pending folder'
+    Assert-TreeEqual $destBefore (Get-TreeHashes $pend[0].FullName) 'the pending folder must hold the pre-deploy destination'
+    Assert-Equal @(Get-DeploySiblings $dest '.prev-old-*').Count 0 'no .prev-old husk may remain'
+    $v3 = Get-TreeHashes $srcC
+    $destHash = Get-TreeHashes $dest
+    foreach ($k in $v3.Keys) {
+        Assert-Equal $destHash[$k] $v3[$k] "destination must hold the v3 file '$k'"
+    }
+    # And the kept pending folder is listed as a leftover on the next run.
+    $out2 = (& $deploy -SourceDir $srcA -Destination $dest -RepoRoot $nonRepo -DryRun -ProcessFixture $fxEmpty 3>&1) | Out-String
+    Assert-Match ($out2 -replace '\s+', '') ([regex]::Escape($pend[0].FullName)) 'the next run must list the kept pending folder'
 }
 
 } finally {

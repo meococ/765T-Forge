@@ -197,19 +197,24 @@ powershell -NoProfile -File scripts\deploy-server.ps1 [-Configuration Release] [
 
 It refuses when the checkout is dirty — any modified or staged tracked file,
 an untracked file under `src\`, or an untracked root build input
-(`Directory.Build.props`, `Directory.Packages.props`, `global.json`,
-`NuGet.config`, `*.slnf`); untracked files elsewhere do not block (pass
-`-AllowDirty` to override, and the dirty paths are recorded in `DEPLOYED.json`).
-It also refuses when the destination is unsafe (the checkout root, an ancestor
-of it, inside `src\` or `.git\`, or a drive root), when a non-empty folder sits
-there that was not made by this script (no `DEPLOYED.json` — move it aside by
-hand), and while a `Forge.Server.exe` is running from the destination or a
-`Forge.Server.exe` path cannot be read — close or disable the MCP clients that
-use the folder first; the script never stops a process. The copy lands in a
-staging sibling, is hash-verified, then swapped in; the previous deploy is
-moved aside first and kept once as `server.prev` (a mid-swap failure restores
-it), and `DEPLOYED.json` records the commit, branch, dirty flag and paths,
-configuration, and every file hash.
+(`Directory.Build.props`, `Directory.Build.targets`, `Directory.Packages.props`,
+`global.json`, `NuGet.config`, `*.slnf`, `*.rsp`); untracked files elsewhere
+do not block (pass `-AllowDirty` to override, and the dirty paths are recorded
+in `DEPLOYED.json`). It also refuses when the destination is unsafe (the
+checkout root, an ancestor of it, inside `src\` or `.git\`, or a drive root),
+when a non-empty folder sits there that was not made by this script (no
+`DEPLOYED.json` it wrote — move it aside by hand), and while a
+`Forge.Server.exe` is running from the destination or a `Forge.Server.exe`
+path cannot be read — close or disable the MCP clients that use the folder
+first; the script never stops a process. The copy lands in a staging sibling,
+is hash-verified, then swapped in; the previous deploy is moved aside first
+and kept once as `server.prev` (a mid-swap failure restores it, and `.prev` is
+retired via a rename so it is only ever absent or complete), and
+`DEPLOYED.json` records the commit, branch, dirty flag and paths,
+configuration, and every file hash. Leftover `*.staging-*`,
+`*.prev-pending-*` and `*.prev-old-*` siblings from killed or failed runs are
+never deleted — every run (including `-DryRun`) lists them so they can be
+removed by hand.
 
 Switching the live entry to `deploy\server` is a Supervisor job done at a live
 window with `claude mcp` — nothing here touches MCP configuration. Until that
