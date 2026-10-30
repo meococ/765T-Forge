@@ -538,6 +538,8 @@ public sealed partial class PluginCommandProcessor
         }
         else
         {
+            // D10: opening a proxy DWG could show the modal Proxy Information dialog too.
+            using var proxyNotice = ProxyNoticeScope.Enter();
             var previousFileDia = Application.GetSystemVariable("FILEDIA");
             try
             {
@@ -809,9 +811,11 @@ public sealed partial class PluginCommandProcessor
             return DryRun(command, new { args.Name, count = ids.Count });
         }
 
+        // D10: reloading an xref loads a foreign database — suppress the proxy dialog.
+        using var proxyNotice = ProxyNoticeScope.Enter();
         ActiveDb.ReloadXrefs(ids);
         tr.Commit();
-        return ForgeResult.Success(command.Id, new { reloaded = ids.Count }, verification: new ForgeVerification { Attempted = true, Passed = true, ReadBack = ReadXrefs() });
+        return ForgeResult.Success(command.Id, new { reloaded = ids.Count, proxynotice = proxyNotice }, verification: new ForgeVerification { Attempted = true, Passed = true, ReadBack = ReadXrefs() });
     }
 
     private static ForgeResult RepathXref(ForgeCommand command)
@@ -841,13 +845,23 @@ public sealed partial class PluginCommandProcessor
         }
 
         tr.Commit();
+        ProxyNoticeScope? proxyNotice = null;
         if (args.Reload)
         {
-            ActiveDb.ReloadXrefs(ids);
+            // D10: the reload loads a foreign database — suppress the proxy dialog.
+            proxyNotice = ProxyNoticeScope.Enter();
+            try
+            {
+                ActiveDb.ReloadXrefs(ids);
+            }
+            finally
+            {
+                proxyNotice.Dispose();
+            }
         }
 
         var readBack = ReadXrefs();
-        return ForgeResult.Success(command.Id, new { repathed = args.Name, args.Path }, verification: new ForgeVerification { Attempted = true, Passed = true, ReadBack = readBack });
+        return ForgeResult.Success(command.Id, new { repathed = args.Name, args.Path, proxynotice = proxyNotice }, verification: new ForgeVerification { Attempted = true, Passed = true, ReadBack = readBack });
     }
 
     private static ObjectIdCollection FindXrefIds(Transaction tr, string? name)
@@ -1150,6 +1164,8 @@ public sealed partial class PluginCommandProcessor
             return DryRun(command, new { args.TemplatePath, args.SetupName, mode = "sync_copy_preferred" });
         }
 
+        // D10: reading the template DWG loads a foreign database — suppress the proxy dialog.
+        using var proxyNotice = ProxyNoticeScope.Enter();
         try
         {
             using var sourceDb = new Database(false, true);
@@ -1186,7 +1202,8 @@ public sealed partial class PluginCommandProcessor
                 completed = true,
                 mode = "sync_copy",
                 args.TemplatePath,
-                args.SetupName
+                args.SetupName,
+                proxynotice = proxyNotice
             });
         }
         catch (System.Exception ex)
@@ -1200,7 +1217,8 @@ public sealed partial class PluginCommandProcessor
                 mode = "queued_psetupin",
                 fallbackReason = ex.Message,
                 args.TemplatePath,
-                args.SetupName
+                args.SetupName,
+                proxynotice = proxyNotice
             });
         }
     }
@@ -1790,6 +1808,52 @@ public sealed partial class PluginCommandProcessor
     private sealed record ExecLispArgs { public string? Lisp { get; init; } }
     private sealed record ExecDotNetArgs { public string? Code { get; init; } }
     private sealed record BlockAttributeValue(string BlockHandle, string BlockName, string Tag, string Value);
+
+    /// <summary>
+    /// smoke-r2 D10: PROXYNOTICE=0 while a foreign database is loaded (ReadDwgFile/DxfIn,
+    /// db.Insert/AttachXref, xref reload, -DGNIMPORT, template/document opens). Without it
+    /// AutoCAD raises the modal "Proxy Information" dialog and every later pipe call waits
+    /// out the timeout until a human clicks OK. The serialized report reads the scope's
+    /// final state (the result leaves the method after Dispose ran), so `restored` is the
+    /// truth rather than a plan; `error` records a suppression that could not be applied.
+    /// </summary>
+    private sealed class ProxyNoticeScope : IDisposable
+    {
+        private readonly ScopedSysvar? _scope;
+
+        private ProxyNoticeScope(ScopedSysvar? scope, string? error)
+        {
+            _scope = scope;
+            Error = error;
+        }
+
+        public bool Applied => _scope?.Applied ?? false;
+        public bool Restored => _scope?.Restored ?? false;
+        public object? Original => _scope?.Original;
+        public string? Error { get; }
+
+        public static ProxyNoticeScope Enter()
+        {
+            try
+            {
+                return new ProxyNoticeScope(
+                    ScopedSysvar.Set(
+                        "PROXYNOTICE",
+                        0,
+                        name => Application.GetSystemVariable(name),
+                        (name, value) => Application.SetSystemVariable(name, value)),
+                    null);
+            }
+            catch (System.Exception ex)
+            {
+                // The sysvar could not be read/written: proceed anyway — the result reports
+                // the failed scope so a later proxy dialog is diagnosable instead of silent.
+                return new ProxyNoticeScope(null, ex.Message);
+            }
+        }
+
+        public void Dispose() => _scope?.Dispose();
+    }
 }
 
 public sealed record DotNetScriptGlobals(Document Document, Database Database, Editor Editor);

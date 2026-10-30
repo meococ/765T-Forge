@@ -187,13 +187,23 @@ public sealed partial class PluginCommandProcessor
         }
 
         tr.Commit();
+        ProxyNoticeScope? proxyNotice = null;
         if (args.Reload)
         {
             using var reloadTr = ActiveDb.TransactionManager.StartTransaction();
             var reloadIds = FindXrefIds(reloadTr, args.Name);
             if (reloadIds.Count > 0)
             {
-                ActiveDb.ReloadXrefs(reloadIds);
+                // D10: the reload loads a foreign database — suppress the proxy dialog.
+                proxyNotice = ProxyNoticeScope.Enter();
+                try
+                {
+                    ActiveDb.ReloadXrefs(reloadIds);
+                }
+                finally
+                {
+                    proxyNotice.Dispose();
+                }
             }
 
             reloadTr.Commit();
@@ -201,7 +211,7 @@ public sealed partial class PluginCommandProcessor
 
         return ForgeResult.Success(
             command.Id,
-            new { hostDir, changes },
+            new { hostDir, changes, proxynotice = proxyNotice },
             verification: new ForgeVerification
             {
                 Attempted = true,
@@ -856,6 +866,8 @@ public sealed partial class PluginCommandProcessor
         // Rewrite host copy xref paths to same-folder relative names.
         if (args.RewritePaths)
         {
+            // D10: reading the copied DWG loads a foreign database — suppress the proxy dialog.
+            using var proxyNotice = ProxyNoticeScope.Enter();
             using var db = new Database(false, true);
             db.ReadDwgFile(plannedHost, FileOpenMode.OpenForReadAndWriteNoShare, true, "");
             using (var tr = db.TransactionManager.StartTransaction())

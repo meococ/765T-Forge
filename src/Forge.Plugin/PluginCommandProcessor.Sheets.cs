@@ -43,6 +43,8 @@ public sealed partial class PluginCommandProcessor
         Document document;
         try
         {
+            // D10: a DWT/DWG template is a foreign database — suppress the proxy dialog.
+            using var proxyNotice = args.TemplatePath is null ? null : ProxyNoticeScope.Enter();
             document = Documents.Add(args.TemplatePath ?? "");
         }
         catch (System.Exception ex)

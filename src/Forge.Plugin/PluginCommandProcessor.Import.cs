@@ -177,6 +177,11 @@ public sealed partial class PluginCommandProcessor
         }
 
         // ---- read the source into a side database (no document, no UI) ----
+        // fix-smoke-20261029-r2 D10: a DWG with proxy objects raises the modal "Proxy
+        // Information" dialog during DxfIn/ReadDwgFile/Insert/AttachXref and wedges every
+        // later pipe call. PROXYNOTICE=0 for the whole foreign-database section, restored
+        // on Dispose; the proxynotice field in the result reports applied/restored truth.
+        using var proxyNotice = ProxyNoticeScope.Enter();
         var phase = Stopwatch.StartNew();
         using var side = new Database(false, true);
         string? dxfLog = null;
@@ -309,6 +314,7 @@ public sealed partial class PluginCommandProcessor
                 xrefSavePath,
                 layerPlan = LayerPlanReport(layerPlan),
                 nestedBlockConflicts = nestedConflicts,
+                proxynotice = proxyNotice,
                 warnings
             });
         }
@@ -368,6 +374,7 @@ public sealed partial class PluginCommandProcessor
                 handles = outcome.Handles,
                 handlesTruncated = outcome.HandlesTruncated ? true : (bool?)null,
                 nestedBlockConflicts = nestedConflicts.Count > 0 ? nestedConflicts : null,
+                proxynotice = proxyNotice,
                 warnings,
                 timingsMs = new { read = readMs, layerMap = mapMs, insert = insertMs, total = total.ElapsedMilliseconds }
             };
@@ -388,7 +395,7 @@ public sealed partial class PluginCommandProcessor
         catch (System.Exception ex) when (ex is Autodesk.AutoCAD.Runtime.Exception or InvalidOperationException or ArgumentException or IOException or UnauthorizedAccessException)
         {
             // Process() pops the UNDO group on a failed result, which also reverts the native insert.
-            return ForgeResult.Failure(command.Id, "import_failed", $"Import failed: {ex.Message}", "Run with dryRun=true to inspect the source; nothing was kept (the UNDO group is rolled back).", data: new { warnings });
+            return ForgeResult.Failure(command.Id, "import_failed", $"Import failed: {ex.Message}", "Run with dryRun=true to inspect the source; nothing was kept (the UNDO group is rolled back).", data: new { proxynotice = proxyNotice, warnings });
         }
     }
 

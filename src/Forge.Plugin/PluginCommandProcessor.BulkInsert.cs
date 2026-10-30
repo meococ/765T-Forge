@@ -296,6 +296,8 @@ public sealed partial class PluginCommandProcessor
     {
         notFound = [];
         error = null;
+        // D10: reading the library DWG loads a foreign database — suppress the proxy dialog.
+        using var proxyNotice = ProxyNoticeScope.Enter();
         using var side = new Database(false, true);
         try
         {
