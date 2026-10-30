@@ -358,4 +358,14 @@ public sealed class D12StoredPlotAreaSourceGuards
         Assert.Contains("centring.OffsetPromptAnswer(area)", source, StringComparison.Ordinal);
         Assert.DoesNotContain("centered && area != PlotAreaKind.Layout ? \"Center\" : \"0,0\"", source, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void TheLayoutAndViewPathWarnsOnAnExplicitCentered()
+    {
+        // review-wp2-r5 F1: D12CenteredIgnoredWarningTests pins the shared helper, but nothing
+        // guarded that the plugin calls it — deleting the call hunk left the suite green. The
+        // Layout/View branch must warn on the raw caller centered, like the scale=fit warning.
+        var source = PlotSource();
+        Assert.Contains("CenteredIgnoredWarning(args.Centered", source, StringComparison.Ordinal);
+    }
 }
