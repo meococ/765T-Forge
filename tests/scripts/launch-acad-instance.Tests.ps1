@@ -428,6 +428,19 @@ Test-Case 'stale state file is overwritten, not refused' {
     Assert-Match $out 'WOULD-START' 'plan must still be produced'
 }
 
+Test-Case 'the MCP snippet defaults to the live Debug server path' {
+    $out = (& $launch -Name mcp1 -DryRun -InstanceRoot (New-InstanceRoot) -RegistryFixture $fixturePath) | Out-String
+    # ConvertTo-Json escapes '\' as '\\' in the printed snippet.
+    Assert-Match $out ([regex]::Escape('src\\Forge.Server\\bin\\Debug\\net8.0\\Forge.Server.exe')) 'the snippet must point at the live Debug build path'
+    Assert-True ($out -notmatch 'bin\\\\Release') 'the snippet must not point at the Release build path'
+}
+
+Test-Case '-ServerExe overrides the snippet server path' {
+    $custom = 'D:\deploy\server\Forge.Server.exe'
+    $out = (& $launch -Name mcp2 -DryRun -ServerExe $custom -InstanceRoot (New-InstanceRoot) -RegistryFixture $fixturePath) | Out-String
+    Assert-Match $out ([regex]::Escape(($custom -replace '\\', '\\'))) 'the snippet must carry the -ServerExe path'
+}
+
 # ------------------------------------------------------------------ stop tests
 
 Test-Case 'stop refuses when state file is missing' {

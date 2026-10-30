@@ -45,6 +45,12 @@
   file. A named mutex (Local\765T-Forge-Launch-<Name>) makes concurrent
   launches for the same name fail instead of racing the checks.
 
+  The printed MCP server entry points at src\Forge.Server\bin\Debug\net8.0\
+  Forge.Server.exe under the repo root so the snippet matches the live entry;
+  -ServerExe <path> overrides it. That default moves to
+  deploy\server\Forge.Server.exe once the live entry is switched to the
+  deploy folder (scripts\deploy-server.ps1).
+
   -DryRun performs every check and prints the full plan
   ([WOULD-COPY] / [WOULD-RECREATE] / [WOULD-SET] / [WOULD-RESTORE] / [WOULD-ENV]
   / [WOULD-START] / [WOULD-WRITE-FILE]) and changes nothing: no registry
@@ -79,6 +85,8 @@ param(
     [string] $Name,
 
     [string] $AcadExe,
+
+    [string] $ServerExe,
 
     [string] $Drawing,
 
@@ -533,11 +541,16 @@ try {
     }
 
     $repoRoot  = Split-Path -Parent $PSScriptRoot
-    $serverExe = Join-Path $repoRoot 'src\Forge.Server\bin\Release\net8.0\Forge.Server.exe'
-    $serverExeNote = if (Test-Path -LiteralPath $serverExe) { $null } else { '  (not found on this machine - build Release first or fix the path)' }
+    # The live MCP entry currently runs the Debug build under src\Forge.Server\bin,
+    # so the snippet below must point there. This default moves to
+    # 'deploy\server\Forge.Server.exe' once the live entry is switched to the
+    # deploy folder (see deploy-server.ps1).
+    $serverExePath = Join-Path $repoRoot 'src\Forge.Server\bin\Debug\net8.0\Forge.Server.exe'
+    if ($ServerExe) { $serverExePath = $ServerExe }
+    $serverExeNote = if (Test-Path -LiteralPath $serverExePath) { $null } else { '  (not found on this machine - build the server first or pass -ServerExe)' }
 
     $mcpEntry = [ordered]@{
-        command = $serverExe
+        command = $serverExePath
         args    = @()
         env     = [ordered]@{
             FORGE_AUTOCAD_TOKEN = '<same as the existing 765t-forge entry>'

@@ -35,6 +35,9 @@ artifacts/
 artifactsverify*/
 **/artifactsverify*/
 
+# Deploy output (scripts/deploy-server.ps1) - never committed
+/deploy/
+
 # Local LISP scratch / internal job scripts (never ship in product repo)
 lisp-lib/
 

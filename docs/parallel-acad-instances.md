@@ -182,3 +182,42 @@ Run by the Lead in a granted window, with the name `smoke` instead of `smoke1`:
 - Step 7: the stop script stopped only pid 29888 (1 s). The pointer was already
   `<<Unnamed Profile>>`. The user's `LogFilePath` / `SaveFilePath` were unchanged.
 - Step 8 (idempotent reuse) was not run; the test profile key was removed after the smoke.
+
+## Deploying the server
+
+The live MCP entry must not run out of `src\Forge.Server\bin` — any build into
+that folder changes or breaks the server every open MCP client is using.
+`scripts\deploy-server.ps1` exists to fix that: it publishes Forge.Server and
+copies the result into a dedicated folder, `<repo>\deploy\server\` (the `deploy/`
+folder is gitignored). Run it like:
+
+```
+powershell -NoProfile -File scripts\deploy-server.ps1 [-Configuration Release] [-DryRun]
+```
+
+It refuses when the checkout is dirty — any modified or staged tracked file,
+an untracked file under `src\`, or an untracked root build input
+(`Directory.Build.props`, `Directory.Build.targets`, `Directory.Packages.props`,
+`global.json`, `NuGet.config`, `*.slnf`, `*.rsp`); untracked files elsewhere
+do not block (pass `-AllowDirty` to override, and the dirty paths are recorded
+in `DEPLOYED.json`). It also refuses when the destination is unsafe (the
+checkout root, an ancestor of it, inside `src\` or `.git\`, or a drive root),
+when a non-empty folder sits there that was not made by this script (no
+`DEPLOYED.json` it wrote — move it aside by hand), and while a
+`Forge.Server.exe` is running from the destination or a `Forge.Server.exe`
+path cannot be read — close or disable the MCP clients that use the folder
+first; the script never stops a process. The copy lands in a staging sibling,
+is hash-verified, then swapped in; the previous deploy is moved aside first
+and kept once as `server.prev` (a mid-swap failure restores it, and `.prev` is
+retired via a rename so it is only ever absent or complete), and
+`DEPLOYED.json` records the commit, branch, dirty flag and paths,
+configuration, and every file hash. Leftover `*.staging-*`,
+`*.prev-pending-*` and `*.prev-old-*` siblings from killed or failed runs are
+never deleted — every run (including `-DryRun`) lists them so they can be
+removed by hand.
+
+Switching the live entry to `deploy\server` is a Supervisor job done at a live
+window with `claude mcp` — nothing here touches MCP configuration. Until that
+switch, the launcher snippet above keeps pointing at the live `bin\Debug`
+path; afterwards, the launcher default moves to `deploy\server\Forge.Server.exe`
+(a one-line follow-up in `launch-acad-instance.ps1`).
