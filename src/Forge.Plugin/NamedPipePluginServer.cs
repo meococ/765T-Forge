@@ -17,9 +17,13 @@ public sealed class NamedPipePluginServer : IDisposable
     private readonly PluginCommandProcessor _processor;
     private readonly CancellationTokenSource _shutdown = new();
     private Task? _loop;
-    // review-d14-r1 F6: mirrors the in-flight DGN run from the Idle lane so Terminate can
-    // drop the temp document and the scoped sysvars on NETUNLOAD.
-    private PluginCommandProcessor.DgnImportRun? _pendingDgnRun;
+    // review-d14-r1 F6: mirrors the in-flight DGN runs from the Idle lane so Terminate can
+    // drop their temp documents and the scoped sysvars at program close — managed plugins
+    // cannot be unloaded mid-session, so program close is the only drain trigger. A set,
+    // not a single slot: after a watchdog timeout a second import can pend while an
+    // earlier run still finishes, and both must drain (review-d14-r2 M1/N2). Touched only
+    // on the AutoCAD main thread (the Idle lane and Terminate's Dispose), so no locking.
+    private readonly HashSet<PluginCommandProcessor.DgnImportRun> _pendingDgnRuns = new();
 
     public NamedPipePluginServer(ForgeEnvironment environment, PluginCommandProcessor processor)
     {
@@ -58,13 +62,17 @@ public sealed class NamedPipePluginServer : IDisposable
         _shutdown.Cancel();
 
         // review-d14-r1 F6: a pending DGN run holds its temp document and the
-        // FILEDIA/DGNIMPORTMODE/PROXYNOTICE scopes; NETUNLOAD mid-leg would leak them to
-        // session end. Terminate runs on the same application context as the Idle lane, so
-        // drain the run inline — CleanupDgnImport is best-effort throughout, and Abandoned
-        // keeps a late context grant from starting the write.
-        var pendingDgnRun = _pendingDgnRun;
-        _pendingDgnRun = null;
-        if (pendingDgnRun is not null)
+        // FILEDIA/DGNIMPORTMODE/PROXYNOTICE scopes; program close mid-leg would leak them
+        // into the next session (all three are profile/registry-persisted). This drain
+        // assumes callers are on the AutoCAD main thread — Terminate qualifies — because
+        // CleanupDgnImport touches documents and sysvars. Drain every pending run
+        // (review-d14-r2 M1: a watchdog-timeout retry can leave two pending). Snapshot
+        // and clear first: a document call inside the drain can pump a nested Idle tick
+        // that removes its own run from the set; cleanup stays idempotent on a re-drain.
+        // Abandoned keeps a late context grant from starting the write.
+        var pendingDgnRuns = _pendingDgnRuns.ToArray();
+        _pendingDgnRuns.Clear();
+        foreach (var pendingDgnRun in pendingDgnRuns)
         {
             pendingDgnRun.Abandoned = true;
             _processor.CleanupDgnImport(pendingDgnRun);
@@ -479,7 +487,9 @@ public sealed class NamedPipePluginServer : IDisposable
                             dgnRun.Abandoned = true;
                             var timedOutRun = dgnRun;
                             dgnRun = null;
-                            _pendingDgnRun = null;
+                            // review-d14-r2 M1: remove only this lane's mirror entry — a
+                            // second import's run may still be pending in the set.
+                            _pendingDgnRuns.Remove(timedOutRun);
                             Finish(_processor.EndDgnImport(command, timedOutRun, contextTimedOut: true));
                         }
 
@@ -493,7 +503,9 @@ public sealed class NamedPipePluginServer : IDisposable
                     // reports that failure for this run exactly once.
                     var finishedRun = dgnRun;
                     dgnRun = null;
-                    _pendingDgnRun = null;
+                    // review-d14-r2 M1: remove only this lane's mirror entry — a
+                    // second import's run may still be pending in the set.
+                    _pendingDgnRuns.Remove(finishedRun);
                     Finish(_processor.EndDgnImport(command, finishedRun));
                     return;
                 }
@@ -528,7 +540,7 @@ public sealed class NamedPipePluginServer : IDisposable
                         // ticks instead of answering the sentinel.
                         run.AuditId = first.AuditId;
                         dgnRun = run;
-                        _pendingDgnRun = run;
+                        _pendingDgnRuns.Add(run);
                         first = null;
                         return;
                     }

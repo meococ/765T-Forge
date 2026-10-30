@@ -328,9 +328,12 @@ public sealed partial class PluginCommandProcessor
     }
 
     /// <summary>
-    /// Plugin teardown path for a run still pending at NETUNLOAD: close the temp document
-    /// and restore the scoped sysvars, best-effort throughout. Called from
-    /// NamedPipePluginServer.Dispose on the same application context the Idle lane uses.
+    /// Plugin teardown path for a run still pending at program close — managed plugins
+    /// cannot be unloaded mid-session, so Terminate is the only trigger. Closes the temp
+    /// document and restores the scoped sysvars, best-effort throughout (at Terminate all
+    /// documents are already destroyed, so the document half throws and is swallowed; the
+    /// sysvar half is what does real work). Called from NamedPipePluginServer.Dispose on
+    /// the same application context the Idle lane uses.
     /// </summary>
     internal void CleanupDgnImport(DgnImportRun run)
     {

@@ -88,6 +88,24 @@ public sealed class ProjectConfigurationTests
     }
 
     [Fact]
+    public void DgnPendingRunMirrorIsASetDrainedPerRunAndAtDispose()
+    {
+        var root = RepoRoot();
+        var source = File.ReadAllText(Path.Combine(root, "src", "Forge.Plugin", "NamedPipePluginServer.cs"));
+
+        // review-d14-r2 M1/N2: a watchdog-timeout retry can leave two DGN runs pending at
+        // once, so the mirror is a set; each finish path removes only its own run (a shared
+        // unconditional clear would let the first finishing lane drain another lane's
+        // mirror slot and skip its Terminate drain entirely).
+        Assert.Contains("HashSet<PluginCommandProcessor.DgnImportRun>", source);
+        Assert.Contains("_pendingDgnRuns.Add(run)", source);
+        Assert.Contains("_pendingDgnRuns.Remove(timedOutRun)", source);
+        Assert.Contains("_pendingDgnRuns.Remove(finishedRun)", source);
+        Assert.Contains("_pendingDgnRuns.Clear()", source);
+        Assert.DoesNotContain("_pendingDgnRun = null", source);
+    }
+
+    [Fact]
     public void CommandDispatchedToolsRejectControlCharacters()
     {
         var root = RepoRoot();
