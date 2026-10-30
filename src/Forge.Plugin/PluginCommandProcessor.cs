@@ -42,7 +42,11 @@ public sealed partial class PluginCommandProcessor
         "forge_doc_export_dxf",
         "forge_plot_to_pdf",
         "forge_plot_publish",
-        "forge_sheet_inventory_import"
+        "forge_sheet_inventory_import",
+        // D14: forge_dgn_import writes a throwaway temporary database, not the active
+        // drawing — an UNDO BE/E group around it would only wrap session state and give
+        // forge_undo a no-op group to pop.
+        "forge_dgn_import"
     };
 
     /// <summary>docs/cad-job-tools.md C2 — the year this build targets, from the ForgeTargetYear assembly stamp.</summary>
@@ -1883,7 +1887,7 @@ public sealed partial class PluginCommandProcessor
     /// truth rather than a plan. review-wp2-r1 finding 5: entry fails closed — a
     /// proxynotice_scope_failed is returned instead of loading unguarded.
     /// </summary>
-    private sealed class ProxyNoticeScope : IDisposable
+    internal sealed class ProxyNoticeScope : IDisposable
     {
         /// <summary>review-wp2-r1 finding 5 (D10): the typed failure when suppression cannot be applied.</summary>
         public const string ScopeFailedCode = "proxynotice_scope_failed";

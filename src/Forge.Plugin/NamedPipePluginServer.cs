@@ -436,6 +436,7 @@ public sealed class NamedPipePluginServer : IDisposable
         var staleAfterMs = (long)RequestDeadline.TotalMilliseconds;
         ForgeResult? first = null;
         var claimed = false;
+        PluginCommandProcessor.DgnImportRun? dgnRun = null;
         long pollUntil = 0;
 
         void Finish(ForgeResult result)
@@ -448,6 +449,28 @@ public sealed class NamedPipePluginServer : IDisposable
         {
             try
             {
+                if (dgnRun is not null)
+                {
+                    // D14: -DGNIMPORT runs inside the temp document's command context. A leg that
+                    // never got dispatched by the deadline is marked abandoned BEFORE its context
+                    // can arrive, so a late grant cannot commit an import after the caller gave
+                    // up; a leg that already started runs to completion, matching the watchdog's
+                    // read-back-after-timeout contract.
+                    if (!dgnRun.LegFinished)
+                    {
+                        if (!dgnRun.LegStarted && Environment.TickCount64 - startedAt >= staleAfterMs)
+                        {
+                            dgnRun.Abandoned = true;
+                            Finish(_processor.EndDgnImport(command, dgnRun, contextTimedOut: true));
+                        }
+
+                        return;
+                    }
+
+                    Finish(_processor.EndDgnImport(command, dgnRun));
+                    return;
+                }
+
                 if (first is null)
                 {
                     // review-wp2-r2 Q1: claim the command BEFORE Process runs. first stays null
@@ -472,6 +495,16 @@ public sealed class NamedPipePluginServer : IDisposable
 
                     claimed = true;
                     first = _processor.Process(command);
+                    if (first.Data is PluginCommandProcessor.DgnImportRun run)
+                    {
+                        // The DGN import queued its command leg — wait for it on later idle
+                        // ticks instead of answering the sentinel.
+                        run.AuditId = first.AuditId;
+                        dgnRun = run;
+                        first = null;
+                        return;
+                    }
+
                     if (first.Ok || first.Error?.Code is not { } code || !DocumentContextPolicy.UnconfirmedCodes.Contains(code) ||
                         first.Data is not (PluginCommandProcessor.DocActivateReadBack or PluginCommandProcessor.DocCloseReadBack))
                     {
