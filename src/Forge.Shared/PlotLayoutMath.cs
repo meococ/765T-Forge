@@ -88,11 +88,18 @@ public readonly record struct PlotCentring(bool Centered, bool KeepStored)
     /// SetPlotCentered/SetPlotOrigin). An explicit stored "x,y" is never written: on a
     /// stored-centred setup PlotOrigin can hold a stale/manual value, and answering it would
     /// actively override centring — the r1 defect again.
+    ///
+    /// live-smoke-20261030 fix4 (D12): Layout and View answer "" unconditionally — the api
+    /// engine never calls SetPlotCentered/SetPlotOrigin for those two areas, so Enter is the
+    /// only answer that makes the engines agree. The r2 "0,0" for Layout is what reset a
+    /// stored Layout's 12,8 mm offset to 0,0 live; and on AutoCAD 2025 a Layout-area offset
+    /// prompt reads "Enter plot offset (x,y) &lt;…&gt;:" with no [Center] option, so "Center"
+    /// must never be sent for it.
     /// </summary>
     public string OffsetPromptAnswer(PlotAreaKind area)
-        => KeepStored
+        => KeepStored || area is PlotAreaKind.Layout or PlotAreaKind.View
             ? ""
-            : Centered && area != PlotAreaKind.Layout ? "Center" : "0,0";
+            : Centered ? "Center" : "0,0";
 }
 
 /// <summary>fix-smoke-20261029 D4: what forge_plot_to_pdf must do so AutoCAD's plot validator accepts the layout.</summary>

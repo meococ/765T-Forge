@@ -192,6 +192,10 @@ public sealed class D12StoredCentringTests
 /// review-wp2-r2 M1 (D12): the -PLOT offset-prompt answer on engine="command". A stored page
 /// setup answers "" (Enter = keep the stored offset AND the stored centred flag) — the r2
 /// defect answered "0,0", which actively overrides a stored, uncentred Window/View offset.
+/// live-smoke-20261030 fix4: Layout and View answer "" unconditionally — the api engine never
+/// writes centring/origin for them, and a Layout-area -PLOT prompt has no [Center] option on
+/// AutoCAD 2025 — so "0,0" (which reset a stored Layout's offset live) and "Center" are both
+/// wrong there.
 /// </summary>
 public sealed class D12LegacyOffsetPromptTests
 {
@@ -213,10 +217,28 @@ public sealed class D12LegacyOffsetPromptTests
         }
     }
 
+    [Theory]
+    [InlineData(PlotAreaKind.Layout)]
+    [InlineData(PlotAreaKind.View)]
+    public void LayoutAndViewAlwaysAnswerEnterLikeTheApiEngine(PlotAreaKind area)
+    {
+        // live-smoke-20261030 fix4: for Layout and View the api engine never calls
+        // SetPlotCentered/SetPlotOrigin — the CopyFrom'd stored offset and centred flag always
+        // stand — so the command engine answers Enter in EVERY centring state to match, and a
+        // Layout-area prompt has no [Center] option anyway (AutoCAD 2025 -PLOT capture).
+        foreach (var centered in new bool?[] { true, false, null })
+        {
+            foreach (var source in new[] { "stored", "requested", "default_layout", null })
+            {
+                Assert.Equal("", PlotCentring.Resolve(centered, source, storedCentered: false).OffsetPromptAnswer(area));
+            }
+        }
+    }
+
     [Fact]
     public void AnExplicitCentredNonLayoutAreaAnswersCenter()
     {
-        foreach (var area in new[] { PlotAreaKind.Window, PlotAreaKind.Extents, PlotAreaKind.Display, PlotAreaKind.Limits, PlotAreaKind.View })
+        foreach (var area in new[] { PlotAreaKind.Window, PlotAreaKind.Extents, PlotAreaKind.Display, PlotAreaKind.Limits })
         {
             Assert.Equal("Center", PlotCentring.Resolve(true, "requested", false).OffsetPromptAnswer(area));
             Assert.Equal("Center", PlotCentring.Resolve(null, "default_model_extents", false).OffsetPromptAnswer(area));
@@ -224,21 +246,18 @@ public sealed class D12LegacyOffsetPromptTests
     }
 
     [Fact]
-    public void CentringNeverAppliesToTheLayoutAreaToken()
-    {
-        // Layout plots at its own stored origin; "Center" is not a valid answer for it.
-        Assert.Equal("0,0", PlotCentring.Resolve(true, "requested", false).OffsetPromptAnswer(PlotAreaKind.Layout));
-        Assert.Equal("0,0", PlotCentring.Resolve(null, "default_layout", false).OffsetPromptAnswer(PlotAreaKind.Layout));
-    }
-
-    [Fact]
     public void AnExplicitUncentredAnswerKeepsTheOriginOffset()
     {
         // Caller passed centered=false on a stored window: KeepStored is off, so "0,0" is the
-        // honest uncentred answer — only the stored-source-without-centered case keeps "".
+        // honest uncentred answer — the api engine agrees (it writes SetPlotCentered(false) +
+        // SetPlotOrigin(0,0) for window/extents/display/limits).
         var c = PlotCentring.Resolve(false, "stored", storedCentered: true);
         Assert.False(c.KeepStored);
         Assert.Equal("0,0", c.OffsetPromptAnswer(PlotAreaKind.Window));
+        foreach (var area in new[] { PlotAreaKind.Extents, PlotAreaKind.Display, PlotAreaKind.Limits })
+        {
+            Assert.Equal("0,0", c.OffsetPromptAnswer(area));
+        }
     }
 }
 

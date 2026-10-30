@@ -1152,6 +1152,9 @@ public sealed partial class PluginCommandProcessor
             // review-wp2-r2 M1: a stored, uncentred Window/View must NOT be answered "0,0" — that
             // overrides the stored offset. KeepStored answers "" (Enter = keep the page setup's
             // stored offset and stored centred flag); see PlotCentring.OffsetPromptAnswer.
+            // live-smoke-20261030 fix4: Layout/View answer "" unconditionally — the api engine
+            // never writes centring/origin for them, and a Layout-area -PLOT prompt has no
+            // [Center] option on this host (AutoCAD 2025).
             tokens.Add(centring.OffsetPromptAnswer(area));
             tokens.Add("Yes");
             tokens.Add(string.IsNullOrWhiteSpace(plotStyle) ? "" : plotStyle!.Trim());
