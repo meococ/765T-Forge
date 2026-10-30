@@ -287,6 +287,8 @@ public sealed partial class PluginCommandProcessor
 
         string canonicalMedia;
         string mediaSource;
+        string? mappedFromMedia = null;
+        (double WidthMm, double HeightMm)? storedSheetMm = null;
         try
         {
             psv.SetPlotConfigurationName(ps, viewer.PlotDevice, null);
@@ -295,6 +297,7 @@ public sealed partial class PluginCommandProcessor
                 .Cast<string>()
                 .Select(canonical => (Canonical: canonical, Locale: SafeLocaleMediaName(psv, ps, canonical)))
                 .ToList();
+            var deviceMedia = mediaList.Select(m => PaperMatch.ToMedia(m.Canonical, m.Locale)).ToArray();
 
             if (!string.IsNullOrWhiteSpace(args.PaperSize))
             {
@@ -318,11 +321,38 @@ public sealed partial class PluginCommandProcessor
                 canonicalMedia = layoutMedia;
                 mediaSource = "layout";
             }
-            else if (!isModel && layout.PlotPaperSize.X > 0 && layout.PlotPaperSize.Y > 0)
+            else if (!isModel)
             {
-                psv.SetClosestMediaName(ps, layout.PlotPaperSize.X, layout.PlotPaperSize.Y, PlotPaperUnit.Millimeters, true);
-                canonicalMedia = ps.CanonicalMediaName;
-                mediaSource = "closest_to_layout";
+                // fix-smoke-20261029-r2 D9: the stored paper name is not offered by this device
+                // (custom media like ezdxf_(841.00_x_594.00_MM), or an imperial sheet name).
+                // Map the stored sheet size onto a device medium of equal size instead of
+                // dying as eInvalidInput; no match or an ambiguous one fails closed.
+                storedSheetMm = PaperMatch.ParseSizeMm(layoutMedia) ?? StoredSheetMm(layout);
+                var paperMatch = PaperMatch.MatchBySize(storedSheetMm?.WidthMm, storedSheetMm?.HeightMm, deviceMedia);
+                if (!paperMatch.Matched)
+                {
+                    tr.Commit();
+                    var sizeText = storedSheetMm is { } sz ? $"{sz.WidthMm:0.###} x {sz.HeightMm:0.###} mm" : "unknown size";
+                    return ForgeResult.Failure(
+                        command.Id,
+                        PaperMatch.NotOnDeviceCode,
+                        paperMatch.Ambiguous
+                            ? $"Layout paper '{layoutMedia}' ({sizeText}) maps to more than one media on '{requestedDevice}' ({string.Join(", ", paperMatch.Nearest)}); refusing to guess."
+                            : $"Layout paper '{layoutMedia}' ({sizeText}) is not a media on '{requestedDevice}'. Nearest by size: {string.Join(", ", paperMatch.Nearest)}.",
+                        "Pass paperSize with one of the listed device media names (forge_system_capabilities.plotDevices).",
+                        data: new
+                        {
+                            device = requestedDevice,
+                            storedMedia = layoutMedia,
+                            storedSizeMm = storedSheetMm is { } ss ? new[] { ss.WidthMm, ss.HeightMm } : null,
+                            paperMatch.Ambiguous,
+                            nearest = paperMatch.Nearest
+                        });
+                }
+
+                canonicalMedia = paperMatch.Canonical!;
+                mappedFromMedia = layoutMedia;
+                mediaSource = "mapped_to_device_media";
             }
             else
             {
@@ -352,6 +382,13 @@ public sealed partial class PluginCommandProcessor
         }
 
         var mediaChanged = !string.Equals(canonicalMedia, layoutMedia, StringComparison.Ordinal);
+        if (mappedFromMedia is not null)
+        {
+            warnings.Add(
+                $"Layout paper '{mappedFromMedia}' is not offered by '{requestedDevice}'; plotted on '{canonicalMedia}' with the same sheet size" +
+                (storedSheetMm is { } sm ? $" ({sm.WidthMm:0.###} x {sm.HeightMm:0.###} mm)." : "."));
+        }
+
         PlotAreaKind area;
         string areaSource;
         if (requestedArea is { } explicitArea)
@@ -616,6 +653,7 @@ public sealed partial class PluginCommandProcessor
             paperSize = readBack.LocaleMedia,
             canonicalMedia = readBack.CanonicalMedia,
             mediaSource,
+            mediaMapped = mappedFromMedia is null ? null : new { from = mappedFromMedia, to = canonicalMedia },
             layoutMedia,
             paperMm = readBack.PaperMm,
             printableMm = readBack.PrintableMm,
@@ -735,6 +773,7 @@ public sealed partial class PluginCommandProcessor
                 plan.paperSize,
                 plan.canonicalMedia,
                 plan.mediaSource,
+                plan.mediaMapped,
                 plan.paperMm,
                 plan.printableMm,
                 pdfSheetMm,
@@ -1094,6 +1133,28 @@ public sealed partial class PluginCommandProcessor
             .Select(m => m.Name)
             .ToArray();
         return ranked;
+    }
+
+    /// <summary>
+    /// fix-smoke-20261029-r2 D9: <see cref="Layout.PlotPaperSize"/> is expressed in the
+    /// layout's own paper units (inches on imperial templates — passing them as millimeters
+    /// is what made the imperial Layout1 plot throw eInvalidInput). Converted to mm for
+    /// <see cref="PaperMatch"/>; pixel-sized paper cannot be compared to a sheet.
+    /// </summary>
+    private static (double WidthMm, double HeightMm)? StoredSheetMm(Layout layout)
+    {
+        var size = layout.PlotPaperSize;
+        if (size.X <= 0 || size.Y <= 0)
+        {
+            return null;
+        }
+
+        return layout.PlotPaperUnits switch
+        {
+            PlotPaperUnit.Millimeters => (size.X, size.Y),
+            PlotPaperUnit.Inches => (size.X * 25.4, size.Y * 25.4),
+            _ => null
+        };
     }
 
     private static PlotPaperUnit GuessPaperUnits(string canonicalMedia, PlotPaperUnit fallback)
