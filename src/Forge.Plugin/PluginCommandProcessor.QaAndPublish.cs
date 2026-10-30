@@ -194,15 +194,21 @@ public sealed partial class PluginCommandProcessor
             var reloadIds = FindXrefIds(reloadTr, args.Name);
             if (reloadIds.Count > 0)
             {
-                // D10: the reload loads a foreign database — suppress the proxy dialog.
-                proxyNotice = ProxyNoticeScope.Enter();
+                // D10 + r1 finding 5: the reload loads a foreign database — fail closed. The
+                // path rewrites above are already committed, so the failure carries them.
+                proxyNotice = ProxyNoticeScope.EnterOrFail(command, out var scopeFailure, new { hostDir, changes, rewriteCommitted = true });
+                if (scopeFailure is not null)
+                {
+                    return scopeFailure;
+                }
+
                 try
                 {
                     ActiveDb.ReloadXrefs(reloadIds);
                 }
                 finally
                 {
-                    proxyNotice.Dispose();
+                    proxyNotice?.Dispose();
                 }
             }
 
@@ -866,8 +872,14 @@ public sealed partial class PluginCommandProcessor
         // Rewrite host copy xref paths to same-folder relative names.
         if (args.RewritePaths)
         {
-            // D10: reading the copied DWG loads a foreign database — suppress the proxy dialog.
-            using var proxyNotice = ProxyNoticeScope.Enter();
+            // D10 + r1 finding 5: reading the copied DWG loads a foreign database — fail
+            // closed when the proxy dialog cannot be suppressed.
+            using var proxyNotice = ProxyNoticeScope.EnterOrFail(command, out var scopeFailure);
+            if (scopeFailure is not null)
+            {
+                return scopeFailure;
+            }
+
             using var db = new Database(false, true);
             db.ReadDwgFile(plannedHost, FileOpenMode.OpenForReadAndWriteNoShare, true, "");
             using (var tr = db.TransactionManager.StartTransaction())

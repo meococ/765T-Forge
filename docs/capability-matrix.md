@@ -71,7 +71,7 @@ Authoring contract ([docs/cad-authoring-tools.md](cad-authoring-tools.md)): WCS 
 |------|--------|-------|
 | `forge_block_list/get/set_attr` | implemented | |
 | `forge_block_campaign` | implemented | Multi-entry dry-run diffs, Unicode |
-| `forge_layout_page_setup_import` | implemented | Prefers sync PlotSettings copy from template DWG/DWT; falls back to queued `-PSETUPIN` with `completed=false` |
+| `forge_layout_page_setup_import` | implemented | Prefers sync PlotSettings copy from template DWG/DWT under a fail-closed `PROXYNOTICE=0` scope; falls back to queued `-PSETUPIN` with `completed=false`. Known gap: the queued `-PSETUPIN` cannot be scoped (it runs after the call returns), so a proxy DWG template can still raise the dialog on that path — prefer the sync path or `forge_layout_page_setup_apply` |
 | `forge_layout_page_setup_apply` | implemented | Sync `PlotSettings` copy onto layout |
 | `forge_plot_preset_apply` | implemented | Device (default no-viewer PDF clone), paper, CTB, area, scale/fit, centring, units, orientation on one or many layouts (`"*"` = all paper layouts) in one validated, all-or-nothing call; optional named page setup. Headless smoke: 2 layouts → A3 fit + `monochrome.ctb` + setup `BENCH-A3`, Model window 1:100 on A1. **Live AutoCAD smoke pending** |
 

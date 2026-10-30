@@ -179,11 +179,17 @@ public sealed partial class PluginCommandProcessor
         }
 
         // ---- read the source into a side database (no document, no UI) ----
-        // fix-smoke-20261029-r2 D10: a DWG with proxy objects raises the modal "Proxy
-        // Information" dialog during DxfIn/ReadDwgFile/Insert/AttachXref and wedges every
-        // later pipe call. PROXYNOTICE=0 for the whole foreign-database section, restored
-        // on Dispose; the proxynotice field in the result reports applied/restored truth.
-        using var proxyNotice = ProxyNoticeScope.Enter();
+        // fix-smoke-20261029-r2 D10 + review-wp2-r1 finding 5: a DWG with proxy objects
+        // raises the modal "Proxy Information" dialog during DxfIn/ReadDwgFile/Insert/
+        // AttachXref and wedges every later pipe call. PROXYNOTICE=0 for the whole
+        // foreign-database section, restored on Dispose — and the call fails closed with
+        // proxynotice_scope_failed when it cannot be applied (no foreign load without
+        // suppression).
+        using var proxyNotice = ProxyNoticeScope.EnterOrFail(command, out var scopeFailure);
+        if (scopeFailure is not null)
+        {
+            return scopeFailure;
+        }
         var phase = Stopwatch.StartNew();
         using var side = new Database(false, true);
         string? dxfLog = null;

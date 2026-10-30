@@ -65,8 +65,14 @@ public sealed partial class PluginCommandProcessor
         var filter = WildcardSet.Parse(args.Filter);
         var watch = Stopwatch.StartNew();
         var db = ActiveDb;
-        // D10: reading the template DWG loads a foreign database — suppress the proxy dialog.
-        using var proxyNotice = ProxyNoticeScope.Enter();
+        // D10 + r1 finding 5: reading the template DWG loads a foreign database — fail
+        // closed when the proxy dialog cannot be suppressed.
+        using var proxyNotice = ProxyNoticeScope.EnterOrFail(command, out var scopeFailure);
+        if (scopeFailure is not null)
+        {
+            return scopeFailure;
+        }
+
         using var side = new Database(false, true);
         try
         {

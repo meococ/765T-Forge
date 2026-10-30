@@ -135,22 +135,44 @@ public sealed class D10ScopedSysvarTests
     }
 
     [Fact]
-    public void SourceGuardEveryForeignDatabaseLoadRunsUnderTheScope()
+    public void SourceGuardEveryForeignDatabaseLoadFailsClosed()
     {
+        // review-wp2-r1 finding 5 (D10): no foreign load without suppression — every
+        // load-bearing call site goes through EnterOrFail and returns proxynotice_scope_failed
+        // instead of loading unguarded when the sysvar cannot be read/set.
         var pluginDir = PluginDispatchSyncTests.RepoPath("src", "Forge.Plugin");
         var import = File.ReadAllText(Path.Combine(pluginDir, "PluginCommandProcessor.Import.cs"));
         var processor = File.ReadAllText(Path.Combine(pluginDir, "PluginCommandProcessor.cs"));
         var dgn = File.ReadAllText(Path.Combine(pluginDir, "PluginCommandProcessor.Dgn.cs"));
+        var standards = File.ReadAllText(Path.Combine(pluginDir, "PluginCommandProcessor.Standards.cs"));
+        var sheets = File.ReadAllText(Path.Combine(pluginDir, "PluginCommandProcessor.Sheets.cs"));
+        var qa = File.ReadAllText(Path.Combine(pluginDir, "PluginCommandProcessor.QaAndPublish.cs"));
+        var bulk = File.ReadAllText(Path.Combine(pluginDir, "PluginCommandProcessor.BulkInsert.cs"));
 
-        // The single suppression point in the plugin feeds every call site below.
+        // The single suppression point emits the typed failure.
         Assert.Contains("ScopedSysvar.Set(", processor, StringComparison.Ordinal);
         Assert.Contains("\"PROXYNOTICE\"", processor, StringComparison.Ordinal);
-        // doc_import covers DxfIn/ReadDwgFile, Insert, AttachXref/OverlayXref in one scope.
-        Assert.Contains("ProxyNoticeScope.Enter()", import, StringComparison.Ordinal);
-        // xref reload / repath-reload / page-setup / doc-open load foreign databases too.
-        var scopeCalls = processor.Split("ProxyNoticeScope.Enter()", StringSplitOptions.None).Length - 1;
-        Assert.True(scopeCalls >= 4, $"ReloadXrefs, RepathXref, PageSetupImport and OpenDocument all enter the PROXYNOTICE scope (found {scopeCalls})");
-        // -DGNIMPORT converts a foreign file in a temporary document.
-        Assert.Contains("ProxyNoticeScope.Enter()", dgn, StringComparison.Ordinal);
+        Assert.Contains("proxynotice_scope_failed", processor, StringComparison.Ordinal);
+        // The permissive Enter() is gone — nothing may enter a scope it cannot verify.
+        foreach (var (name, source) in new[]
+        {
+            ("processor", processor), ("import", import), ("dgn", dgn),
+            ("standards", standards), ("sheets", sheets), ("qa", qa), ("bulk", bulk)
+        })
+        {
+            Assert.DoesNotContain("ProxyNoticeScope.Enter()", source, StringComparison.Ordinal);
+            Assert.Contains("ProxyNoticeScope.EnterOrFail(", source, StringComparison.Ordinal);
+        }
+
+        // The 11 load-bearing sites: doc_open, xref_reload, repath reload + page-setup import
+        // (processor); doc_import (import); -DGNIMPORT (dgn); standards import (standards);
+        // doc_new — unconditional, template or not (sheets); xref normalize reload +
+        // pack-and-go (qa); library-DWG read (bulk).
+        Assert.True(processor.Split("EnterOrFail(", StringSplitOptions.None).Length - 1 >= 5,
+            "doc_open, xref_reload, repath reload and page-setup import must each enter the fail-closed scope");
+        Assert.Contains("Documents.Add(args.TemplatePath ?? \"\")", sheets, StringComparison.Ordinal);
+        Assert.DoesNotContain("args.TemplatePath is null ? null", sheets, StringComparison.Ordinal);
+        Assert.True(qa.Split("EnterOrFail(", StringSplitOptions.None).Length - 1 >= 2,
+            "xref normalize reload and pack-and-go must each enter the fail-closed scope");
     }
 }

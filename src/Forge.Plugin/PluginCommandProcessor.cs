@@ -555,8 +555,14 @@ public sealed partial class PluginCommandProcessor
         }
         else
         {
-            // D10: opening a proxy DWG could show the modal Proxy Information dialog too.
-            using var proxyNotice = ProxyNoticeScope.Enter();
+            // D10 + r1 finding 5: opening a proxy DWG could show the modal Proxy Information
+            // dialog — fail closed when it cannot be suppressed.
+            using var proxyNotice = ProxyNoticeScope.EnterOrFail(command, out var scopeFailure);
+            if (scopeFailure is not null)
+            {
+                return scopeFailure;
+            }
+
             var previousFileDia = Application.GetSystemVariable("FILEDIA");
             try
             {
@@ -828,8 +834,14 @@ public sealed partial class PluginCommandProcessor
             return DryRun(command, new { args.Name, count = ids.Count });
         }
 
-        // D10: reloading an xref loads a foreign database — suppress the proxy dialog.
-        using var proxyNotice = ProxyNoticeScope.Enter();
+        // D10 + r1 finding 5: reloading an xref loads a foreign database — fail closed
+        // when the proxy dialog cannot be suppressed.
+        using var proxyNotice = ProxyNoticeScope.EnterOrFail(command, out var scopeFailure);
+        if (scopeFailure is not null)
+        {
+            return scopeFailure;
+        }
+
         ActiveDb.ReloadXrefs(ids);
         tr.Commit();
         return ForgeResult.Success(command.Id, new { reloaded = ids.Count, proxynotice = proxyNotice }, verification: new ForgeVerification { Attempted = true, Passed = true, ReadBack = ReadXrefs() });
@@ -865,15 +877,21 @@ public sealed partial class PluginCommandProcessor
         ProxyNoticeScope? proxyNotice = null;
         if (args.Reload)
         {
-            // D10: the reload loads a foreign database — suppress the proxy dialog.
-            proxyNotice = ProxyNoticeScope.Enter();
+            // D10 + r1 finding 5: the reload loads a foreign database — fail closed. The
+            // repath above is already committed, so the failure carries that truth.
+            proxyNotice = ProxyNoticeScope.EnterOrFail(command, out var scopeFailure, new { repathed = args.Name, repathCommitted = true });
+            if (scopeFailure is not null)
+            {
+                return scopeFailure;
+            }
+
             try
             {
                 ActiveDb.ReloadXrefs(ids);
             }
             finally
             {
-                proxyNotice.Dispose();
+                proxyNotice?.Dispose();
             }
         }
 
@@ -1181,8 +1199,14 @@ public sealed partial class PluginCommandProcessor
             return DryRun(command, new { args.TemplatePath, args.SetupName, mode = "sync_copy_preferred" });
         }
 
-        // D10: reading the template DWG loads a foreign database — suppress the proxy dialog.
-        using var proxyNotice = ProxyNoticeScope.Enter();
+        // D10 + r1 finding 5: reading the template DWG loads a foreign database — fail
+        // closed when the proxy dialog cannot be suppressed.
+        using var proxyNotice = ProxyNoticeScope.EnterOrFail(command, out var scopeFailure);
+        if (scopeFailure is not null)
+        {
+            return scopeFailure;
+        }
+
         try
         {
             using var sourceDb = new Database(false, true);
@@ -1226,6 +1250,10 @@ public sealed partial class PluginCommandProcessor
         catch (System.Exception ex)
         {
             // Fall back to classic command queue — honesty flags required.
+            // r1 finding 8 (D10 gap, documented): the queued -PSETUPIN runs AFTER this call
+            // returns and the PROXYNOTICE scope has disposed, so the proxy dialog is NOT
+            // suppressed on this path — a template DWG with proxies can still raise it.
+            // The sync Database path above is the scoped one; callers should prefer it.
             ActiveDoc.SendStringToExecute($"_.-PSETUPIN \"{EscapeCommand(args.TemplatePath)}\" \"{EscapeCommand(args.SetupName)}\" ", true, false, false);
             return ForgeResult.Success(command.Id, new
             {
@@ -1832,44 +1860,63 @@ public sealed partial class PluginCommandProcessor
     /// AutoCAD raises the modal "Proxy Information" dialog and every later pipe call waits
     /// out the timeout until a human clicks OK. The serialized report reads the scope's
     /// final state (the result leaves the method after Dispose ran), so `restored` is the
-    /// truth rather than a plan; `error` records a suppression that could not be applied.
+    /// truth rather than a plan. review-wp2-r1 finding 5: entry fails closed — a
+    /// proxynotice_scope_failed is returned instead of loading unguarded.
     /// </summary>
     private sealed class ProxyNoticeScope : IDisposable
     {
-        private readonly ScopedSysvar? _scope;
+        /// <summary>review-wp2-r1 finding 5 (D10): the typed failure when suppression cannot be applied.</summary>
+        public const string ScopeFailedCode = "proxynotice_scope_failed";
 
-        private ProxyNoticeScope(ScopedSysvar? scope, string? error)
+        private readonly ScopedSysvar _scope;
+
+        private ProxyNoticeScope(ScopedSysvar scope)
         {
             _scope = scope;
-            Error = error;
         }
 
-        public bool Applied => _scope?.Applied ?? false;
-        public bool Restored => _scope?.Restored ?? false;
-        public object? Original => _scope?.Original;
-        public string? Error { get; }
+        public bool Applied => _scope.Applied;
+        public bool Restored => _scope.Restored;
+        public object? Original => _scope.Original;
+        public string? Error => null;
 
-        public static ProxyNoticeScope Enter()
+        /// <summary>Throws when PROXYNOTICE cannot be read or written — callers go through <see cref="EnterOrFail"/>.</summary>
+        private static ProxyNoticeScope Enter()
+        {
+            return new ProxyNoticeScope(
+                ScopedSysvar.Set(
+                    "PROXYNOTICE",
+                    0,
+                    name => Application.GetSystemVariable(name),
+                    (name, value) => Application.SetSystemVariable(name, value)));
+        }
+
+        /// <summary>
+        /// review-wp2-r1 finding 5 (D10): fail closed — when PROXYNOTICE cannot be read or
+        /// written the foreign load must NOT proceed (no foreign load without suppression;
+        /// the r1 code proceeded and only reported a dead scope). Returns the scope and null
+        /// on success; null + the typed proxynotice_scope_failed result otherwise.
+        /// </summary>
+        public static ProxyNoticeScope? EnterOrFail(ForgeCommand command, out ForgeResult? failure, object? failureData = null)
         {
             try
             {
-                return new ProxyNoticeScope(
-                    ScopedSysvar.Set(
-                        "PROXYNOTICE",
-                        0,
-                        name => Application.GetSystemVariable(name),
-                        (name, value) => Application.SetSystemVariable(name, value)),
-                    null);
+                failure = null;
+                return Enter();
             }
             catch (System.Exception ex)
             {
-                // The sysvar could not be read/written: proceed anyway — the result reports
-                // the failed scope so a later proxy dialog is diagnosable instead of silent.
-                return new ProxyNoticeScope(null, ex.Message);
+                failure = ForgeResult.Failure(
+                    command.Id,
+                    ScopeFailedCode,
+                    $"PROXYNOTICE could not be suppressed: {ex.Message}",
+                    "No foreign load was attempted — the call is safe to retry once system variables respond.",
+                    data: failureData);
+                return null;
             }
         }
 
-        public void Dispose() => _scope?.Dispose();
+        public void Dispose() => _scope.Dispose();
     }
 }
 
