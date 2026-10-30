@@ -17,6 +17,25 @@ public enum PlotAreaKind
     View
 }
 
+/// <summary>
+/// live-smoke-20261030 fix4 (D12): a paper layout's stored plot type, carried by NAME.
+/// AutoCAD's managed Autodesk.AutoCAD.DatabaseServices.PlotType is 0-based
+/// (Display=0, Extents=1, Limits=2, View=3, Window=4, Layout=5) — one below the 1-based
+/// ActiveX AcPlotType numbering the r2 code assumed (live readback: a stored Window read
+/// 4, a stored View 3, a stored Layout 5). Forge.Shared cannot reference the AutoCAD
+/// assemblies (ServerOnly CI), so the plugin converts member-by-member by name and no int
+/// ever crosses this boundary.
+/// </summary>
+public enum StoredPlotType
+{
+    Display,
+    Extents,
+    Limits,
+    View,
+    Window,
+    Layout
+}
+
 /// <summary>Parsed plot scale: fit-to-sheet, or paper units : drawing units.</summary>
 public readonly record struct PlotScaleSpec(bool Fit, double PaperUnits, double DrawingUnits)
 {
@@ -212,16 +231,16 @@ public static class PlotLayoutMath
     /// <summary>
     /// fix-smoke-20261029-r2 D12: chooses the plot area. An explicit caller area always wins;
     /// Model keeps the extents default; a PAPER layout with no caller area falls back to its
-    /// own stored plot type (AcPlotType int: Display=1, Extents=2, Limits=3, View=4, Window=5,
-    /// Layout=6 — stored Window carries the layout's stored window box, stored View needs its
-    /// stored view name), and only when the stored type is unusable do the media/default rules
-    /// apply. The stored-window case is what the r2 smoke missed: AEON sheets store Window and
-    /// the old code silently plotted "layout" into an empty PDF.
+    /// own stored plot type (<see cref="StoredPlotType"/> by name — stored Window carries the
+    /// layout's stored window box, stored View needs its stored view name), and only when the
+    /// stored type is unusable do the media/default rules apply. The stored-window case is
+    /// what the r2 smoke missed: AEON sheets store Window and the old code silently plotted
+    /// "layout" into an empty PDF.
     /// </summary>
     public static PlotAreaResolution ResolveArea(
         PlotAreaKind? requested,
         bool isModel,
-        int? storedPlotType,
+        StoredPlotType? storedPlotType,
         double[]? storedWindow,
         string? storedViewName,
         bool mediaChanged)
@@ -238,12 +257,12 @@ public static class PlotLayoutMath
 
         var storedKind = storedPlotType switch
         {
-            1 => PlotAreaKind.Display,
-            2 => PlotAreaKind.Extents,
-            3 => PlotAreaKind.Limits,
-            4 when !string.IsNullOrWhiteSpace(storedViewName) => PlotAreaKind.View,
-            5 when storedWindow is { Length: 4 } w && w[2] - w[0] > 0 && w[3] - w[1] > 0 => PlotAreaKind.Window,
-            6 => PlotAreaKind.Layout,
+            StoredPlotType.Display => PlotAreaKind.Display,
+            StoredPlotType.Extents => PlotAreaKind.Extents,
+            StoredPlotType.Limits => PlotAreaKind.Limits,
+            StoredPlotType.View when !string.IsNullOrWhiteSpace(storedViewName) => PlotAreaKind.View,
+            StoredPlotType.Window when storedWindow is { Length: 4 } w && w[2] - w[0] > 0 && w[3] - w[1] > 0 => PlotAreaKind.Window,
+            StoredPlotType.Layout => PlotAreaKind.Layout,
             _ => (PlotAreaKind?)null
         };
 

@@ -482,14 +482,26 @@ public sealed partial class PluginCommandProcessor
         // wins (AEON sheets store Window + a stored window; the old default silently plotted
         // "layout" and produced an empty PDF). Stored type/window/view read is best-effort —
         // an unreadable stored setup falls back to the previous defaults.
-        int? storedPlotType = null;
+        StoredPlotType? storedPlotType = null;
         double[]? storedWindowBox = null;
         string? storedViewName = null;
         if (!isModel)
         {
             try
             {
-                storedPlotType = (int)layout.PlotType;
+                // live-smoke-20261030 fix4 (D12): layout.PlotType is the managed, 0-based
+                // Autodesk.AutoCAD.DatabaseServices.PlotType — NOT the 1-based ActiveX
+                // AcPlotType. Convert member-by-member by name; never cast it to int.
+                storedPlotType = layout.PlotType switch
+                {
+                    AcPlotType.Display => StoredPlotType.Display,
+                    AcPlotType.Extents => StoredPlotType.Extents,
+                    AcPlotType.Limits => StoredPlotType.Limits,
+                    AcPlotType.View => StoredPlotType.View,
+                    AcPlotType.Window => StoredPlotType.Window,
+                    AcPlotType.Layout => StoredPlotType.Layout,
+                    _ => null
+                };
                 var wa = layout.PlotWindowArea;
                 storedWindowBox = [wa.MinPoint.X, wa.MinPoint.Y, wa.MaxPoint.X, wa.MaxPoint.Y];
                 storedViewName = layout.PlotViewName;
@@ -768,7 +780,7 @@ public sealed partial class PluginCommandProcessor
             paperUnits = validated.PlotPaperUnits.ToString(),
             plotArea = area.ToString().ToLowerInvariant(),
             plotAreaSource = areaSource,
-            storedPlotType,
+            storedPlotType = storedPlotType?.ToString(),
             storedViewName,
             window,
             plotAreaBox = areaBox,

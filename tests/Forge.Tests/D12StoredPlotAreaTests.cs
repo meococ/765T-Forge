@@ -6,7 +6,10 @@ namespace Forge.Tests;
 /// smoke r2 D12: with no caller plotArea the layout's stored plot type wins (AEON sheets
 /// store Window + a stored window) — the default must not silently become layout/extents —
 /// and a PDF that comes out EMPTY is a failure, never a warning.
-/// AcPlotType ints: Display=1, Extents=2, Limits=3, View=4, Window=5, Layout=6.
+/// live-smoke-20261030 fix4: the stored type arrives as <see cref="StoredPlotType"/> BY NAME —
+/// the managed PlotType is 0-based (Display=0 … Layout=5), NOT the 1-based ActiveX AcPlotType
+/// the r2 int mapping assumed (stored Window read 4 → was resolved as View, stored View 3 →
+/// Limits → eInvalidInput, stored Layout 5 → Window).
 /// </summary>
 public sealed class D12StoredPlotAreaTests
 {
@@ -15,7 +18,7 @@ public sealed class D12StoredPlotAreaTests
     [Fact]
     public void AnExplicitCallerAreaAlwaysWins()
     {
-        var r = PlotLayoutMath.ResolveArea(PlotAreaKind.Layout, false, 5, SheetWindow, null, false);
+        var r = PlotLayoutMath.ResolveArea(PlotAreaKind.Layout, false, StoredPlotType.Window, SheetWindow, null, false);
         Assert.Equal(PlotAreaKind.Layout, r.Area);
         Assert.Equal("requested", r.Source);
         Assert.Null(r.Window);
@@ -24,7 +27,7 @@ public sealed class D12StoredPlotAreaTests
     [Fact]
     public void ModelKeepsTheExtentsDefaultRegardlessOfStoredType()
     {
-        var r = PlotLayoutMath.ResolveArea(null, true, 5, SheetWindow, null, false);
+        var r = PlotLayoutMath.ResolveArea(null, true, StoredPlotType.Window, SheetWindow, null, false);
         Assert.Equal(PlotAreaKind.Extents, r.Area);
         Assert.Equal("default_model_extents", r.Source);
     }
@@ -32,7 +35,7 @@ public sealed class D12StoredPlotAreaTests
     [Fact]
     public void StoredWindowPlotsTheStoredWindow()
     {
-        var r = PlotLayoutMath.ResolveArea(null, false, 5, SheetWindow, null, false);
+        var r = PlotLayoutMath.ResolveArea(null, false, StoredPlotType.Window, SheetWindow, null, false);
         Assert.Equal(PlotAreaKind.Window, r.Area);
         Assert.Equal("stored", r.Source);
         Assert.Equal(SheetWindow, r.Window);
@@ -43,7 +46,7 @@ public sealed class D12StoredPlotAreaTests
     {
         // D9+D12 together: stored media was mapped to a same-size device medium — the stored
         // window is still the layout's own intent and must not be replaced by extents.
-        var r = PlotLayoutMath.ResolveArea(null, false, 5, SheetWindow, null, true);
+        var r = PlotLayoutMath.ResolveArea(null, false, StoredPlotType.Window, SheetWindow, null, true);
         Assert.Equal(PlotAreaKind.Window, r.Area);
         Assert.Equal("stored", r.Source);
     }
@@ -52,26 +55,38 @@ public sealed class D12StoredPlotAreaTests
     public void ADegenerateStoredWindowFallsBackToDefaults()
     {
         var degenerate = new[] { 10.0, 20.0, 10.0, 260.0 }; // zero width
-        Assert.Equal(PlotAreaKind.Layout, PlotLayoutMath.ResolveArea(null, false, 5, degenerate, null, false).Area);
-        Assert.Equal(PlotAreaKind.Extents, PlotLayoutMath.ResolveArea(null, false, 5, degenerate, null, true).Area);
-        Assert.Equal(PlotAreaKind.Layout, PlotLayoutMath.ResolveArea(null, false, 5, null, null, false).Area);
+        Assert.Equal(PlotAreaKind.Layout, PlotLayoutMath.ResolveArea(null, false, StoredPlotType.Window, degenerate, null, false).Area);
+        Assert.Equal(PlotAreaKind.Extents, PlotLayoutMath.ResolveArea(null, false, StoredPlotType.Window, degenerate, null, true).Area);
+        Assert.Equal(PlotAreaKind.Layout, PlotLayoutMath.ResolveArea(null, false, StoredPlotType.Window, null, null, false).Area);
     }
 
     [Theory]
-    [InlineData(6, PlotAreaKind.Layout)]
-    [InlineData(2, PlotAreaKind.Extents)]
-    [InlineData(1, PlotAreaKind.Display)]
-    [InlineData(3, PlotAreaKind.Limits)]
-    public void StoredAreaKindsMapThrough(int storedType, PlotAreaKind expected)
+    [InlineData(StoredPlotType.Layout, PlotAreaKind.Layout)]
+    [InlineData(StoredPlotType.Extents, PlotAreaKind.Extents)]
+    [InlineData(StoredPlotType.Display, PlotAreaKind.Display)]
+    [InlineData(StoredPlotType.Limits, PlotAreaKind.Limits)]
+    public void StoredAreaKindsMapThrough(StoredPlotType storedType, PlotAreaKind expected)
         => Assert.Equal(expected, PlotLayoutMath.ResolveArea(null, false, storedType, null, null, false).Area);
+
+    [Fact]
+    public void AStoredLayoutIgnoresALeftoverWindowBox()
+    {
+        // live-smoke-20261030 fix4: a layout stored as Layout can still carry a stale window
+        // box; it must resolve to Layout, never to Window (the r2 off-by-one plotted it as
+        // Window with whatever box was left over).
+        var r = PlotLayoutMath.ResolveArea(null, false, StoredPlotType.Layout, SheetWindow, null, false);
+        Assert.Equal(PlotAreaKind.Layout, r.Area);
+        Assert.Equal("stored", r.Source);
+        Assert.Null(r.Window);
+    }
 
     [Fact]
     public void StoredNamedViewNeedsTheStoredViewName()
     {
-        Assert.Equal(PlotAreaKind.View, PlotLayoutMath.ResolveArea(null, false, 4, null, "SHEET-01", false).Area);
+        Assert.Equal(PlotAreaKind.View, PlotLayoutMath.ResolveArea(null, false, StoredPlotType.View, null, "SHEET-01", false).Area);
         // A stored View without a name cannot be applied: defaults instead of guessing.
-        Assert.Equal(PlotAreaKind.Layout, PlotLayoutMath.ResolveArea(null, false, 4, null, null, false).Area);
-        Assert.Equal(PlotAreaKind.Layout, PlotLayoutMath.ResolveArea(null, false, 4, null, " ", false).Area);
+        Assert.Equal(PlotAreaKind.Layout, PlotLayoutMath.ResolveArea(null, false, StoredPlotType.View, null, null, false).Area);
+        Assert.Equal(PlotAreaKind.Layout, PlotLayoutMath.ResolveArea(null, false, StoredPlotType.View, null, " ", false).Area);
     }
 
     [Fact]
@@ -79,7 +94,6 @@ public sealed class D12StoredPlotAreaTests
     {
         Assert.Equal(PlotAreaKind.Extents, PlotLayoutMath.ResolveArea(null, false, null, null, null, true).Area);
         Assert.Equal(PlotAreaKind.Layout, PlotLayoutMath.ResolveArea(null, false, null, null, null, false).Area);
-        Assert.Equal(PlotAreaKind.Layout, PlotLayoutMath.ResolveArea(null, false, 0, null, null, false).Area);
     }
 }
 
@@ -240,8 +254,25 @@ public sealed class D12StoredPlotAreaSourceGuards
         var source = PlotSource();
         Assert.Contains("PlotLayoutMath.ResolveArea(", source, StringComparison.Ordinal);
         Assert.Contains("layout.PlotWindowArea", source, StringComparison.Ordinal);
-        Assert.Contains("(int)layout.PlotType", source, StringComparison.Ordinal);
+        Assert.Contains("layout.PlotType switch", source, StringComparison.Ordinal);
+        Assert.Contains("storedPlotType = storedPlotType?.ToString()", source, StringComparison.Ordinal);
         Assert.Contains("AcPlotType.View", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheStoredPlotTypeIsConvertedByNameNeverCastToInt()
+    {
+        // live-smoke-20261030 fix4: the managed PlotType is 0-based but the r2 code read it
+        // through the 1-based ActiveX AcPlotType numbering — stored Window resolved as View,
+        // stored View as Limits (eInvalidInput), stored Layout as Window. The enum must be
+        // converted member-by-member by name; an int cast must never come back.
+        var source = PlotSource();
+        Assert.DoesNotContain("(int)layout.PlotType", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("Convert.ToInt32(layout.PlotType", source, StringComparison.Ordinal);
+        foreach (var member in new[] { "Display", "Extents", "Limits", "View", "Window", "Layout" })
+        {
+            Assert.Contains($"AcPlotType.{member} => StoredPlotType.{member}", source, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
