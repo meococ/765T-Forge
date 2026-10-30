@@ -1,5 +1,27 @@
 namespace Forge.Shared;
 
+/// <summary>fix-smoke-20261029-r2 D13: where a tool call is dispatched for a given document state.</summary>
+public enum DocDispatchDecision
+{
+    /// <summary>Document lifecycle tool: always the application-context Idle marshal.</summary>
+    ApplicationLane,
+
+    /// <summary>Document-free tool, zero open documents: the zero-document answer (synthesized where possible).</summary>
+    ZeroDocumentLane,
+
+    /// <summary>Document-free tool, documents open but none active: the Idle marshal (no command context needed).</summary>
+    IdleLane,
+
+    /// <summary>Zero open documents: a command context cannot exist — fail fast with no_active_document.</summary>
+    FailNoActiveDocument,
+
+    /// <summary>Documents exist but none is active: a command context cannot exist — fail fast with no_command_context.</summary>
+    FailNoCommandContext,
+
+    /// <summary>An active document exists: run in its command context.</summary>
+    CommandContext
+}
+
 /// <summary>
 /// fix-smoke-20261029 D1: tools that create, open, switch or close documents must run in AutoCAD's
 /// application context (the plugin's Application.Idle lane). Inside a document's command context AutoCAD
@@ -13,6 +35,18 @@ public static class DocumentContextPolicy
         "forge_doc_close",
         "forge_doc_new",
         "forge_doc_open"
+    };
+
+    /// <summary>
+    /// smoke-r2 D13: tools that answer while AutoCAD sits on the Start tab. With zero documents
+    /// they take the zero-document lane (health/doc_list_open get a synthesized answer, version the
+    /// idle marshal); with documents open but none active they ride the Idle marshal.
+    /// </summary>
+    public static readonly IReadOnlySet<string> ZeroDocumentTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "forge_system_health",
+        "forge_system_version",
+        "forge_doc_list_open"
     };
 
     /// <summary>Tools that create, open or close a drawing: they may need longer than a plain switch to settle.</summary>
@@ -38,6 +72,52 @@ public static class DocumentContextPolicy
     public const int LifecycleDeadlineMarginMs = 5000;
 
     public static bool RunsInApplicationContext(string tool) => ApplicationContextTools.Contains(tool);
+
+    /// <summary>
+    /// smoke-r2 D13 decision table: tool x open-document count x active document -> dispatch lane or
+    /// fail-fast code. Zero documents means a command context can never exist, so document tools fail
+    /// immediately (no_active_document) instead of waiting out the request deadline; documents open
+    /// but none active keep the no_command_context refusal for the same reason; the lifecycle tools
+    /// always take the application lane and the Start-tab diagnostics take the document-free lanes.
+    /// </summary>
+    public static DocDispatchDecision Route(string tool, int documentCount, bool hasActiveDocument)
+    {
+        if (RunsInApplicationContext(tool))
+        {
+            return DocDispatchDecision.ApplicationLane;
+        }
+
+        if (!hasActiveDocument)
+        {
+            if (ZeroDocumentTools.Contains(tool))
+            {
+                return documentCount == 0 ? DocDispatchDecision.ZeroDocumentLane : DocDispatchDecision.IdleLane;
+            }
+
+            return documentCount == 0 ? DocDispatchDecision.FailNoActiveDocument : DocDispatchDecision.FailNoCommandContext;
+        }
+
+        return DocDispatchDecision.CommandContext;
+    }
+
+    /// <summary>
+    /// The zero-document lane answer for a Start-tab tool, or null when the tool needs the Idle
+    /// marshal instead (forge_system_version reports host build data only AutoCAD can give).
+    /// </summary>
+    public static ForgeResult? ZeroDocumentAnswer(string commandId, string tool)
+        => tool.ToLowerInvariant() switch
+        {
+            "forge_system_health" => ForgeResult.Success(commandId, new
+            {
+                status = "ok",
+                server = ForgeConstants.ServerName,
+                documents = 0,
+                activeDocument = (string?)null,
+                hint = "AutoCAD is on the Start tab with no drawing open. Call forge_doc_new or forge_doc_open before using document tools; forge_system_health, forge_system_version and forge_doc_list_open still answer."
+            }),
+            "forge_doc_list_open" => ForgeResult.Success(commandId, new { documents = Array.Empty<object>() }),
+            _ => null
+        };
 
     /// <summary>How long (ms since the request started) the Idle lane may keep re-reading the active document.</summary>
     public static long PollWindowMs(string tool, long requestDeadlineMs)

@@ -10,17 +10,8 @@ namespace Forge.Plugin;
 
 public sealed class NamedPipePluginServer : IDisposable
 {
-    // Tools that answer without any open document (AutoCAD Start tab). Everything else needs a
-    // command context, which only exists with an active document: ExecuteInCommandContextAsync
-    // on a document-free host never dispatches its callback, so without this split the first
-    // call on the Start tab wedged the single pipe instance until AutoCAD restarted.
-    private static readonly HashSet<string> DocumentFreeTools = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "forge_system_health",
-        "forge_system_version",
-        "forge_doc_list_open",
-    };
-
+    // Document-free dispatch is decided by Forge.Shared.DocumentContextPolicy.Route (D13): the
+    // Start-tab tool set, the zero-document answer and both fail-fast codes live there.
     private readonly ForgeEnvironment _environment;
     private readonly PluginCommandProcessor _processor;
     private readonly CancellationTokenSource _shutdown = new();
@@ -235,37 +226,45 @@ public sealed class NamedPipePluginServer : IDisposable
 
     private Task<ForgeResult> ExecuteOnMainThreadAsync(ForgeCommand command)
     {
-        if (DocumentContextPolicy.RunsInApplicationContext(command.Tool))
+        // smoke-r2 D13: the Shared decision table decides BEFORE any marshal. Zero documents means a
+        // command context can never exist, so document tools fail fast instead of wedging the pipe
+        // for the whole timeout; Start-tab diagnostics get their zero-document answer; a missing
+        // active document with open documents keeps the no_command_context refusal. The dispatch
+        // itself must never depend on AutoCAD going idle.
+        var documentCount = Application.DocumentManager.Count;
+        var hasActiveDocument = Application.DocumentManager.MdiActiveDocument is not null;
+        switch (DocumentContextPolicy.Route(command.Tool, documentCount, hasActiveDocument))
         {
-            // Creating, opening or switching the active drawing must happen in application context,
-            // never inside a document command context (AutoCAD defers the switch until that command
-            // ends; fix-smoke-20261029 D1) — and it must work from the Start tab too.
-            return ExecuteDocActivateWhenIdleAsync(command);
-        }
+            case DocDispatchDecision.ApplicationLane:
+                // Creating, opening or switching the active drawing must happen in application
+                // context, never inside a document command context (fix-smoke-20261029 D1).
+                return ExecuteDocActivateWhenIdleAsync(command);
 
-        if (Application.DocumentManager.MdiActiveDocument is null)
-        {
-            if (DocumentFreeTools.Contains(command.Tool))
-            {
-                // Diagnostics answer on the Start tab by riding the main thread's idle pump —
-                // there is no command context to marshal into without a document.
+            case DocDispatchDecision.ZeroDocumentLane:
+                return DocumentContextPolicy.ZeroDocumentAnswer(command.Id, command.Tool) is { } answer
+                    ? Task.FromResult(answer)
+                    : ExecuteWhenIdleAsync(command);
+
+            case DocDispatchDecision.IdleLane:
                 return ExecuteWhenIdleAsync(command);
-            }
 
-            if (Application.DocumentManager.Count == 0)
-            {
+            case DocDispatchDecision.FailNoActiveDocument:
+                return Task.FromResult(ForgeResult.Failure(
+                    command.Id,
+                    "no_active_document",
+                    "AutoCAD has no open document (Start tab): there is no document to run this tool on.",
+                    "Create or open a drawing first (forge_doc_new, forge_doc_open), then retry; forge_system_health, forge_system_version and forge_doc_list_open still answer."));
+
+            case DocDispatchDecision.FailNoCommandContext:
                 return Task.FromResult(ForgeResult.Failure(
                     command.Id,
                     "no_command_context",
-                    "AutoCAD has no open document (Start tab): there is no command context to execute this tool in.",
-                    "Open a drawing in AutoCAD first (forge_doc_open also needs a document), then retry; forge_system_health, forge_system_version and forge_doc_list_open still answer."));
-            }
+                    "Documents are open but none is active (the Start tab has focus): there is no command context to execute this tool in.",
+                    "Activate a drawing first (forge_doc_activate) or click its window in AutoCAD, then retry."));
 
-            // Documents are open but none is active (Start tab focused): still try the command
-            // context — if the host wedges, the watchdog answers and the pipe keeps serving.
+            default:
+                return ExecuteInCommandContextAsync(command);
         }
-
-        return ExecuteInCommandContextAsync(command);
     }
 
     private Task<ForgeResult> ExecuteInCommandContextAsync(ForgeCommand command)
