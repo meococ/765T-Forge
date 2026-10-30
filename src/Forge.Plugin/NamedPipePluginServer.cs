@@ -498,36 +498,76 @@ public sealed class NamedPipePluginServer : IDisposable
 
                     if (!dgnRun.ContextRestored)
                     {
-                        // D14-quiescence: the leg queued its destructive half onto the
-                        // application context; it lands only after the command session
-                        // fully unwound. Answering before ContextRestored is exactly the
-                        // mid-teardown close that wedged quiescence
+                        // D14-quiescence: the leg queued its ordering proof + sysvar
+                        // restore onto the application context; it lands only after the
+                        // command session fully unwound. Answering before ContextRestored
+                        // is exactly the mid-teardown close that wedged quiescence
                         // (artifacts/d14/fail-evidence-20261030.md) — keep waiting, bounded
                         // by the same deadline as the leg itself.
                         if (Environment.TickCount64 - startedAt >= staleAfterMs)
                         {
                             var stalledRun = dgnRun;
                             dgnRun = null;
-                            // Deliberately NOT removed from _pendingDgnRuns: the queued
-                            // callback still owns the close, and the Terminate drain is the
-                            // fallback if it never lands.
+                            // Deliberately NOT removed from _pendingDgnRuns: nothing owns
+                            // the leftover document's close now (the callback holds only
+                            // sysvars) — the Terminate drain is the fallback.
                             Finish(_processor.EndDgnImport(command, stalledRun, restoreTimedOut: true));
                         }
 
                         return;
                     }
 
-                    // review-d14-r1 F1: clear the field BEFORE EndDgnImport — its document
-                    // close/activate calls can pump a nested Idle tick, which must see
-                    // dgnRun already null (-> first is null -> claimed -> return) instead
-                    // of running a second EndDgnImport. If it throws, the catch below
-                    // reports that failure for this run exactly once.
-                    var finishedRun = dgnRun;
-                    dgnRun = null;
-                    // review-d14-r2 M1: remove only this lane's mirror entry — a
-                    // second import's run may still be pending in the set.
-                    _pendingDgnRuns.Remove(finishedRun);
-                    Finish(_processor.EndDgnImport(command, finishedRun));
+                    if (!dgnRun.SettleArmed)
+                    {
+                        // D14-quiescence r4 (artifacts/d14/fail-evidence-r3-20261031.md):
+                        // CloseAndDiscard can run on an Idle tick (pre-fix evidence) but
+                        // NOT inside the app-context callback and NOT on the tick that
+                        // first observes ContextRestored — r3's in-lane attempt failed
+                        // there too. Arm now and let one full quiescent cycle pass before
+                        // the first close attempt on the NEXT tick.
+                        dgnRun.SettleArmed = true;
+                        return;
+                    }
+
+                    // Settled: attempt the document restore. The close may pump a nested
+                    // Idle raise — RestoreInFlight makes that raise return early instead
+                    // of retrying the same close concurrently.
+                    if (!dgnRun.RestoreInFlight)
+                    {
+                        var closed = false;
+                        dgnRun.RestoreInFlight = true;
+                        try
+                        {
+                            closed = _processor.TryRestoreDgnDocument(dgnRun);
+                        }
+                        finally
+                        {
+                            dgnRun.RestoreInFlight = false;
+                        }
+
+                        if (!closed && Environment.TickCount64 - startedAt < staleAfterMs)
+                        {
+                            // Each settled tick gets a retry until the deadline — extra
+                            // settle cycles cost nothing and the lane never blocks.
+                            return;
+                        }
+
+                        // Close landed, or the deadline ran out (EndDgnImport then maps
+                        // TempClosed:false to dgn_temp_document_leaked — a failure, not
+                        // ok:true with a footnote).
+                        var finishedRun = dgnRun;
+                        dgnRun = null;
+                        if (closed)
+                        {
+                            // review-d14-r2 M1: remove only this lane's mirror entry — a
+                            // second import's run may still be pending in the set. On the
+                            // leaked path the run stays mirrored so the Terminate drain
+                            // can still attempt the leftover document's close.
+                            _pendingDgnRuns.Remove(finishedRun);
+                        }
+                        Finish(_processor.EndDgnImport(command, finishedRun));
+                    }
+
                     return;
                 }
 

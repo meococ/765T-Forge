@@ -27,12 +27,16 @@ namespace Forge.Plugin;
 // Idle tick after the leg flagged LegFinished, which can fall inside the window where the
 // command-context request is still unwinding; AutoCAD reported itself quiescent while the
 // session it belonged to was mid-teardown, the close orphaned it, and AutoCAD never went
-// quiescent again. Two changes close that window: the leg runs synchronous Editor.Command
-// so no nested async command session exists at all, and the destructive half is queued by
-// the leg onto the application context (DocumentCollection.ExecuteInApplicationContext) —
-// dispatched only after the doc-context request has fully completed. The Idle lane answers
-// only once ContextRestored reports the restore landed; EndDgnImport's own restores stay
-// as the idempotent fallback for paths where no restore was queued (context timeout and a
+// quiescent again. The leg therefore runs synchronous Editor.Command (no nested async
+// command session exists at all) and queues ONLY the ordering proof plus the sysvar/scope
+// restore onto the application context (DocumentCollection.ExecuteInApplicationContext) —
+// dispatched strictly after the doc-context request completes. r3 proved the document
+// close cannot complete inside that callback (fail-evidence-r3), so the Idle lane — which
+// demonstrably CAN close on a tick — waits for ContextRestored, lets one full quiescent
+// cycle pass (SettleArmed), then retries TryRestoreDgnDocument on each tick until the
+// deadline; on timeout it answers dgn_temp_document_leaked instead of ok:true, the
+// leftover document staying open for the Terminate drain. EndDgnImport's own restores
+// stay as the idempotent fallback for paths where no restore was queued (context timeout,
 // failed marshal).
 public sealed partial class PluginCommandProcessor
 {
@@ -71,15 +75,28 @@ public sealed partial class PluginCommandProcessor
         // Abandoned is set when the deadline passes before dispatch so a late context grant
         // can never start the write. LegFinished marks the end of the leg's own work;
         // ContextRestored is set by the queued application-context callback after the
-        // destructive half (document close + sysvar/context restore) actually ran — the
-        // lane's proof the command session fully unwound, waited on before EndDgnImport.
+        // sysvar/scope restore ran — the lane's ordering proof that the command session
+        // fully unwound (the r4 callback runs NO document operations: r3 showed
+        // CloseAndDiscard cannot complete inside that boundary). SettleArmed marks the
+        // first ContextRestored-seeing Idle tick — the document close is attempted only
+        // on ticks AFTER it (one full quiescent cycle later), retried until the deadline;
+        // RestoreInFlight guards a nested Idle raise during a pumping close attempt;
+        // SysvarsRestored makes the queued callback skip the sysvar half if the lane
+        // already ran it on a timeout path.
         public bool LegStarted { get; set; }
         public bool LegFinished { get; set; }
         public bool ContextRestored { get; set; }
+        public bool SettleArmed { get; set; }
+        public bool RestoreInFlight { get; set; }
+        public bool SysvarsRestored { get; set; }
         public bool Abandoned { get; set; }
         public bool WrongDocument { get; set; }
         public string? ActiveAtDispatch { get; set; }
         public System.Exception? LegError { get; set; }
+
+        // The temp document's name captured at creation (Document.Name throws on a
+        // disposed/closed document) — used by the leaked-document reporting fields.
+        public string? TempDocName { get; set; }
         public int EntityCount { get; set; }
         public int LayerCount { get; set; }
     }
@@ -188,6 +205,7 @@ public sealed partial class PluginCommandProcessor
             // application-context restore (EndDgnImport where none was queued).
             Application.SetSystemVariable("DGNIMPORTMODE", DgnImportPolicy.ImportIntoCurrentDrawing);
             run.TempDoc = Documents.Add("");
+            run.TempDocName = run.TempDoc.Name;
             Documents.MdiActiveDocument = run.TempDoc;
 
             // -DGNIMPORT prompt order (Autodesk Help, checked 2026-10): filename → design
@@ -243,16 +261,18 @@ public sealed partial class PluginCommandProcessor
                 finally
                 {
                     run.LegFinished = true;
-                    // D14-quiescence: the destructive half (active-doc restore + temp-doc
-                    // CloseAndDiscard + sysvar/scope restore) must not run while this
-                    // command-context request could still be unwinding — an Idle tick ran it
-                    // mid-teardown and AutoCAD never went quiescent again
-                    // (artifacts/d14/fail-evidence-20261030.md). Queue it onto the
-                    // application context: app-context work is dispatched only after this
-                    // request fully completed, so the close lands strictly post-unwind and
-                    // ContextRestored is what the Idle lane waits on before answering.
-                    // Skipped on the Abandoned return — the lane's timeout path already ran
-                    // the cleanup itself, and no restore of a stale previous may land late.
+                    // D14-quiescence r4 (artifacts/d14/fail-evidence-r3-20261031.md): queue
+                    // the ordering proof onto the application context — app-context work is
+                    // dispatched only after this request fully completed, so the callback
+                    // landing is what proves the unwind. The callback runs ONLY the sysvar
+                    // and scope restore plus the ContextRestored flag: r3 showed the
+                    // document half (Previous-activate + CloseAndDiscard) cannot complete
+                    // inside this boundary, so the temp-document close was moved to a
+                    // settled Idle tick — the lane arms on the tick that first sees
+                    // ContextRestored and attempts the close on the next tick, retried
+                    // until the request deadline. Skipped on the Abandoned return — the
+                    // lane's timeout path already ran the cleanup itself, and no restore
+                    // of a stale previous may land late.
                     if (!run.Abandoned)
                     {
                         try
@@ -261,8 +281,14 @@ public sealed partial class PluginCommandProcessor
                             {
                                 try
                                 {
-                                    RestoreDgnContext(run);
-                                    RestoreDgnSysvars(run);
+                                    // Review r1 F2: if a timeout path already restored the
+                                    // sysvars before this callback dispatched, do not
+                                    // stomp anything a user changed after the answer.
+                                    if (!run.SysvarsRestored)
+                                    {
+                                        RestoreDgnSysvars(run);
+                                        run.SysvarsRestored = true;
+                                    }
                                 }
                                 finally
                                 {
@@ -273,7 +299,7 @@ public sealed partial class PluginCommandProcessor
                         catch
                         {
                             // The marshal itself could not be queued — unblock the lane;
-                            // EndDgnImport's own restores are the fallback (pre-fix
+                            // EndDgnImport's own sysvar restore is the fallback (pre-fix
                             // behaviour on a path that cannot normally fail).
                             run.ContextRestored = true;
                         }
@@ -294,8 +320,11 @@ public sealed partial class PluginCommandProcessor
         }
         catch (System.Exception ex)
         {
-            RestoreDgnContext(run);
+            // The leg never queued (marshal threw before the sentinel returned) — no
+            // command session exists, so the synchronous restore is still safe here.
+            TryRestoreDgnDocument(run);
             RestoreDgnSysvars(run);
+            run.SysvarsRestored = true;
             return ForgeResult.Failure(
                 command.Id,
                 "dgn_import_failed",
@@ -306,12 +335,14 @@ public sealed partial class PluginCommandProcessor
 
     /// <summary>
     /// D14: second half of forge_dgn_import, called by the Idle lane once the command leg
-    /// finished and the queued application-context restore landed (or once the deadline
-    /// passed without the leg ever starting). Runs on the application context. On a
-    /// restored run the destructive half already ran inside the queued callback —
-    /// RestoreDgnContext/RestoreDgnSysvars stay idempotent fallbacks for the paths where no
-    /// callback was queued — then the leg outcome is mapped to the same typed results the
-    /// synchronous version returned.
+    /// finished, the queued application-context callback landed (ordering proof), one
+    /// full quiescent cycle passed (SettleArmed), and the settled document restore either
+    /// closed the temp document or the request deadline ran out (or once the deadline
+    /// passed without the leg ever starting). Runs on the application context. The lane
+    /// — not this method — owns the document close on the restored path: r3 showed
+    /// CloseAndDiscard cannot run inside the app-context callback, so the lane attempts
+    /// it on settled ticks only. The sysvar/scope restore stays an idempotent fallback
+    /// here for the paths where no callback was queued.
     /// </summary>
     internal ForgeResult EndDgnImport(ForgeCommand command, DgnImportRun run, bool contextTimedOut = false, bool restoreTimedOut = false)
     {
@@ -319,30 +350,32 @@ public sealed partial class PluginCommandProcessor
         {
             if (restoreTimedOut)
             {
-                // D14-quiescence: the queued application-context restore never dispatched.
-                // The destructive document half stays owned by that callback (and the
-                // Terminate drain) — running CloseAndDiscard here could repeat the exact
-                // mid-teardown close this fixes. The sysvar half is session-independent
-                // and still runs in the finally; the close lands whenever AutoCAD reaches
-                // the next application-context boundary.
+                // D14-quiescence: the queued application-context callback never
+                // dispatched, so ContextRestored never landed — nothing owns the
+                // document close (it is deliberately NOT queued inside the callback:
+                // r3 proved it cannot run there) and running it here could repeat the
+                // mid-teardown close that wedged quiescence. The sysvar half is
+                // session-independent and still runs in the finally; the temp document
+                // stays open and the Terminate drain is the fallback.
                 return FinishDgn(run, ForgeResult.Failure(
                     command.Id,
                     "dgn_context_restore_timeout",
-                    "-DGNIMPORT finished but AutoCAD did not dispatch the queued application-context restore before the request deadline; the temporary document is still open.",
-                    "Its close remains queued and runs when AutoCAD reaches the next application-context boundary (the Terminate drain discards it at program close if it never does). Check for a dialog or a running command holding AutoCAD, then retry.",
-                    data: new { tempDocumentClosed = run.TempClosed }));
+                    "-DGNIMPORT finished but AutoCAD did not dispatch the queued application-context callback before the request deadline; the temporary document is still open.",
+                    $"The leftover document ({run.TempDocName ?? "DrawingN.dwg"}) is empty and unsaved — close it by hand in AutoCAD, or leave it: the plugin's Terminate drain discards it at program close. Check for a dialog or a running command holding AutoCAD, then retry.",
+                    data: new { tempDocumentClosed = run.TempClosed, tempDocumentLeaked = !run.TempClosed, tempDocumentName = run.TempDocName }));
             }
-
-            RestoreDgnContext(run);
 
             if (contextTimedOut)
             {
+                // No command session ever ran, so no session teardown can be orphaned —
+                // the synchronous document restore is still safe on this path.
+                TryRestoreDgnDocument(run);
                 return FinishDgn(run, ForgeResult.Failure(
                     command.Id,
                     "dgn_context_timeout",
                     "AutoCAD did not grant the temporary document's command context before the request deadline; -DGNIMPORT never ran.",
                     "The temporary document was discarded without importing. Retry; if it repeats, a dialog or a running command is likely blocking the command line.",
-                    data: new { tempDocumentClosed = run.TempClosed }));
+                    data: new { tempDocumentClosed = run.TempClosed, tempDocumentLeaked = !run.TempClosed, tempDocumentName = run.TempDocName }));
             }
 
             if (run.WrongDocument)
@@ -352,7 +385,7 @@ public sealed partial class PluginCommandProcessor
                     "dgn_temp_document_not_active",
                     $"The temporary document was not the active document when the command context opened (active: {run.ActiveAtDispatch ?? "<none>"}); -DGNIMPORT was not run.",
                     "Another drawing grabbed activation between document creation and command dispatch. Close modal dialogs or palettes that switch drawings and retry.",
-                    data: new { tempDocumentClosed = run.TempClosed }));
+                    data: new { tempDocumentClosed = run.TempClosed, tempDocumentLeaked = !run.TempClosed, tempDocumentName = run.TempDocName }));
             }
 
             if (run.LegError is { } legError)
@@ -362,7 +395,7 @@ public sealed partial class PluginCommandProcessor
                     "dgn_import_failed",
                     $"-DGNIMPORT failed: {legError.Message}",
                     "Verify the DGN is V8 and not password-protected. A large DGN can also exceed the plugin response timeout — raise FORGE_PLUGIN_RESPONSE_TIMEOUT_SECONDS and retry with the same args.",
-                    data: new { tempDocumentClosed = run.TempClosed }));
+                    data: new { tempDocumentClosed = run.TempClosed, tempDocumentLeaked = !run.TempClosed, tempDocumentName = run.TempDocName }));
             }
 
             if (run.EntityCount == 0)
@@ -372,10 +405,39 @@ public sealed partial class PluginCommandProcessor
                     "dgn_import_empty",
                     $"-DGNIMPORT finished but the fresh document's model space holds 0 entities (dgn: {run.DgnPath}, model: {run.ModelName ?? "<default>"}).",
                     "The DGN may use a differently named design model (pass modelName; the dialog-based DGNIMPORT lists them with '?') or the file may not be a readable V8 DGN.",
-                    data: new { tempDocumentClosed = run.TempClosed }));
+                    data: new { tempDocumentClosed = run.TempClosed, tempDocumentLeaked = !run.TempClosed, tempDocumentName = run.TempDocName }));
             }
 
             var outputBytes = new FileInfo(run.TargetPath).Length;
+            if (!run.TempClosed)
+            {
+                // r4 honest reporting: the import itself succeeded but the settled close
+                // retries never landed before the deadline — surface a distinct failure,
+                // not ok:true with a footnote. The leftover document stays open (the
+                // Terminate drain is the fallback) and the field reports it honestly.
+                return FinishDgn(run, ForgeResult.Failure(
+                    command.Id,
+                    "dgn_temp_document_leaked",
+                    $"-DGNIMPORT completed ({run.EntityCount} entities) but the temporary document ({run.TempDocName ?? "DrawingN.dwg"}) could not be closed before the request deadline.",
+                    "The leftover document is empty and unsaved — close it by hand in AutoCAD, or leave it: the plugin's Terminate drain discards it at program close. A dialog or a running command may have blocked the close; check AutoCAD and retry.",
+                    data: new
+                    {
+                        dgnPath = run.DgnPath,
+                        targetPath = run.TargetPath,
+                        units = run.Units,
+                        modelName = run.ModelName,
+                        entityCount = run.EntityCount,
+                        layerCount = run.LayerCount,
+                        sourceBytes = run.SourceBytes,
+                        outputBytes,
+                        targetBackup = run.TargetBackup,
+                        tempDocumentClosed = run.TempClosed,
+                        tempDocumentLeaked = true,
+                        tempDocumentName = run.TempDocName,
+                        proxynotice = run.ProxyNotice
+                    }));
+            }
+
             return FinishDgn(run, ForgeResult.Success(
                 command.Id,
                 new
@@ -390,6 +452,7 @@ public sealed partial class PluginCommandProcessor
                     outputBytes,
                     targetBackup = run.TargetBackup,
                     tempDocumentClosed = run.TempClosed,
+                    tempDocumentLeaked = false,
                     proxynotice = run.ProxyNotice
                 },
                 verification: new ForgeVerification
@@ -402,7 +465,13 @@ public sealed partial class PluginCommandProcessor
         }
         finally
         {
-            RestoreDgnSysvars(run);
+            // Session-independent half — also stamps SysvarsRestored so a late-landing
+            // queued callback will not rewrite sysvars a user changed after the answer.
+            if (!run.SysvarsRestored)
+            {
+                RestoreDgnSysvars(run);
+                run.SysvarsRestored = true;
+            }
         }
     }
 
@@ -416,26 +485,64 @@ public sealed partial class PluginCommandProcessor
     /// </summary>
     internal void CleanupDgnImport(DgnImportRun run)
     {
-        RestoreDgnContext(run);
+        TryRestoreDgnDocument(run);
         RestoreDgnSysvars(run);
+        run.SysvarsRestored = true;
     }
 
-    // The previous active document first (so the temp close runs on a non-active doc), then
-    // the temp document — both best-effort; tempDocumentClosed reports the truth.
-    private static void RestoreDgnContext(DgnImportRun run)
+    /// <summary>
+    /// The document half of the restore: re-activate the document that was active before
+    /// the temp doc took over, then CloseAndDiscard the temp document. Both best-effort;
+    /// <see cref="DgnImportRun.TempClosed"/> reports the close truth. Called ONLY by the
+    /// Idle lane on settled ticks (after ContextRestored plus one full quiescent cycle,
+    /// retried until the deadline), by the contextTimedOut path in EndDgnImport (no
+    /// command session exists there), and by the Terminate drain — never inside the
+    /// queued application-context callback, where r3 proved the close cannot complete.
+    /// </summary>
+    internal bool TryRestoreDgnDocument(DgnImportRun run)
     {
-        try
+        // The previous active document first (so the temp close runs on a non-active
+        // doc when one exists). If Previous is null (import started at zero documents)
+        // or gone — closed meanwhile, the assignment throws — activate any other open
+        // document instead of leaving the temp doc active for its close.
+        var activated = false;
+        if (run.Previous is not null)
         {
-            if (run.Previous is not null)
+            try
             {
                 Documents.MdiActiveDocument = run.Previous;
+                activated = true;
+            }
+            catch
+            {
+                // Best-effort activation of the previously active document.
             }
         }
-        catch
+
+        if (!activated)
         {
-            // Best-effort restore of the previously active document.
+            try
+            {
+                foreach (Document doc in Documents)
+                {
+                    if (!ReferenceEquals(doc, run.TempDoc))
+                    {
+                        Documents.MdiActiveDocument = doc;
+                        break;
+                    }
+                }
+            }
+            catch
+            {
+                // Best-effort activation — the close attempt proceeds regardless.
+            }
         }
 
+        // Last-document case: nothing else is open, so the temp doc closes while active.
+        // Precedent: the pre-fix Idle-lane close completed in exactly this configuration
+        // (fail-evidence-20261030) — the wedge came from the mid-teardown boundary, not
+        // from closing the last doc. If AutoCAD still refuses, the catch leaves the doc
+        // open and the run reports dgn_temp_document_leaked.
         try
         {
             run.TempDoc?.CloseAndDiscard();
@@ -445,6 +552,8 @@ public sealed partial class PluginCommandProcessor
         {
             // Best-effort close of the temporary document; reported via tempDocumentClosed.
         }
+
+        return run.TempClosed;
     }
 
     private static void RestoreDgnSysvars(DgnImportRun run)
