@@ -32,7 +32,7 @@ Paths used below:
 | Deployed bundle | `%APPDATA%\Autodesk\ApplicationPlugins\765T-Forge.bundle\` |
 | Rollback copies (created in step 3) | `D:\765T-Forge\artifacts\rollback-speed-20261029\` |
 | Smoke scratch folder (written as `<S>` below) | `D:\765T-Forge\artifacts\smoke-speed-20261029\` |
-| Metric template | `C:\Users\toila\AppData\Local\Autodesk\AutoCAD 2025\R25.0\enu\Template\acadiso.dwt` |
+| Metric template | `%LOCALAPPDATA%\Autodesk\AutoCAD 2025\R25.0\enu\Template\acadiso.dwt` |
 
 ## 1. Stop, in this order
 
