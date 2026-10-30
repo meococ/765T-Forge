@@ -88,6 +88,87 @@ public sealed class ProjectConfigurationTests
     }
 
     [Fact]
+    public void DgnPendingRunMirrorIsASetDrainedPerRunAndAtDispose()
+    {
+        var root = RepoRoot();
+        var source = File.ReadAllText(Path.Combine(root, "src", "Forge.Plugin", "NamedPipePluginServer.cs"));
+
+        // review-d14-r2 M1/N2: a watchdog-timeout retry can leave two DGN runs pending at
+        // once, so the mirror is a set; each finish path removes only its own run (a shared
+        // unconditional clear would let the first finishing lane drain another lane's
+        // mirror slot and skip its Terminate drain entirely).
+        Assert.Contains("HashSet<PluginCommandProcessor.DgnImportRun>", source);
+        Assert.Contains("_pendingDgnRuns.Add(run)", source);
+        Assert.Contains("_pendingDgnRuns.Remove(timedOutRun)", source);
+        Assert.Contains("_pendingDgnRuns.Remove(finishedRun)", source);
+        Assert.Contains("_pendingDgnRuns.Clear()", source);
+        Assert.DoesNotContain("_pendingDgnRun = null", source);
+    }
+
+    [Fact]
+    public void DgnCloseRunsOnlyOnSettledIdleTicksAfterContextRestored()
+    {
+        var root = RepoRoot();
+        var dgn = File.ReadAllText(Path.Combine(root, "src", "Forge.Plugin", "PluginCommandProcessor.Dgn.cs"));
+        var pipe = File.ReadAllText(Path.Combine(root, "src", "Forge.Plugin", "NamedPipePluginServer.cs"));
+
+        // fail-evidence-20261030: an Idle-lane CloseAndDiscard mid-teardown wedged
+        // quiescence. fail-evidence-r3-20261031: the same close inside the queued
+        // app-context callback (and on the tick that first observes ContextRestored)
+        // throws silently — the temp document leaked. r4 split: the queued callback
+        // holds ONLY the ordering proof + sysvar/scope restore; the document close is
+        // attempted by the Idle lane on ticks AFTER a full quiescent cycle, retried
+        // until the deadline, and reported as dgn_temp_document_leaked when it never lands.
+        var cbStart = dgn.IndexOf("Documents.ExecuteInApplicationContext(_ =>", StringComparison.Ordinal);
+        Assert.True(cbStart >= 0, "the leg must queue the app-context ordering proof");
+        var cbEnd = dgn.IndexOf("}, null);", cbStart, StringComparison.Ordinal);
+        Assert.True(cbEnd > cbStart, "the queued callback region must be locatable");
+        var callback = dgn.Substring(cbStart, cbEnd - cbStart);
+        Assert.Contains("RestoreDgnSysvars(run)", callback);
+        Assert.Contains("run.ContextRestored = true", callback);
+        Assert.DoesNotContain("CloseAndDiscard", callback);
+        Assert.DoesNotContain("MdiActiveDocument", callback);
+        Assert.DoesNotContain("TryRestoreDgnDocument", callback);
+
+        // The leg runs the synchronous command — no nested async session survives the
+        // callback to be orphaned by the close — and a late Abandoned return must not
+        // queue a stale restore.
+        Assert.Contains("run.TempDoc.Editor.Command(", dgn);
+        Assert.DoesNotContain("CommandAsync(", dgn);
+        Assert.Contains("if (!run.Abandoned)", dgn);
+
+        // The document-restore entry point exists for the settled lane ticks.
+        Assert.Contains("internal bool TryRestoreDgnDocument(DgnImportRun run)", dgn);
+
+        // review-r4 F1/F6: every RestoreDgnSysvars caller must be SysvarsRestored-gated
+        // (queued callback, EndDgnImport finally, CleanupDgnImport drain, DgnImport catch
+        // stamps directly) so a late restore cannot stomp post-answer user changes.
+        var gateCount = dgn.Split(new[] { "if (!run.SysvarsRestored)" }, StringSplitOptions.None).Length - 1;
+        Assert.True(gateCount >= 3, $"expected >=3 SysvarsRestored-gated restore callers, found {gateCount}");
+
+        // Honest reporting: a leftover temp document is a distinct failure code plus a
+        // truth field on every DGN result, not ok:true with a footnote.
+        Assert.Contains("dgn_temp_document_leaked", dgn);
+        Assert.Contains("tempDocumentLeaked", dgn);
+        Assert.Contains("tempDocumentName", dgn);
+        Assert.Contains("dgn_context_restore_timeout", dgn);
+
+        // Lane ordering: wait for ContextRestored, arm one full quiescent cycle, then
+        // attempt the restore with the nested-raise guard, retrying until the deadline,
+        // then answer through EndDgnImport.
+        var waitIndex = pipe.IndexOf("!dgnRun.ContextRestored", StringComparison.Ordinal);
+        var armIndex = pipe.IndexOf("dgnRun.SettleArmed = true", StringComparison.Ordinal);
+        var closeIndex = pipe.IndexOf("_processor.TryRestoreDgnDocument(dgnRun)", StringComparison.Ordinal);
+        var endIndex = pipe.IndexOf("EndDgnImport(command, finishedRun)", StringComparison.Ordinal);
+        Assert.True(waitIndex >= 0, "the Idle lane must wait on ContextRestored before finishing a DGN run");
+        Assert.True(armIndex > waitIndex, "the settle arm must come after the ContextRestored wait");
+        Assert.True(closeIndex > armIndex, "the first close attempt must come on a tick after the arm");
+        Assert.True(endIndex > closeIndex, "the answer must follow the settled close attempt");
+        Assert.Contains("dgnRun.RestoreInFlight", pipe);
+        Assert.Contains("restoreTimedOut: true", pipe);
+    }
+
+    [Fact]
     public void CommandDispatchedToolsRejectControlCharacters()
     {
         var root = RepoRoot();

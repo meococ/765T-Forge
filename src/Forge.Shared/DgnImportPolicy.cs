@@ -25,6 +25,29 @@ public sealed record DgnImportArgs
 /// </summary>
 public static class DgnImportPolicy
 {
+    /// <summary>
+    /// D14: DGNIMPORTMODE value scoped during the import — "import into the current drawing,
+    /// ignore duplicate named objects". It must be forced: the default mode 0 would make
+    /// -DGNIMPORT create a second drawing of its own instead of filling the temporary
+    /// document (breaking the one-temp-document guarantee), and mode 2 prefixes every named
+    /// object with the DGN file name (the client contract keeps level names as layer names).
+    /// A fresh template document has no named objects for "ignore duplicates" to swallow.
+    /// Note: importing into the current drawing converts DGN references to blocks; importing
+    /// into a new drawing converts them to xrefs — a future arg could expose that if a job
+    /// needs sibling reference DWGs.
+    /// </summary>
+    public const int ImportIntoCurrentDrawing = 1;
+
+    /// <summary>
+    /// The -DGNIMPORT argument list for Editor.Command/CommandAsync. Prompt order per
+    /// Autodesk Help (-DGNIMPORT): filename → design model (empty accepts the DGN default)
+    /// → conversion units Master/Sub → mapping setup (empty accepts the default Standard
+    /// setup). An empty-string argument acts as Enter. Discrete arguments are passed as
+    /// typed command inputs, so paths and model names containing spaces need no quoting.
+    /// </summary>
+    public static object[] CommandArguments(string dgnPath, string? modelName, string units)
+        => ["-DGNIMPORT", dgnPath, modelName ?? "", units, ""];
+
     public static (bool Allowed, string? Code, string? Message, string? Suggestion) Validate(DgnImportArgs args)
     {
         if (string.IsNullOrWhiteSpace(args.DgnPath) || string.IsNullOrWhiteSpace(args.TargetDwgPath))

@@ -17,6 +17,13 @@ public sealed class NamedPipePluginServer : IDisposable
     private readonly PluginCommandProcessor _processor;
     private readonly CancellationTokenSource _shutdown = new();
     private Task? _loop;
+    // review-d14-r1 F6: mirrors the in-flight DGN runs from the Idle lane so Terminate can
+    // drop their temp documents and the scoped sysvars at program close — managed plugins
+    // cannot be unloaded mid-session, so program close is the only drain trigger. A set,
+    // not a single slot: after a watchdog timeout a second import can pend while an
+    // earlier run still finishes, and both must drain (review-d14-r2 M1/N2). Touched only
+    // on the AutoCAD main thread (the Idle lane and Terminate's Dispose), so no locking.
+    private readonly HashSet<PluginCommandProcessor.DgnImportRun> _pendingDgnRuns = new();
 
     public NamedPipePluginServer(ForgeEnvironment environment, PluginCommandProcessor processor)
     {
@@ -53,6 +60,23 @@ public sealed class NamedPipePluginServer : IDisposable
         // this token, and an ObjectDisposedException here would kill the loop silently
         // during teardown.
         _shutdown.Cancel();
+
+        // review-d14-r1 F6: a pending DGN run holds its temp document and the
+        // FILEDIA/DGNIMPORTMODE/PROXYNOTICE scopes; program close mid-leg would leak them
+        // into the next session (all three are profile/registry-persisted). This drain
+        // assumes callers are on the AutoCAD main thread — Terminate qualifies — because
+        // CleanupDgnImport touches documents and sysvars. Drain every pending run
+        // (review-d14-r2 M1: a watchdog-timeout retry can leave two pending). Snapshot
+        // and clear first: a document call inside the drain can pump a nested Idle tick
+        // that removes its own run from the set; cleanup stays idempotent on a re-drain.
+        // Abandoned keeps a late context grant from starting the write.
+        var pendingDgnRuns = _pendingDgnRuns.ToArray();
+        _pendingDgnRuns.Clear();
+        foreach (var pendingDgnRun in pendingDgnRuns)
+        {
+            pendingDgnRun.Abandoned = true;
+            _processor.CleanupDgnImport(pendingDgnRun);
+        }
     }
 
     private static void TryWriteEditorMessage(string message)
@@ -436,6 +460,7 @@ public sealed class NamedPipePluginServer : IDisposable
         var staleAfterMs = (long)RequestDeadline.TotalMilliseconds;
         ForgeResult? first = null;
         var claimed = false;
+        PluginCommandProcessor.DgnImportRun? dgnRun = null;
         long pollUntil = 0;
 
         void Finish(ForgeResult result)
@@ -448,12 +473,110 @@ public sealed class NamedPipePluginServer : IDisposable
         {
             try
             {
+                if (dgnRun is not null)
+                {
+                    // D14: -DGNIMPORT runs inside the temp document's command context. A leg that
+                    // never got dispatched by the deadline is marked abandoned BEFORE its context
+                    // can arrive, so a late grant cannot commit an import after the caller gave
+                    // up; a leg that already started runs to completion, matching the watchdog's
+                    // read-back-after-timeout contract.
+                    if (!dgnRun.LegFinished)
+                    {
+                        if (!dgnRun.LegStarted && Environment.TickCount64 - startedAt >= staleAfterMs)
+                        {
+                            dgnRun.Abandoned = true;
+                            var timedOutRun = dgnRun;
+                            dgnRun = null;
+                            // review-d14-r2 M1: remove only this lane's mirror entry — a
+                            // second import's run may still be pending in the set.
+                            _pendingDgnRuns.Remove(timedOutRun);
+                            Finish(_processor.EndDgnImport(command, timedOutRun, contextTimedOut: true));
+                        }
+
+                        return;
+                    }
+
+                    if (!dgnRun.ContextRestored)
+                    {
+                        // D14-quiescence: the leg queued its ordering proof + sysvar
+                        // restore onto the application context; it lands only after the
+                        // command session fully unwound. Answering before ContextRestored
+                        // is exactly the mid-teardown close that wedged quiescence
+                        // (artifacts/d14/fail-evidence-20261030.md) — keep waiting, bounded
+                        // by the same deadline as the leg itself.
+                        if (Environment.TickCount64 - startedAt >= staleAfterMs)
+                        {
+                            var stalledRun = dgnRun;
+                            dgnRun = null;
+                            // Deliberately NOT removed from _pendingDgnRuns: nothing owns
+                            // the leftover document's close now (the callback holds only
+                            // sysvars) — the Terminate drain is the fallback.
+                            Finish(_processor.EndDgnImport(command, stalledRun, restoreTimedOut: true));
+                        }
+
+                        return;
+                    }
+
+                    if (!dgnRun.SettleArmed)
+                    {
+                        // D14-quiescence r4 (artifacts/d14/fail-evidence-r3-20261031.md):
+                        // CloseAndDiscard can run on an Idle tick (pre-fix evidence) but
+                        // NOT inside the app-context callback and NOT on the tick that
+                        // first observes ContextRestored — r3's in-lane attempt failed
+                        // there too. Arm now and let one full quiescent cycle pass before
+                        // the first close attempt on the NEXT tick.
+                        dgnRun.SettleArmed = true;
+                        return;
+                    }
+
+                    // Settled: attempt the document restore. The close may pump a nested
+                    // Idle raise — RestoreInFlight makes that raise return early instead
+                    // of retrying the same close concurrently.
+                    if (!dgnRun.RestoreInFlight)
+                    {
+                        var closed = false;
+                        dgnRun.RestoreInFlight = true;
+                        try
+                        {
+                            closed = _processor.TryRestoreDgnDocument(dgnRun);
+                        }
+                        finally
+                        {
+                            dgnRun.RestoreInFlight = false;
+                        }
+
+                        if (!closed && Environment.TickCount64 - startedAt < staleAfterMs)
+                        {
+                            // Each settled tick gets a retry until the deadline — extra
+                            // settle cycles cost nothing and the lane never blocks.
+                            return;
+                        }
+
+                        // Close landed, or the deadline ran out (EndDgnImport then maps
+                        // TempClosed:false to dgn_temp_document_leaked — a failure, not
+                        // ok:true with a footnote).
+                        var finishedRun = dgnRun;
+                        dgnRun = null;
+                        if (closed)
+                        {
+                            // review-d14-r2 M1: remove only this lane's mirror entry — a
+                            // second import's run may still be pending in the set. On the
+                            // leaked path the run stays mirrored so the Terminate drain
+                            // can still attempt the leftover document's close.
+                            _pendingDgnRuns.Remove(finishedRun);
+                        }
+                        Finish(_processor.EndDgnImport(command, finishedRun));
+                    }
+
+                    return;
+                }
+
                 if (first is null)
                 {
                     // review-wp2-r2 Q1: claim the command BEFORE Process runs. first stays null
                     // for the whole synchronous Process call, so a nested Application.Idle raise
-                    // during a message-pumping call inside it (Documents.Add / Editor.Command in
-                    // forge_dgn_import) would otherwise re-enter and run the same command twice —
+                    // during a message-pumping call inside it (Documents.Add / MdiActiveDocument
+                    // in forge_dgn_import) would otherwise re-enter and run the same command twice —
                     // a second temp document + -DGNIMPORT. Already-started work runs to
                     // completion, so a nested raise returns regardless of the deadline.
                     if (claimed)
@@ -472,6 +595,17 @@ public sealed class NamedPipePluginServer : IDisposable
 
                     claimed = true;
                     first = _processor.Process(command);
+                    if (first.Data is PluginCommandProcessor.DgnImportRun run)
+                    {
+                        // The DGN import queued its command leg — wait for it on later idle
+                        // ticks instead of answering the sentinel.
+                        run.AuditId = first.AuditId;
+                        dgnRun = run;
+                        _pendingDgnRuns.Add(run);
+                        first = null;
+                        return;
+                    }
+
                     if (first.Ok || first.Error?.Code is not { } code || !DocumentContextPolicy.UnconfirmedCodes.Contains(code) ||
                         first.Data is not (PluginCommandProcessor.DocActivateReadBack or PluginCommandProcessor.DocCloseReadBack))
                     {

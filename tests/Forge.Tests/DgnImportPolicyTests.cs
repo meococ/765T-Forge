@@ -82,6 +82,30 @@ public class DgnImportPolicyTests
     }
 
     [Fact]
+    public void CommandArguments_MatchDashDgnImportPromptOrder()
+    {
+        var tokens = DgnImportPolicy.CommandArguments(@"D:\in\plan.dgn", null, "Master");
+
+        Assert.Equal(new object[] { "-DGNIMPORT", @"D:\in\plan.dgn", "", "Master", "" }, tokens);
+    }
+
+    [Theory]
+    [InlineData("Sheet 1", "Sub", new object[] { "-DGNIMPORT", "a.dgn", "Sheet 1", "Sub", "" })]
+    [InlineData("", "Master", new object[] { "-DGNIMPORT", "a.dgn", "", "Master", "" })]
+    public void CommandArguments_ModelAndUnitsPassThrough(string model, string units, object[] expected)
+    {
+        Assert.Equal(expected, DgnImportPolicy.CommandArguments("a.dgn", model, units));
+    }
+
+    [Fact]
+    public void ImportIntoCurrentDrawing_IsModeOne()
+    {
+        // DGNIMPORTMODE 0 would create a second document inside -DGNIMPORT; 2 prefixes named
+        // objects with the file name. The tool's temp-document contract requires 1.
+        Assert.Equal(1, DgnImportPolicy.ImportIntoCurrentDrawing);
+    }
+
+    [Fact]
     public void Registry_TypedTool_NoBackup_NoOpenWorld()
     {
         var tool = ForgeToolRegistry.Get("forge_dgn_import");
