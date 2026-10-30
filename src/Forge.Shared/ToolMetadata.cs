@@ -21,6 +21,11 @@ public static class ForgeToolRegistry
         ["forge_system_setvar"] = Write("forge_system_setvar", "system", idempotent: true),
         ["forge_system_capabilities"] = Read("forge_system_capabilities", "system"),
         ["forge_doc_list_open"] = Read("forge_doc_list_open", "document"),
+        // Switches the active drawing (session state only — no database write, no backup, no undo mark).
+        ["forge_doc_activate"] = new ToolMetadata("forge_doc_activate", "document", false, false, true, false, false),
+        // fix-smoke-20261029 D8: closing can discard unsaved work (Destructive). No pre-call backup: the
+        // drawing is not modified; with save=true the tool backs up the file itself before overwriting it.
+        ["forge_doc_close"] = new ToolMetadata("forge_doc_close", "document", false, true, false, false, false),
         ["forge_doc_list_layouts"] = Read("forge_doc_list_layouts", "document"),
         ["forge_doc_open"] = Write("forge_doc_open", "document", idempotent: true),
         ["forge_doc_save"] = Write("forge_doc_save", "document", idempotent: true),
@@ -107,6 +112,7 @@ public static class ForgeToolRegistry
         // C29–C30 — AI spatial perception, text search, OSNAP intelligence, and high-level AEC generators.
         ["forge_drawing_summary"] = Read("forge_drawing_summary", "document"),
         ["forge_entity_search_text"] = Read("forge_entity_search_text", "entity"),
+        ["forge_text_list"] = Read("forge_text_list", "entity"),
         ["forge_entity_snap"] = Read("forge_entity_snap", "entity"),
         ["forge_draw_grid"] = new ToolMetadata("forge_draw_grid", "draw", false, false, false, false, false),
         ["forge_draw_wall"] = new ToolMetadata("forge_draw_wall", "draw", false, false, false, false, false),
@@ -140,6 +146,17 @@ public static class ForgeToolRegistry
         ["forge_linework_transform"] = new ToolMetadata("forge_linework_transform", "linework", false, false, true, false, false, RequiresAutoCad: false),
         ["forge_batch_run"] = new ToolMetadata("forge_batch_run", "batch", false, true, false, false, true, RequiresAutoCad: false),
         ["forge_batch_status"] = Read("forge_batch_status", "batch", requiresAutoCad: false),
+        // Speed wave (2026-10-29). forge_doc_import can redefine an existing block (replaceExisting)
+        // and rename/merge layers it brings in: destructive + backup. forge_standards_import follows
+        // the style-tool policy (overwrite restyles existing objects; same call → same state).
+        // forge_block_insert_bulk can replace block definitions from a library (redefine): destructive
+        // + backup. forge_plot_preset_apply rewrites layout plot settings / a named page setup like
+        // forge_layout_page_setup_apply. forge_qa_annotation_clash is a pure read.
+        ["forge_doc_import"] = new ToolMetadata("forge_doc_import", "document", false, true, false, false, true),
+        ["forge_qa_annotation_clash"] = Read("forge_qa_annotation_clash", "qa"),
+        ["forge_standards_import"] = new ToolMetadata("forge_standards_import", "style", false, true, true, false, true),
+        ["forge_block_insert_bulk"] = new ToolMetadata("forge_block_insert_bulk", "block", false, true, false, false, true),
+        ["forge_plot_preset_apply"] = Write("forge_plot_preset_apply", "plot", idempotent: true),
         ["forge_exec_command"] = Destructive("forge_exec_command", "exec", unsafeTool: true),
         ["forge_exec_lisp"] = Destructive("forge_exec_lisp", "exec", unsafeTool: true),
         ["forge_run_script"] = Destructive("forge_run_script", "exec", requiresAutoCad: false),

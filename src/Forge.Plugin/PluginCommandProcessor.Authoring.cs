@@ -24,8 +24,8 @@ public sealed partial class PluginCommandProcessor
     /// <summary>Model-space BTR opened for write inside the caller's transaction.</summary>
     internal static BlockTableRecord ModelSpaceForWrite(Database db, Transaction tr)
     {
-        var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
-        return (BlockTableRecord)tr.GetObject(blockTable[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+        // The id is cached during forge_draw_batch; the record is still opened in the caller's transaction.
+        return (BlockTableRecord)tr.GetObject(ModelSpaceIdFor(db, tr), OpenMode.ForWrite);
     }
 
     /// <summary>

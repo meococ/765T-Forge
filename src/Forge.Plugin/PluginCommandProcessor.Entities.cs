@@ -94,7 +94,8 @@ public sealed partial class PluginCommandProcessor
                     textString = text.TextString,
                     position = new[] { text.Position.X, text.Position.Y, text.Position.Z },
                     height = text.Height,
-                    rotationDeg = text.Rotation * 180.0 / Math.PI
+                    rotationDeg = text.Rotation * 180.0 / Math.PI,
+                    textStyle = text.TextStyleName
                 },
                 MText mtext => new
                 {
@@ -103,7 +104,9 @@ public sealed partial class PluginCommandProcessor
                     location = new[] { mtext.Location.X, mtext.Location.Y, mtext.Location.Z },
                     textHeight = mtext.TextHeight,
                     width = mtext.Width,
-                    rotationDeg = mtext.Rotation * 180.0 / Math.PI
+                    rotationDeg = mtext.Rotation * 180.0 / Math.PI,
+                    textStyle = mtext.TextStyleName,
+                    backgroundMask = mtext.BackgroundFill
                 },
                 Table table => BuildTableKindReadBack(table),
                 BlockReference blockRef => BuildBlockRefKindReadBack(tr, blockRef),
@@ -118,6 +121,10 @@ public sealed partial class PluginCommandProcessor
                 {
                     contentType = mleader.ContentType.ToString(),
                     text = mleader.ContentType == ContentType.MTextContent ? mleader.MText?.Contents : null,
+                    backgroundMask = mleader.ContentType == ContentType.MTextContent ? mleader.MText?.BackgroundFill : null,
+                    contentBlock = mleader.ContentType == ContentType.BlockContent && !mleader.BlockContentId.IsNull
+                        ? ((BlockTableRecord)tr.GetObject(mleader.BlockContentId, OpenMode.ForRead)).Name
+                        : null,
                     leaderCount = mleader.LeaderCount
                 },
                 Region region => new
@@ -394,6 +401,11 @@ public sealed partial class PluginCommandProcessor
         var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
         var modelSpace = (BlockTableRecord)tr.GetObject(blockTable[BlockTableRecord.ModelSpace], OpenMode.ForRead);
 
+        if (args.IncludeBlocks)
+        {
+            return EntityListWithBlocks(command, args, tr, modelSpace, hasWindow ? [minX, minY, maxX, maxY] : null, maxEntities);
+        }
+
         var entities = new List<object>();
         foreach (ObjectId id in modelSpace)
         {
@@ -435,6 +447,61 @@ public sealed partial class PluginCommandProcessor
         }
 
         return ForgeResult.Success(command.Id, new { count = entities.Count, truncated = entities.Count == maxEntities, entities });
+    }
+
+    /// <summary>
+    /// forge_entity_list with includeBlocks=true: the INSERTs themselves plus everything nested inside
+    /// them (world bbox, effective layer, depth, insert/block path). The window prunes INSERTs whose
+    /// world extents miss it; the layer filter matches the entity's own or effective layer.
+    /// </summary>
+    private static ForgeResult EntityListWithBlocks(ForgeCommand command, EntityListArgs args, Transaction tr, BlockTableRecord modelSpace, double[]? window, int maxEntities)
+    {
+        var options = new BlockWalkOptions(true, BlockWalk.ClampDepth(args.BlockDepth), window, IncludeXrefs: true);
+        var stats = new BlockWalkStats();
+        var entities = new List<object>();
+        WalkBlockSpace(tr, modelSpace, options, stats, (entity, _, frame) =>
+        {
+            var effectiveLayer = BlockWalk.EffectiveLayer(entity.Layer, frame.ParentEffectiveLayer);
+            if (!string.IsNullOrWhiteSpace(args.Layer) &&
+                !entity.Layer.Equals(args.Layer, StringComparison.OrdinalIgnoreCase) &&
+                !effectiveLayer.Equals(args.Layer, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(args.Type) && !entity.GetType().Name.Equals(args.Type, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var bbox = WorldBox(entity, frame);
+            if (window is not null && (bbox is null || !BlockWalk.BoxesIntersect(bbox, window)))
+            {
+                return true;
+            }
+
+            entities.Add(new
+            {
+                handle = HandleString(entity),
+                type = entity.GetType().Name,
+                layer = entity.Layer,
+                effectiveLayer,
+                depth = frame.Depth,
+                insertPath = frame.Path.Count > 0 ? BlockWalk.InsertPathLabel(frame.Path) : null,
+                blockPath = frame.Path.Count > 0 ? frame.Path.Select(p => p.BlockName).ToArray() : null,
+                bbox
+            });
+            return entities.Count < maxEntities;
+        });
+
+        tr.Commit();
+        return ForgeResult.Success(command.Id, new
+        {
+            count = entities.Count,
+            truncated = stats.Truncated,
+            blockTraversal = BlockTraversalReport(options, stats),
+            entities
+        });
     }
 
     private static ForgeResult EntityMove(ForgeCommand command)
@@ -970,13 +1037,16 @@ public sealed partial class PluginCommandProcessor
             verification: new ForgeVerification { Attempted = true, Passed = updated > 0 && unknown.Count == 0 && locked.Count == 0, ReadBack = readBack });
     }
 
-    // forge_undo is the one handler allowed to call Editor.Command: AutoCAD's undo engine owns
-    // the group boundaries (the dispatcher wraps each typed write in one UNDO mark), so a single
-    // "_.U" pops exactly one Forge write group. No transaction, no dry-run.
+    // forge_undo is the one handler allowed to call Editor.Command("_.U"). fix-smoke-20261029 D3: AutoCAD
+    // leaves an undo unit for every command-context call (reads and dry runs too), so one "_.U" may pop
+    // the wrong unit. The ledger (PluginCommandProcessor.UndoLedger.cs) knows what the last tracked write
+    // changed; UndoVerifier runs "_.U" until it reaches that write, reverts it only when the drawing is
+    // proven unchanged since, verifies the revert from real state, and redoes every U on any failure.
     private static ForgeResult Undo(ForgeCommand command)
     {
         var args = Args<UndoArgs>(command); // empty record; kept for the Args<T> convention
         _ = args;
+        UndoFootprint? undoTarget = null;
         try
         {
             var undoCtl = System.Convert.ToInt32(Autodesk.AutoCAD.ApplicationServices.Application.GetSystemVariable("UNDOCTL"));
@@ -985,46 +1055,94 @@ public sealed partial class PluginCommandProcessor
                 return ForgeResult.Failure(command.Id, "undo_failed", "AutoCAD UNDO is disabled (UNDOCTL=0).", "Enable UNDO in AutoCAD before calling forge_undo.");
             }
 
-            var db = ActiveDb;
-            var trackedBefore = GetTrackedUndoDepth(db);
-            var dbmodBefore = System.Convert.ToInt32(Autodesk.AutoCAD.ApplicationServices.Application.GetSystemVariable("DBMOD"));
-            var handseedBefore = db.Handseed.Value;
-            if (trackedBefore <= 0 && dbmodBefore == 0)
+            if ((undoCtl & 2) != 0)
+            {
+                return ForgeResult.Failure(command.Id, "undo_failed", "AutoCAD UNDO is limited to one step (UNDOCTL 'One' is set).", "Run UNDO > All in AutoCAD before calling forge_undo.");
+            }
+
+            if ((undoCtl & 8) != 0)
+            {
+                return ForgeResult.Failure(command.Id, "undo_failed", "An UNDO group is active in AutoCAD.", "Close it with UNDO > End before calling forge_undo.");
+            }
+
+            var doc = ActiveDoc;
+            var ledger = ExistingLedger(doc);
+            var target = ledger?.State.Top;
+            undoTarget = target;
+            if (ledger is null || target is null)
             {
                 return ForgeResult.Failure(
                     command.Id,
                     "undo_failed",
-                    "Nothing to undo in the active document.",
-                    "No Forge write groups or unsaved drawing modifications are present on the undo stack.");
+                    "Nothing to undo: no Forge write is recorded for the active document.",
+                    "forge_undo only reverts Forge's own tracked writes; it never undoes changes made outside Forge.",
+                    data: new { undone = false, remainingForgeUndoSteps = 0 });
             }
 
-            ActiveEditor.Command("_.U");
-            var hadTrackedGroup = TryDecrementTrackedUndoDepth(db, out var remainingForgeUndoSteps);
-            var dbmodAfter = System.Convert.ToInt32(Autodesk.AutoCAD.ApplicationServices.Application.GetSystemVariable("DBMOD"));
-            var handseedAfter = db.Handseed.Value;
-
-            if (!hadTrackedGroup && dbmodBefore == dbmodAfter && handseedBefore == handseedAfter)
+            Subscribe(ledger);
+            var outcome = UndoVerifier.Run(target, new AcadUndoHost(ledger.Db, doc.Editor));
+            if (outcome.MarkDirty is { } reason)
             {
-                return ForgeResult.Failure(
-                    command.Id,
-                    "undo_failed",
-                    "Nothing was undone (undo stack is already at the beginning of the session).",
-                    "Perform a drawing modification before calling forge_undo.");
+                target.MarkDirty(reason);
             }
 
-            return ForgeResult.Success(
-                command.Id,
-                new
-                {
-                    undone = true,
-                    undoCtl,
-                    remainingForgeUndoSteps,
-                    note = "AutoCAD executed one undo step."
-                });
+            if (outcome.PopEntry)
+            {
+                ledger.State.Pop();
+            }
+
+            var data = new
+            {
+                undone = outcome.Undone,
+                tool = target.Tool,
+                writeCommandId = target.CommandId,
+                outcome.NothingRecorded,
+                outcome.UCount,
+                outcome.RedoCount,
+                outcome.Restored,
+                outcome.SkippedEmptyUnits,
+                outcome.SkippedViewUnits,
+                outcome.SkippedSideEffectUnits,
+                remainingForgeUndoSteps = ledger.State.Depth,
+                droppedOldestSteps = ledger.State.DroppedOldest,
+                outcome.Reason,
+                foreign = outcome.Foreign,
+                notReverted = outcome.NotReverted,
+                notRestored = outcome.NotRestored,
+                unitClasses = outcome.Classes,
+                undoCtl
+            };
+            var verification = new ForgeVerification
+            {
+                Attempted = true,
+                Passed = outcome.Undone,
+                Message = outcome.Message,
+                ReadBack = new { outcome.Undone, outcome.Restored, outcome.NotReverted }
+            };
+
+            return outcome.Undone
+                ? ForgeResult.Success(command.Id, data, verification: verification)
+                : ForgeResult.Failure(
+                    command.Id,
+                    outcome.Code ?? "undo_failed",
+                    outcome.Message,
+                    outcome.Code switch
+                    {
+                        UndoVerifier.ChangedSinceWrite => "The drawing was changed after that Forge write. Use AutoCAD's own UNDO if you really want to go back past the later change, then forge_qa_readback to check.",
+                        UndoVerifier.NothingRecordedCode => "That write changed nothing; call forge_undo again for the write before it.",
+                        UndoVerifier.FootprintTooLarge => "Use AutoCAD's own UNDO for writes this large, then read back.",
+                        _ => outcome.Restored == false
+                            ? "The drawing state is uncertain: read it back (forge_qa_readback / forge_entity_list) before any further write."
+                            : "Nothing was changed by this call. Read back the drawing before deciding what to do."
+                    },
+                    data: data,
+                    verification: verification);
         }
         catch (System.Exception ex)
         {
-            return ForgeResult.Failure(command.Id, "undo_failed", ex.Message, "There may be nothing left to undo.");
+            // The state of AutoCAD's undo stack is unknown after an exception: never undo this write later.
+            undoTarget?.MarkDirty("undo_exception");
+            return ForgeResult.Failure(command.Id, "undo_failed", ex.Message, "Read back the drawing (forge_qa_readback) before any further write.");
         }
     }
 
@@ -2422,7 +2540,7 @@ public sealed partial class PluginCommandProcessor
     }
 
     private sealed record EntityGetArgs { public string? Handle { get; init; } }
-    private sealed record EntityListArgs { public double[][]? Window { get; init; } public string? Layer { get; init; } public string? Type { get; init; } public int? MaxEntities { get; init; } }
+    private sealed record EntityListArgs { public double[][]? Window { get; init; } public string? Layer { get; init; } public string? Type { get; init; } public int? MaxEntities { get; init; } public bool IncludeBlocks { get; init; } public int? BlockDepth { get; init; } }
     private sealed record EntityMoveArgs { public string[]? Handles { get; init; } public double[]? Delta { get; init; } }
     private sealed record EntityCopyArgs { public string[]? Handles { get; init; } public double[]? Delta { get; init; } public int Copies { get; init; } = 1; }
     private sealed record EntityRotateArgs { public string[]? Handles { get; init; } public double[]? BasePoint { get; init; } public double AngleDeg { get; init; } }

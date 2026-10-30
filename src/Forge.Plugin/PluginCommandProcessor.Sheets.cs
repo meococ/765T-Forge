@@ -37,6 +37,9 @@ public sealed partial class PluginCommandProcessor
             return DryRun(command, new { template = args.TemplatePath, note = "A blank document is created when no template is given." });
         }
 
+        // fix-smoke-20261029 D1: runs on the application-context (Idle) lane, so the switch to the new
+        // drawing is not deferred behind a document command. The result comes from a readback.
+        var before = Documents.MdiActiveDocument?.Name;
         Document document;
         try
         {
@@ -51,14 +54,18 @@ public sealed partial class PluginCommandProcessor
                 "A DWT/DWG template path must be readable and loadable in this AutoCAD version.");
         }
 
-        return ForgeResult.Success(
+        if (!ReferenceEquals(Documents.MdiActiveDocument, document))
+        {
+            Documents.MdiActiveDocument = document;
+        }
+
+        return ReadBackActiveDocument(
             command.Id,
-            new { name = document.Name, template = args.TemplatePath, note = "The new document is now the active document." },
-            verification: new ForgeVerification
+            new DocActivateReadBack(document.Name, before, null, false, false, [])
             {
-                Attempted = true,
-                Passed = document.Database is not null,
-                ReadBack = new { name = document.Name }
+                TargetDocument = document,
+                Template = args.TemplatePath,
+                UnconfirmedCode = "doc_new_unconfirmed"
             });
     }
 

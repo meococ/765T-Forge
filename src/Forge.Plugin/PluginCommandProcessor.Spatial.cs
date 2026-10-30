@@ -1032,38 +1032,16 @@ public sealed partial class PluginCommandProcessor
                 return ForgeResult.Failure(command.Id, "invalid_scale", "hatchScale must be > 0.");
             }
 
-            // If closed wall without openings has 2 loops (outer + inner), hatch between them in one Hatch;
-            // otherwise hatch each solid wall piece loop.
-            if (args.Closed && plan.Openings.Length == 0 && loopIds.Count == 2)
+            // fix-smoke-20261029 D2: same pattern order and readback as forge_draw_hatch. A rejected pattern
+            // or a readback mismatch fails the call; the transaction is not committed, so nothing is left.
+            var hatchPatternName = args.HatchPattern!.Trim().ToUpperInvariant();
+            var hatchSolid = hatchPatternName.Equals("SOLID", StringComparison.Ordinal);
+            var hatchAngleRad = DegreesToRadians(args.HatchAngleDeg);
+            try
             {
-                var hatch = new Hatch();
-                try
-                {
-                    hatch.SetDatabaseDefaults(db);
-                    ApplyLayerAndColor(hatch, args.HatchLayer ?? args.Layer, null);
-                    AppendExistingToModelSpace(db, tr, hatch);
-                    hatch.PatternScale = hatchScale;
-                    hatch.PatternAngle = DegreesToRadians(args.HatchAngleDeg);
-                    hatch.SetHatchPattern(HatchPatternType.PreDefined, args.HatchPattern!);
-                    hatch.Associative = true;
-                    hatch.AppendLoop(HatchLoopTypes.External, [loopIds[0]]);
-                    hatch.AppendLoop(HatchLoopTypes.Default, [loopIds[1]]);
-                    hatch.EvaluateHatch(true);
-                    hatchHandles.Add(HandleString(hatch));
-                }
-                catch
-                {
-                    if (hatch.ObjectId.IsNull)
-                    {
-                        hatch.Dispose();
-                    }
-
-                    throw;
-                }
-            }
-            else
-            {
-                foreach (var loopId in loopIds)
+                // If closed wall without openings has 2 loops (outer + inner), hatch between them in one Hatch;
+                // otherwise hatch each solid wall piece loop.
+                if (args.Closed && plan.Openings.Length == 0 && loopIds.Count == 2)
                 {
                     var hatch = new Hatch();
                     try
@@ -1071,12 +1049,12 @@ public sealed partial class PluginCommandProcessor
                         hatch.SetDatabaseDefaults(db);
                         ApplyLayerAndColor(hatch, args.HatchLayer ?? args.Layer, null);
                         AppendExistingToModelSpace(db, tr, hatch);
-                        hatch.PatternScale = hatchScale;
-                        hatch.PatternAngle = DegreesToRadians(args.HatchAngleDeg);
-                        hatch.SetHatchPattern(HatchPatternType.PreDefined, args.HatchPattern!);
+                        ApplyHatchPattern(hatch, hatchPatternName, hatchSolid, hatchScale, hatchAngleRad);
                         hatch.Associative = true;
-                        hatch.AppendLoop(HatchLoopTypes.Default, [loopId]);
+                        hatch.AppendLoop(HatchLoopTypes.External, [loopIds[0]]);
+                        hatch.AppendLoop(HatchLoopTypes.Default, [loopIds[1]]);
                         hatch.EvaluateHatch(true);
+                        VerifyHatch(db, hatch, hatchPatternName, hatchSolid, hatchScale, hatchAngleRad);
                         hatchHandles.Add(HandleString(hatch));
                     }
                     catch
@@ -1089,6 +1067,38 @@ public sealed partial class PluginCommandProcessor
                         throw;
                     }
                 }
+                else
+                {
+                    foreach (var loopId in loopIds)
+                    {
+                        var hatch = new Hatch();
+                        try
+                        {
+                            hatch.SetDatabaseDefaults(db);
+                            ApplyLayerAndColor(hatch, args.HatchLayer ?? args.Layer, null);
+                            AppendExistingToModelSpace(db, tr, hatch);
+                            ApplyHatchPattern(hatch, hatchPatternName, hatchSolid, hatchScale, hatchAngleRad);
+                            hatch.Associative = true;
+                            hatch.AppendLoop(HatchLoopTypes.Default, [loopId]);
+                            hatch.EvaluateHatch(true);
+                            VerifyHatch(db, hatch, hatchPatternName, hatchSolid, hatchScale, hatchAngleRad);
+                            hatchHandles.Add(HandleString(hatch));
+                        }
+                        catch
+                        {
+                            if (hatch.ObjectId.IsNull)
+                            {
+                                hatch.Dispose();
+                            }
+
+                            throw;
+                        }
+                    }
+                }
+            }
+            catch (DrawStepException ex)
+            {
+                return ForgeResult.Failure(command.Id, ex.Code, ex.Message, "Check the hatch pattern name (e.g. ANSI31, SOLID). Nothing was drawn: the walls and hatches of this call were rolled back.");
             }
         }
 

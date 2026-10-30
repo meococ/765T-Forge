@@ -52,6 +52,12 @@ public sealed record LineworkEntity
 
     /// <summary>Number of straight segments this entity contributes (Segments.Count).</summary>
     public int SegCount { get; init; }
+
+    /// <summary>Handles of the INSERTs (outermost first, "&gt;"-joined) holding this entity; null at top level.</summary>
+    public string? InsertPath { get; init; }
+
+    /// <summary>The entity's own layer when it differs from <see cref="Layer"/> (layer "0" inside a block shows on the INSERT's layer).</summary>
+    public string? OwnLayer { get; init; }
 }
 
 /// <summary>Common query arguments shared by all forge_linework_* tools.</summary>
@@ -100,6 +106,17 @@ public record LineworkQueryArgs
 
     /// <summary>Include entities inside xref block records (transformed to host space). Default true.</summary>
     public bool IncludeXrefContents { get; init; } = true;
+
+    /// <summary>
+    /// Walk into block INSERTs (nested, transforms applied, MINSERT expanded) instead of reading only
+    /// top-level entities. Default false (legacy behaviour). With it, xrefs are walked through their
+    /// INSERTs (every instance) when includeXrefContents is true, layer "0" content reports the
+    /// INSERT's layer, and bbox also prunes INSERTs whose world extents miss it.
+    /// </summary>
+    public bool IncludeBlocks { get; init; }
+
+    /// <summary>Maximum INSERT nesting depth walked when includeBlocks=true. Default 8, max 32.</summary>
+    public int? BlockDepth { get; init; }
 
     /// <summary>Drawing units per meter. 0 = auto (INSUNITS for drawings, 1000 for dump files).</summary>
     public double UnitsPerMeter { get; init; }

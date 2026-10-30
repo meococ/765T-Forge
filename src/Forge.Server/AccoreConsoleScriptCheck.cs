@@ -73,9 +73,16 @@ public static class AccoreConsoleScriptCheck
         {
             text = Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
         }
-        else if (LooksLikeUtf16Le(bytes))
+        else if (LooksLikeUtf16Le(bytes, offset: 0))
         {
             text = Encoding.Unicode.GetString(bytes, 0, bytes.Length - (bytes.Length % 2));
+        }
+        else if (LooksLikeUtf16Le(bytes, offset: 1))
+        {
+            // UTF-16LE shifted by one stray leading byte (e.g. a single-byte banner char before the
+            // console switched to wide output): keep that byte, decode the rest on its real alignment.
+            var rest = bytes.Length - 1;
+            text = Encoding.Latin1.GetString(bytes, 0, 1) + Encoding.Unicode.GetString(bytes, 1, rest - (rest % 2));
         }
         else
         {
@@ -85,16 +92,62 @@ public static class AccoreConsoleScriptCheck
         return text.Replace("\0", "");
     }
 
-    private static bool LooksLikeUtf16Le(byte[] bytes)
+    /// <summary>
+    /// Strips what makes accoreconsole output unreadable inside a JSON envelope: NUL and other C0
+    /// control characters (backspace spinners, form feeds) except TAB/CR/LF, and the console's
+    /// doubled "\r\r\n" line ends. Very long output keeps its head and tail with a marker.
+    /// </summary>
+    public static string CleanForReport(string? text, int maxChars = 64 * 1024)
     {
-        var sample = Math.Min(bytes.Length - (bytes.Length % 2), 8192);
+        if (string.IsNullOrEmpty(text))
+        {
+            return "";
+        }
+
+        var sb = new StringBuilder(text.Length);
+        foreach (var ch in text)
+        {
+            var keep = ch == '\t' || ch == '\r' || ch == '\n' || (ch >= ' ' && ch != '\u007f');
+            if (!keep)
+            {
+                continue;
+            }
+
+            // Runs of U+FFFD (undecodable bytes) collapse to one so binary noise stays short.
+            if (ch == '\uFFFD' && sb.Length > 0 && sb[^1] == '\uFFFD')
+            {
+                continue;
+            }
+
+            sb.Append(ch);
+        }
+
+        var cleaned = sb.ToString();
+        while (cleaned.Contains("\r\r\n", StringComparison.Ordinal))
+        {
+            cleaned = cleaned.Replace("\r\r\n", "\r\n", StringComparison.Ordinal);
+        }
+
+        if (maxChars <= 0 || cleaned.Length <= maxChars)
+        {
+            return cleaned;
+        }
+
+        var half = maxChars / 2;
+        return cleaned[..half] + $"\r\n...[{cleaned.Length - (half * 2)} chars omitted]...\r\n" + cleaned[^half..];
+    }
+
+    private static bool LooksLikeUtf16Le(byte[] bytes, int offset)
+    {
+        var available = bytes.Length - offset;
+        var sample = Math.Min(available - (available % 2), 8192);
         if (sample < 2)
         {
             return false;
         }
 
         int oddZeros = 0, evenZeros = 0;
-        for (var i = 0; i < sample; i += 2)
+        for (var i = offset; i < offset + sample; i += 2)
         {
             if (bytes[i] == 0)
             {

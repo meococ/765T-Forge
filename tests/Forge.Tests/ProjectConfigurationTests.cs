@@ -97,6 +97,63 @@ public sealed class ProjectConfigurationTests
         Assert.Contains("RejectControlChars", source);
     }
 
+    [Fact]
+    public void ExecLispEvaluatesSynchronouslyAndKeepsTheQueuedPathAsFallbackOnly()
+    {
+        var source = File.ReadAllText(Path.Combine(RepoRoot(), "src", "Forge.Plugin", "PluginCommandProcessor.Lisp.cs"));
+
+        // acedEvaluateLisp returns the value; Editor.Command(lisp) always threw eInvalidInput and fell back to queueing.
+        Assert.Contains("acedEvaluateLisp", source);
+        Assert.Contains("LispEval.Wrap", source);
+        Assert.DoesNotContain("ActiveEditor.Command(lisp", source);
+        Assert.DoesNotContain(".Command(normalized", source);
+        // The queued path survives only for a missing export, and says so.
+        Assert.Contains("queued_fallback", source);
+        Assert.Contains("EntryPointNotFoundException", source);
+        Assert.Contains("unsafe_not_acknowledged", source);
+    }
+
+    [Fact]
+    public void PlotNeverRunsWithTheViewerDeviceAndRefreshesTheDeviceList()
+    {
+        var source = File.ReadAllText(Path.Combine(RepoRoot(), "src", "Forge.Plugin", "PluginCommandProcessor.Plot.cs"));
+
+        Assert.Contains("PrepareNoViewerDevice", source);
+        Assert.Contains("Pc3File.ViewerProperty", source);
+        Assert.Contains("plot_viewer_suppression_failed", source);
+        Assert.Contains("RefreshList", source);
+        // Background plotting would return before the PDF exists; it is forced off and restored.
+        Assert.Contains("BACKGROUNDPLOT", source);
+        Assert.Contains("plot_overwrite_not_acknowledged", source);
+    }
+
+    [Fact]
+    public void DocActivateRunsInApplicationContextWithReadBack()
+    {
+        var root = RepoRoot();
+        var pipe = File.ReadAllText(Path.Combine(root, "src", "Forge.Plugin", "NamedPipePluginServer.cs"));
+        var tool = File.ReadAllText(Path.Combine(root, "src", "Forge.Plugin", "PluginCommandProcessor.DocActivate.cs"));
+
+        Assert.Contains("DocumentContextPolicy.RunsInApplicationContext", pipe); // fix-smoke-20261029 D1: doc_activate/new/open share the Idle lane
+        Assert.Contains("ExecuteDocActivateWhenIdleAsync", pipe);
+        Assert.Contains("DocumentMatcher.Match", pipe);
+        Assert.Contains("DocumentMatcher.Match", tool);
+        Assert.Contains("ReadBackActiveDocument", tool);
+        Assert.Contains("doc_activate_unconfirmed", tool);
+        Assert.Contains("ambiguous_document", tool);
+    }
+
+    [Fact]
+    public void RunScriptDrivesLispThroughAGeneratedLoaderAndCleansOutput()
+    {
+        var source = File.ReadAllText(Path.Combine(RepoRoot(), "src", "Forge.Server", "HeadlessAccoreConsoleRunner.cs"));
+
+        Assert.Contains("AccoreScriptPlan.TryGetKind", source);
+        Assert.Contains("AccoreScriptPlan.LoaderScriptBytes", source);
+        Assert.Contains("CleanForReport", source);
+        Assert.Contains("unsupported_script_type", source);
+    }
+
     private static string RepoRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

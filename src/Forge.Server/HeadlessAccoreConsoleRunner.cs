@@ -197,6 +197,13 @@ public sealed class HeadlessAccoreConsoleRunner
             return ForgeResult.Failure(commandId, "script_not_found", $"Script file not found: {scriptPath}");
         }
 
+        if (!AccoreScriptPlan.TryGetKind(scriptPath, out var scriptKind, out var kindError))
+        {
+            return ForgeResult.Failure(commandId, "unsupported_script_type", kindError!, "Pass a .scr command script or a .lsp AutoLISP file.");
+        }
+
+        // The safety scan runs on the user's own script bytes (.scr commands or .lsp source); the
+        // generated .scr loader for a .lsp is Forge's trusted text and is never re-scanned.
         var scriptBytes = await File.ReadAllBytesAsync(scriptPath, cancellationToken).ConfigureAwait(false);
         var scriptText = AccoreConsoleScriptCheck.DecodeOutput(scriptBytes);
         var scriptDecision = _safetyPolicy.EvaluateText("forge_run_script", scriptText);
@@ -211,6 +218,7 @@ public sealed class HeadlessAccoreConsoleRunner
             return ForgeResult.Failure(commandId, "accoreconsole_not_found", $"accoreconsole.exe not found at {accoreconsole}.");
         }
 
+        var scriptKindName = scriptKind == AccoreScriptPlan.ScriptKind.Lisp ? "lsp" : "scr";
         if (dryRun)
         {
             return ForgeResult.Success(commandId, new
@@ -218,14 +226,30 @@ public sealed class HeadlessAccoreConsoleRunner
                 wouldRun = accoreconsole,
                 dwgPath,
                 scriptPath,
+                scriptKind = scriptKindName,
+                loader = scriptKind == AccoreScriptPlan.ScriptKind.Lisp
+                    ? AccoreScriptPlan.LoaderScript(Path.Combine(Path.GetTempPath(), "forge-script-<id>.lsp"))
+                    : null,
                 backup = _backupPlanner.PlanBackupPath(dwgPath)
             });
         }
 
         var backupPath = _backupPlanner.TryBackup(dwgPath);
-        var ext = string.IsNullOrWhiteSpace(Path.GetExtension(scriptPath)) ? ".scr" : Path.GetExtension(scriptPath);
-        var tempScriptPath = Path.Combine(Path.GetTempPath(), $"forge-script-{commandId}-{Guid.NewGuid():N}{ext}");
-        await File.WriteAllBytesAsync(tempScriptPath, scriptBytes, cancellationToken).ConfigureAwait(false);
+        var tempStem = Path.Combine(Path.GetTempPath(), $"forge-script-{commandId}-{Guid.NewGuid():N}");
+        var tempScriptPath = tempStem + ".scr";
+        string? tempLispPath = null;
+        if (scriptKind == AccoreScriptPlan.ScriptKind.Lisp)
+        {
+            // accoreconsole /s only runs .scr ("probe.lsp" → "probe.lsp.scr: Can't find file"),
+            // so the verified .lsp bytes are loaded by a generated .scr.
+            tempLispPath = tempStem + ".lsp";
+            await File.WriteAllBytesAsync(tempLispPath, scriptBytes, cancellationToken).ConfigureAwait(false);
+            await File.WriteAllBytesAsync(tempScriptPath, AccoreScriptPlan.LoaderScriptBytes(tempLispPath), cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            await File.WriteAllBytesAsync(tempScriptPath, scriptBytes, cancellationToken).ConfigureAwait(false);
+        }
 
         try
         {
@@ -256,8 +280,8 @@ public sealed class HeadlessAccoreConsoleRunner
                 var stdoutTask = ReadAllBytesAsync(process.StandardOutput.BaseStream, timeoutCts.Token);
                 var stderrTask = ReadAllBytesAsync(process.StandardError.BaseStream, timeoutCts.Token);
                 await process.WaitForExitAsync(timeoutCts.Token).ConfigureAwait(false);
-                var stdout = AccoreConsoleScriptCheck.DecodeOutput(await stdoutTask.ConfigureAwait(false));
-                var stderr = AccoreConsoleScriptCheck.DecodeOutput(await stderrTask.ConfigureAwait(false));
+                var stdout = AccoreConsoleScriptCheck.CleanForReport(AccoreConsoleScriptCheck.DecodeOutput(await stdoutTask.ConfigureAwait(false)));
+                var stderr = AccoreConsoleScriptCheck.CleanForReport(AccoreConsoleScriptCheck.DecodeOutput(await stderrTask.ConfigureAwait(false)));
 
                 if (process.ExitCode != 0)
                 {
@@ -271,10 +295,10 @@ public sealed class HeadlessAccoreConsoleRunner
                         AccoreConsoleScriptCheck.ErrorCode,
                         "accoreconsole exited 0, but stdout/stderr reported a script error (*Cancel*, Unknown command, or *Invalid*).",
                         "Inspect data.stdout / data.stderr and fix the script tokens.",
-                        data: new { exitCode = process.ExitCode, stdout, stderr, backupPath });
+                        data: new { exitCode = process.ExitCode, scriptKind = scriptKindName, stdout, stderr, backupPath });
                 }
 
-                return ForgeResult.Success(commandId, new { exitCode = process.ExitCode, stdout, stderr, backupPath });
+                return ForgeResult.Success(commandId, new { exitCode = process.ExitCode, scriptKind = scriptKindName, stdout, stderr, backupPath });
             }
             catch (OperationCanceledException)
             {
@@ -300,6 +324,11 @@ public sealed class HeadlessAccoreConsoleRunner
                 if (File.Exists(tempScriptPath))
                 {
                     File.Delete(tempScriptPath);
+                }
+
+                if (tempLispPath is not null && File.Exists(tempLispPath))
+                {
+                    File.Delete(tempLispPath);
                 }
             }
             catch

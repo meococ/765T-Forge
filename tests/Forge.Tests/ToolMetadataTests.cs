@@ -177,6 +177,102 @@ public sealed class ToolMetadataTests
     }
 
     [Fact]
+    public void ReliabilityWaveToolsContract()
+    {
+        // forge_doc_activate switches the active drawing only: it writes nothing to any DWG (no backup,
+        // not destructive), repeating it lands in the same state (idempotent), typed params only.
+        var activate = ForgeToolRegistry.Get("forge_doc_activate");
+        Assert.Equal("document", activate.Group);
+        Assert.False(activate.ReadOnly);
+        Assert.False(activate.Destructive);
+        Assert.True(activate.Idempotent);
+        Assert.False(activate.OpenWorld);
+        Assert.False(activate.RequiresBackup);
+        Assert.False(activate.Unsafe);
+
+        // forge_text_list is a pure read (block-aware text content).
+        var textList = ForgeToolRegistry.Get("forge_text_list");
+        Assert.True(textList.ReadOnly);
+        Assert.False(textList.RequiresBackup);
+
+        var policy = new SafetyPolicy();
+        Assert.True(policy.Evaluate(new ForgeCommand { Tool = "forge_doc_activate", Args = ForgeJson.ToElement(new { name = "Plan1.dwg" }) }).Allowed);
+        Assert.True(policy.Evaluate(new ForgeCommand { Tool = "forge_text_list", Args = ForgeJson.ToElement(new { includeBlocks = true }) }).Allowed);
+
+        // exec_lisp stays behind the unsafe acknowledgement even though it now returns its value synchronously.
+        Assert.True(ForgeToolRegistry.Get("forge_exec_lisp").Unsafe);
+        Assert.False(policy.Evaluate(new ForgeCommand { Tool = "forge_exec_lisp", Args = ForgeJson.ToElement(new { lisp = "(+ 1 2)" }) }).Allowed);
+
+        foreach (var profile in new[] { "core", "linework", "authoring" })
+        {
+            Assert.True(ToolProfiles.TryGet(profile, out var tools));
+            Assert.Contains("forge_doc_activate", tools);
+            Assert.Contains("forge_text_list", tools);
+        }
+    }
+
+    [Fact]
+    public void SpeedWaveToolsContract()
+    {
+        // forge_doc_import / forge_block_insert_bulk can redefine existing blocks (replaceExisting /
+        // redefine) and the import renames/merges layers: destructive with a pre-write backup.
+        foreach (var name in new[] { "forge_doc_import", "forge_block_insert_bulk" })
+        {
+            var tool = ForgeToolRegistry.Get(name);
+            Assert.False(tool.ReadOnly, name);
+            Assert.True(tool.Destructive, name);
+            Assert.True(tool.RequiresBackup, name);
+            Assert.False(tool.Idempotent, name);
+            Assert.False(tool.OpenWorld, name);
+            Assert.False(tool.Unsafe, name);
+        }
+
+        Assert.Equal("document", ForgeToolRegistry.Get("forge_doc_import").Group);
+        Assert.Equal("block", ForgeToolRegistry.Get("forge_block_insert_bulk").Group);
+
+        // Standards import follows the style-tool policy (overwrite restyles existing objects).
+        var standards = ForgeToolRegistry.Get("forge_standards_import");
+        Assert.Equal("style", standards.Group);
+        Assert.True(standards.Destructive);
+        Assert.True(standards.RequiresBackup);
+        Assert.True(standards.Idempotent);
+        Assert.False(standards.OpenWorld);
+
+        // Plot preset rewrites layout plot settings like forge_layout_page_setup_apply.
+        var preset = ForgeToolRegistry.Get("forge_plot_preset_apply");
+        Assert.Equal("plot", preset.Group);
+        Assert.False(preset.ReadOnly);
+        Assert.False(preset.Destructive);
+        Assert.True(preset.Idempotent);
+        Assert.True(preset.RequiresBackup);
+
+        // Annotation QA is a pure read.
+        var clash = ForgeToolRegistry.Get("forge_qa_annotation_clash");
+        Assert.Equal("qa", clash.Group);
+        Assert.True(clash.ReadOnly);
+        Assert.False(clash.RequiresBackup);
+
+        // Typed params only: SafetyPolicy allows them without an unsafe acknowledgement.
+        var policy = new SafetyPolicy();
+        Assert.True(policy.Evaluate(new ForgeCommand { Tool = "forge_doc_import", Args = ForgeJson.ToElement(new { path = @"C:\in\plan.dxf", mode = "block" }) }).Allowed);
+        Assert.True(policy.Evaluate(new ForgeCommand { Tool = "forge_standards_import", Args = ForgeJson.ToElement(new { templatePath = @"C:\std\office.dwt", onConflict = "overwrite" }) }).Allowed);
+        Assert.True(policy.Evaluate(new ForgeCommand { Tool = "forge_block_insert_bulk", Args = ForgeJson.ToElement(new { blockName = "VAV", items = new[] { new { position = new[] { 0.0, 0.0 } } } }) }).Allowed);
+        Assert.True(policy.Evaluate(new ForgeCommand { Tool = "forge_plot_preset_apply", Args = ForgeJson.ToElement(new { layouts = new[] { "*" }, scale = "fit" }) }).Allowed);
+        Assert.True(policy.Evaluate(new ForgeCommand { Tool = "forge_qa_annotation_clash", Args = ForgeJson.ToElement(new { plotScale = 100 }) }).Allowed);
+
+        Assert.True(ToolProfiles.TryGet("authoring", out var authoring));
+        foreach (var name in new[] { "forge_doc_import", "forge_standards_import", "forge_block_insert_bulk", "forge_plot_preset_apply", "forge_qa_annotation_clash" })
+        {
+            Assert.Contains(name, authoring);
+        }
+
+        Assert.True(ToolProfiles.TryGet("qa", out var qa));
+        Assert.Contains("forge_qa_annotation_clash", qa);
+        Assert.True(ToolProfiles.TryGet("plot", out var plot));
+        Assert.Contains("forge_plot_preset_apply", plot);
+    }
+
+    [Fact]
     public void McpToolAnnotationsAreConsistent()
     {
         foreach (var meta in ForgeToolRegistry.All)
