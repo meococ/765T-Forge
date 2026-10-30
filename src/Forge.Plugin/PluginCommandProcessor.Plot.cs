@@ -479,7 +479,7 @@ public sealed partial class PluginCommandProcessor
         }
 
         // fix-smoke-20261029-r2 D12: with no caller plotArea the layout's OWN stored plot type
-        // wins (AEON sheets store Window + a stored window; the old default silently plotted
+        // wins (client sheets store Window + a stored window; the old default silently plotted
         // "layout" and produced an empty PDF). Stored type/window/view read is best-effort —
         // an unreadable stored setup falls back to the previous defaults.
         StoredPlotType? storedPlotType = null;

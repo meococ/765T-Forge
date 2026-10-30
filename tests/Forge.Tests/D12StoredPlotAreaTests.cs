@@ -3,7 +3,7 @@ using Forge.Shared;
 namespace Forge.Tests;
 
 /// <summary>
-/// smoke r2 D12: with no caller plotArea the layout's stored plot type wins (AEON sheets
+/// smoke r2 D12: with no caller plotArea the layout's stored plot type wins (client sheets
 /// store Window + a stored window) — the default must not silently become layout/extents —
 /// and a PDF that comes out EMPTY is a failure, never a warning.
 /// live-smoke-20261030 fix4: the stored type arrives as <see cref="StoredPlotType"/> BY NAME —

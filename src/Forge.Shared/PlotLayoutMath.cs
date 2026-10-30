@@ -253,7 +253,7 @@ public static class PlotLayoutMath
     /// own stored plot type (<see cref="StoredPlotType"/> by name — stored Window carries the
     /// layout's stored window box, stored View needs its stored view name), and only when the
     /// stored type is unusable do the media/default rules apply. The stored-window case is
-    /// what the r2 smoke missed: AEON sheets store Window and the old code silently plotted
+    /// what the r2 smoke missed: client sheets store Window and the old code silently plotted
     /// "layout" into an empty PDF.
     /// </summary>
     public static PlotAreaResolution ResolveArea(
