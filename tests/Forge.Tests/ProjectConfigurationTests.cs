@@ -140,6 +140,12 @@ public sealed class ProjectConfigurationTests
         // The document-restore entry point exists for the settled lane ticks.
         Assert.Contains("internal bool TryRestoreDgnDocument(DgnImportRun run)", dgn);
 
+        // review-r4 F1/F6: every RestoreDgnSysvars caller must be SysvarsRestored-gated
+        // (queued callback, EndDgnImport finally, CleanupDgnImport drain, DgnImport catch
+        // stamps directly) so a late restore cannot stomp post-answer user changes.
+        var gateCount = dgn.Split(new[] { "if (!run.SysvarsRestored)" }, StringSplitOptions.None).Length - 1;
+        Assert.True(gateCount >= 3, $"expected >=3 SysvarsRestored-gated restore callers, found {gateCount}");
+
         // Honest reporting: a leftover temp document is a distinct failure code plus a
         // truth field on every DGN result, not ok:true with a footnote.
         Assert.Contains("dgn_temp_document_leaked", dgn);

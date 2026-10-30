@@ -322,6 +322,9 @@ public sealed partial class PluginCommandProcessor
         {
             // The leg never queued (marshal threw before the sentinel returned) — no
             // command session exists, so the synchronous restore is still safe here.
+            // review-r4 F7: stamp Abandoned so a queued leg that somehow still lands
+            // later never queues a stale restore.
+            run.Abandoned = true;
             TryRestoreDgnDocument(run);
             RestoreDgnSysvars(run);
             run.SysvarsRestored = true;
@@ -361,7 +364,7 @@ public sealed partial class PluginCommandProcessor
                     command.Id,
                     "dgn_context_restore_timeout",
                     "-DGNIMPORT finished but AutoCAD did not dispatch the queued application-context callback before the request deadline; the temporary document is still open.",
-                    $"The leftover document ({run.TempDocName ?? "DrawingN.dwg"}) is empty and unsaved — close it by hand in AutoCAD, or leave it: the plugin's Terminate drain discards it at program close. Check for a dialog or a running command holding AutoCAD, then retry.",
+                    $"The leftover document ({run.TempDocName ?? "DrawingN.dwg"}) holds the imported entities and is unsaved — close it by hand in AutoCAD, or leave it: the plugin's Terminate drain discards it at program close. Check for a dialog or a running command holding AutoCAD, then retry.",
                     data: new { tempDocumentClosed = run.TempClosed, tempDocumentLeaked = !run.TempClosed, tempDocumentName = run.TempDocName }));
             }
 
@@ -419,7 +422,7 @@ public sealed partial class PluginCommandProcessor
                     command.Id,
                     "dgn_temp_document_leaked",
                     $"-DGNIMPORT completed ({run.EntityCount} entities) but the temporary document ({run.TempDocName ?? "DrawingN.dwg"}) could not be closed before the request deadline.",
-                    "The leftover document is empty and unsaved — close it by hand in AutoCAD, or leave it: the plugin's Terminate drain discards it at program close. A dialog or a running command may have blocked the close; check AutoCAD and retry.",
+                    "The leftover document holds the imported entities and is unsaved — close it by hand in AutoCAD, or leave it: the plugin's Terminate drain discards it at program close. A dialog or a running command may have blocked the close; check AutoCAD and retry.",
                     data: new
                     {
                         dgnPath = run.DgnPath,
@@ -453,6 +456,7 @@ public sealed partial class PluginCommandProcessor
                     targetBackup = run.TargetBackup,
                     tempDocumentClosed = run.TempClosed,
                     tempDocumentLeaked = false,
+                    tempDocumentName = run.TempDocName,
                     proxynotice = run.ProxyNotice
                 },
                 verification: new ForgeVerification
@@ -486,8 +490,14 @@ public sealed partial class PluginCommandProcessor
     internal void CleanupDgnImport(DgnImportRun run)
     {
         TryRestoreDgnDocument(run);
-        RestoreDgnSysvars(run);
-        run.SysvarsRestored = true;
+        // review-r4 F1: gate like every other caller — on mirrored already-answered
+        // runs (leak / restore-timeout) an unconditional restore here would revert
+        // sysvar changes the user made after the answer.
+        if (!run.SysvarsRestored)
+        {
+            RestoreDgnSysvars(run);
+            run.SysvarsRestored = true;
+        }
     }
 
     /// <summary>
