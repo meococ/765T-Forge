@@ -120,56 +120,101 @@ public sealed class D13ZeroDocumentPolicyTests
     }
 }
 
-public sealed class D13ZeroDocumentAnswerTests
+/// <summary>review-wp2-r1 finding 1 (D13): the fixed-time pipe-token gate every lane passes first.</summary>
+public sealed class D13PipeAuthTests
 {
-    [Fact]
-    public void HealthAnswersOkWithZeroDocumentsAndAHint()
-    {
-        var result = DocumentContextPolicy.ZeroDocumentAnswer("cmd-1", "forge_system_health");
-        Assert.NotNull(result);
-        Assert.True(result!.Ok);
-        Assert.Null(result.Error);
-        var json = System.Text.Json.JsonSerializer.Serialize(result.Data);
-        Assert.Contains("\"documents\":0", json, StringComparison.Ordinal);
-        Assert.Contains("forge_doc_new", json, StringComparison.Ordinal);
-        Assert.Contains("forge_doc_open", json, StringComparison.Ordinal);
-    }
+    [Theory]
+    [InlineData("abc", "abc", true)]
+    [InlineData("abc", "abd", false)]
+    [InlineData("abc", "abcd", false)]
+    [InlineData(null, "expected", false)]
+    [InlineData("", "expected", false)]
+    [InlineData("", "", true)]
+    [InlineData(null, null, true)]
+    public void TokensCompareInFixedTime(string? token, string? expected, bool matches)
+        => Assert.Equal(matches, PipeAuth.TokenMatches(token, expected));
 
     [Fact]
-    public void DocListOpenAnswersWithAnEmptyDocumentList()
+    public void ASharedHintNamesTheRecoveryTools()
     {
-        var result = DocumentContextPolicy.ZeroDocumentAnswer("cmd-2", "forge_doc_list_open");
-        Assert.NotNull(result);
-        Assert.True(result!.Ok);
-        Assert.Contains("\"documents\":[]", System.Text.Json.JsonSerializer.Serialize(result.Data), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void VersionStillRidesTheIdleMarshal()
-    {
-        Assert.Null(DocumentContextPolicy.ZeroDocumentAnswer("cmd-3", "forge_system_version"));
-    }
-
-    [Fact]
-    public void DocumentToolsNeverGetASynthesizedAnswer()
-    {
-        Assert.Null(DocumentContextPolicy.ZeroDocumentAnswer("cmd-4", "forge_draw_line"));
-        Assert.Null(DocumentContextPolicy.ZeroDocumentAnswer("cmd-5", "forge_plot_to_pdf"));
+        // The Start-tab guidance the real Health() emits at 0 documents (folded into the real
+        // handler so the token check, audit record and full field set apply — no synthesized answer).
+        Assert.Contains("forge_doc_new", DocumentContextPolicy.ZeroDocumentHint, StringComparison.Ordinal);
+        Assert.Contains("forge_doc_open", DocumentContextPolicy.ZeroDocumentHint, StringComparison.Ordinal);
     }
 }
 
-/// <summary>D13 plugin wiring guards.</summary>
+/// <summary>D13 + review-wp2-r1 findings 1–2 plugin wiring guards.</summary>
 public sealed class D13ZeroDocumentSourceGuards
 {
     private static string ServerSource()
         => File.ReadAllText(Path.Combine(PluginDispatchSyncTests.RepoPath("src", "Forge.Plugin"), "NamedPipePluginServer.cs"));
+
+    private static string ProcessorSource()
+        => File.ReadAllText(Path.Combine(PluginDispatchSyncTests.RepoPath("src", "Forge.Plugin"), "PluginCommandProcessor.cs"));
+
+    private static string MethodBody(string source, string signature)
+    {
+        var start = source.IndexOf(signature, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"method not found: {signature}");
+        var end = System.Text.RegularExpressions.Regex.Match(source[start..], @"\n    \}\r?\n");
+        Assert.True(end.Success, $"end of method not found: {signature}");
+        return source.Substring(start, end.Index + end.Length);
+    }
+
+    [Fact]
+    public void TheDispatchAuthenticatesBeforeItRoutes()
+    {
+        // A bad token at 0 documents must get `unauthorized` for health, doc_list_open AND a
+        // doc-needing tool — never `ok` (the r1 break: the synthesized lane skipped Process).
+        var body = MethodBody(ServerSource(), "private Task<ForgeResult> ExecuteOnMainThreadAsync(");
+        var verify = body.IndexOf("VerifyToken(command)", StringComparison.Ordinal);
+        var route = body.IndexOf("DocumentContextPolicy.Route(", StringComparison.Ordinal);
+        Assert.True(verify >= 0 && route > verify, "the token check must run before DocumentContextPolicy.Route so every lane — refusals included — is authenticated");
+    }
+
+    [Fact]
+    public void TheZeroDocumentLaneRunsThroughProcessOnTheIdleMarshal()
+    {
+        var body = MethodBody(ServerSource(), "private Task<ForgeResult> ExecuteOnMainThreadAsync(");
+        // The synthesized answer is gone: the lane reaches _processor.Process via the Idle marshal.
+        Assert.DoesNotContain("ZeroDocumentAnswer", body, StringComparison.Ordinal);
+        var lane = body.IndexOf("DocDispatchDecision.ZeroDocumentLane", StringComparison.Ordinal);
+        var idle = body.IndexOf("ExecuteWhenIdleAsync(command)", StringComparison.Ordinal);
+        Assert.True(lane >= 0 && idle > lane, "the zero-document lane must marshal to the Idle lane, not answer inline");
+
+        var idleBody = MethodBody(ServerSource(), "private Task<ForgeResult> ExecuteWhenIdleAsync(");
+        Assert.Contains("_processor.Process(command)", idleBody, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ProcessKeepsItsOwnTokenCheckAndWritesTheAuditRecord()
+    {
+        var body = MethodBody(ProcessorSource(), "public ForgeResult Process(");
+        var verify = body.IndexOf("VerifyToken(command)", StringComparison.Ordinal);
+        var audit = body.IndexOf("_auditSink.WriteBestEffort(", StringComparison.Ordinal);
+        Assert.True(verify >= 0, "Process must keep its own token check (single enforcement point)");
+        Assert.True(audit > verify, "the audit record is written for calls that pass the token check");
+    }
+
+    [Fact]
+    public void TheRealHealthHandlerCarriesTheFullFieldSet()
+    {
+        // good token at 0 documents ⇒ health answers with pipe, targetYear, hostYear,
+        // documents: 0 and the hint — the fields the synthesized answer dropped (finding 2).
+        var body = MethodBody(ProcessorSource(), "private ForgeResult Health(");
+        Assert.Contains("pipe", body, StringComparison.Ordinal);
+        Assert.Contains("targetYear", body, StringComparison.Ordinal);
+        Assert.Contains("hostYear", body, StringComparison.Ordinal);
+        Assert.Contains("documents", body, StringComparison.Ordinal);
+        Assert.Contains("DocumentContextPolicy.ZeroDocumentHint", body, StringComparison.Ordinal);
+    }
 
     [Fact]
     public void TheDispatchRoutesThroughTheSharedPolicy()
     {
         var source = ServerSource();
         Assert.Contains("DocumentContextPolicy.Route(", source, StringComparison.Ordinal);
-        Assert.Contains("DocumentContextPolicy.ZeroDocumentAnswer(", source, StringComparison.Ordinal);
         Assert.Contains("no_active_document", source, StringComparison.Ordinal);
         Assert.Contains("no_command_context", source, StringComparison.Ordinal);
         // The decision must be taken before any marshal — never inside the command context.

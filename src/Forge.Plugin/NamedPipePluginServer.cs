@@ -11,7 +11,8 @@ namespace Forge.Plugin;
 public sealed class NamedPipePluginServer : IDisposable
 {
     // Document-free dispatch is decided by Forge.Shared.DocumentContextPolicy.Route (D13): the
-    // Start-tab tool set, the zero-document answer and both fail-fast codes live there.
+    // document-free tool set and both fail-fast codes live there. Every lane authenticates via
+    // PluginCommandProcessor.VerifyToken before routing (review-wp2-r1 finding 1).
     private readonly ForgeEnvironment _environment;
     private readonly PluginCommandProcessor _processor;
     private readonly CancellationTokenSource _shutdown = new();
@@ -226,11 +227,21 @@ public sealed class NamedPipePluginServer : IDisposable
 
     private Task<ForgeResult> ExecuteOnMainThreadAsync(ForgeCommand command)
     {
+        // review-wp2-r1 finding 1 (D13): authenticate BEFORE any routing — the zero-document lane
+        // and the fail-fast refusals used to answer unauthenticated (an ok health answer and no
+        // audit record). A bad token now gets `unauthorized` on every lane; Process re-checks it
+        // for the lanes that run through it.
+        if (_processor.VerifyToken(command) is { } unauthorized)
+        {
+            return Task.FromResult(unauthorized);
+        }
+
         // smoke-r2 D13: the Shared decision table decides BEFORE any marshal. Zero documents means a
         // command context can never exist, so document tools fail fast instead of wedging the pipe
-        // for the whole timeout; Start-tab diagnostics get their zero-document answer; a missing
-        // active document with open documents keeps the no_command_context refusal. The dispatch
-        // itself must never depend on AutoCAD going idle.
+        // for the whole timeout; document-free tools ride the Idle marshal into the real handlers
+        // (token check, audit record and every Process gate apply there); a missing active document
+        // with open documents keeps the no_command_context refusal. The dispatch itself must never
+        // depend on AutoCAD going idle.
         var documentCount = Application.DocumentManager.Count;
         var hasActiveDocument = Application.DocumentManager.MdiActiveDocument is not null;
         switch (DocumentContextPolicy.Route(command.Tool, documentCount, hasActiveDocument))
@@ -241,11 +252,10 @@ public sealed class NamedPipePluginServer : IDisposable
                 return ExecuteDocActivateWhenIdleAsync(command);
 
             case DocDispatchDecision.ZeroDocumentLane:
-                return DocumentContextPolicy.ZeroDocumentAnswer(command.Id, command.Tool) is { } answer
-                    ? Task.FromResult(answer)
-                    : ExecuteWhenIdleAsync(command);
-
             case DocDispatchDecision.IdleLane:
+                // Every handler in DocumentContextPolicy.ZeroDocumentTools is document-free, so at
+                // zero documents the real Health()/ListOpenDocuments()/Version()/store/sysvar
+                // handlers answer through Process — with the audit record written.
                 return ExecuteWhenIdleAsync(command);
 
             case DocDispatchDecision.FailNoActiveDocument:

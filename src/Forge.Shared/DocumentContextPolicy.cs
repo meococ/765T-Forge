@@ -6,7 +6,7 @@ public enum DocDispatchDecision
     /// <summary>Document lifecycle tool: always the application-context Idle marshal.</summary>
     ApplicationLane,
 
-    /// <summary>Document-free tool, zero open documents: the zero-document answer (synthesized where possible).</summary>
+    /// <summary>Document-free tool, zero open documents: the Idle marshal (every handler in the set is document-free).</summary>
     ZeroDocumentLane,
 
     /// <summary>Document-free tool, documents open but none active: the Idle marshal (no command context needed).</summary>
@@ -38,9 +38,11 @@ public static class DocumentContextPolicy
     };
 
     /// <summary>
-    /// smoke-r2 D13: tools that answer while AutoCAD sits on the Start tab. With zero documents
-    /// they take the zero-document lane (health/doc_list_open get a synthesized answer, version the
-    /// idle marshal); with documents open but none active they ride the Idle marshal.
+    /// smoke-r2 D13 + review-wp2-r1 findings 1–3: tools whose handlers never touch the active
+    /// document or database. With zero documents they take the zero-document lane, which is the
+    /// Idle marshal — the real handlers answer (health reports documents: 0 + the hint), so the
+    /// token check, the audit record and every other Process gate still apply. With documents
+    /// open but none active they ride the same Idle marshal.
     /// </summary>
     public static readonly IReadOnlySet<string> ZeroDocumentTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
@@ -78,7 +80,7 @@ public static class DocumentContextPolicy
     /// fail-fast code. Zero documents means a command context can never exist, so document tools fail
     /// immediately (no_active_document) instead of waiting out the request deadline; documents open
     /// but none active keep the no_command_context refusal for the same reason; the lifecycle tools
-    /// always take the application lane and the Start-tab diagnostics take the document-free lanes.
+    /// always take the application lane and the document-free tools take the idle lanes.
     /// </summary>
     public static DocDispatchDecision Route(string tool, int documentCount, bool hasActiveDocument)
     {
@@ -101,23 +103,12 @@ public static class DocumentContextPolicy
     }
 
     /// <summary>
-    /// The zero-document lane answer for a Start-tab tool, or null when the tool needs the Idle
-    /// marshal instead (forge_system_version reports host build data only AutoCAD can give).
+    /// review-wp2-r1 finding 1 (D13): the Start-tab guidance the real health handler emits when
+    /// <c>Documents.Count == 0</c>. A synthesized zero-document answer was removed — it bypassed
+    /// the pipe-token check and the audit sink and dropped the pipe/targetYear/hostYear fields.
     /// </summary>
-    public static ForgeResult? ZeroDocumentAnswer(string commandId, string tool)
-        => tool.ToLowerInvariant() switch
-        {
-            "forge_system_health" => ForgeResult.Success(commandId, new
-            {
-                status = "ok",
-                server = ForgeConstants.ServerName,
-                documents = 0,
-                activeDocument = (string?)null,
-                hint = "AutoCAD is on the Start tab with no drawing open. Call forge_doc_new or forge_doc_open before using document tools; forge_system_health, forge_system_version and forge_doc_list_open still answer."
-            }),
-            "forge_doc_list_open" => ForgeResult.Success(commandId, new { documents = Array.Empty<object>() }),
-            _ => null
-        };
+    public const string ZeroDocumentHint =
+        "AutoCAD is on the Start tab with no drawing open. Call forge_doc_new or forge_doc_open before using document tools; forge_system_health, forge_system_version and forge_doc_list_open still answer.";
 
     /// <summary>How long (ms since the request started) the Idle lane may keep re-reading the active document.</summary>
     public static long PollWindowMs(string tool, long requestDeadlineMs)

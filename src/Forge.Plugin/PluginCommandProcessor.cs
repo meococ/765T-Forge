@@ -64,13 +64,24 @@ public sealed partial class PluginCommandProcessor
         _auditSink = auditSink;
     }
 
+    /// <summary>
+    /// review-wp2-r1 finding 1 (D13): the pipe-token gate, hoisted so the dispatcher can
+    /// authenticate before routing — the zero-document lane and the fast refusals must answer
+    /// `unauthorized` to a bad token, never `ok`. Process keeps its own check because it stays
+    /// the single enforcement point for every lane that runs through it.
+    /// </summary>
+    internal ForgeResult? VerifyToken(ForgeCommand command)
+    {
+        return PipeAuth.TokenMatches(command.AuthToken, _environment.Token)
+            ? null
+            : ForgeResult.Failure(command.Id, PipeAuth.UnauthorizedCode, "Invalid Forge named pipe token.");
+    }
+
     public ForgeResult Process(ForgeCommand command)
     {
-        var tokenBytes = Encoding.UTF8.GetBytes(command.AuthToken ?? "");
-        var expectedBytes = Encoding.UTF8.GetBytes(_environment.Token ?? "");
-        if (!CryptographicOperations.FixedTimeEquals(tokenBytes, expectedBytes))
+        if (VerifyToken(command) is { } unauthorized)
         {
-            return ForgeResult.Failure(command.Id, "unauthorized", "Invalid Forge named pipe token.");
+            return unauthorized;
         }
 
         // fix-smoke-20261029 D3: every authenticated call opens an undo-ledger scope, so object changes
@@ -387,6 +398,10 @@ public sealed partial class PluginCommandProcessor
     private ForgeResult Health(ForgeCommand command)
     {
         MeasureHostYear();
+        // review-wp2-r1 findings 1–2 (D13): the real handler answers at zero documents too —
+        // it is document-free (ActiveDocumentPath is null-safe) — so the Start-tab answer
+        // carries the same fields as always plus documents: 0 and the recovery hint.
+        var documentCount = Documents.Count;
         return ForgeResult.Success(command.Id, new
         {
             status = "ok",
@@ -394,7 +409,9 @@ public sealed partial class PluginCommandProcessor
             pipe = _environment.PipeName,
             targetYear = TargetYear,
             hostYear = _hostYear,
-            activeDocument = ActiveDocumentPath()
+            documents = documentCount,
+            activeDocument = ActiveDocumentPath(),
+            hint = documentCount == 0 ? DocumentContextPolicy.ZeroDocumentHint : null
         });
     }
 
