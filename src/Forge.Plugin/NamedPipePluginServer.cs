@@ -17,6 +17,9 @@ public sealed class NamedPipePluginServer : IDisposable
     private readonly PluginCommandProcessor _processor;
     private readonly CancellationTokenSource _shutdown = new();
     private Task? _loop;
+    // review-d14-r1 F6: mirrors the in-flight DGN run from the Idle lane so Terminate can
+    // drop the temp document and the scoped sysvars on NETUNLOAD.
+    private PluginCommandProcessor.DgnImportRun? _pendingDgnRun;
 
     public NamedPipePluginServer(ForgeEnvironment environment, PluginCommandProcessor processor)
     {
@@ -53,6 +56,19 @@ public sealed class NamedPipePluginServer : IDisposable
         // this token, and an ObjectDisposedException here would kill the loop silently
         // during teardown.
         _shutdown.Cancel();
+
+        // review-d14-r1 F6: a pending DGN run holds its temp document and the
+        // FILEDIA/DGNIMPORTMODE/PROXYNOTICE scopes; NETUNLOAD mid-leg would leak them to
+        // session end. Terminate runs on the same application context as the Idle lane, so
+        // drain the run inline — CleanupDgnImport is best-effort throughout, and Abandoned
+        // keeps a late context grant from starting the write.
+        var pendingDgnRun = _pendingDgnRun;
+        _pendingDgnRun = null;
+        if (pendingDgnRun is not null)
+        {
+            pendingDgnRun.Abandoned = true;
+            _processor.CleanupDgnImport(pendingDgnRun);
+        }
     }
 
     private static void TryWriteEditorMessage(string message)
@@ -461,13 +477,24 @@ public sealed class NamedPipePluginServer : IDisposable
                         if (!dgnRun.LegStarted && Environment.TickCount64 - startedAt >= staleAfterMs)
                         {
                             dgnRun.Abandoned = true;
-                            Finish(_processor.EndDgnImport(command, dgnRun, contextTimedOut: true));
+                            var timedOutRun = dgnRun;
+                            dgnRun = null;
+                            _pendingDgnRun = null;
+                            Finish(_processor.EndDgnImport(command, timedOutRun, contextTimedOut: true));
                         }
 
                         return;
                     }
 
-                    Finish(_processor.EndDgnImport(command, dgnRun));
+                    // review-d14-r1 F1: clear the field BEFORE EndDgnImport — its document
+                    // close/activate calls can pump a nested Idle tick, which must see
+                    // dgnRun already null (-> first is null -> claimed -> return) instead
+                    // of running a second EndDgnImport. If it throws, the catch below
+                    // reports that failure for this run exactly once.
+                    var finishedRun = dgnRun;
+                    dgnRun = null;
+                    _pendingDgnRun = null;
+                    Finish(_processor.EndDgnImport(command, finishedRun));
                     return;
                 }
 
@@ -475,8 +502,8 @@ public sealed class NamedPipePluginServer : IDisposable
                 {
                     // review-wp2-r2 Q1: claim the command BEFORE Process runs. first stays null
                     // for the whole synchronous Process call, so a nested Application.Idle raise
-                    // during a message-pumping call inside it (Documents.Add / Editor.Command in
-                    // forge_dgn_import) would otherwise re-enter and run the same command twice —
+                    // during a message-pumping call inside it (Documents.Add / MdiActiveDocument
+                    // in forge_dgn_import) would otherwise re-enter and run the same command twice —
                     // a second temp document + -DGNIMPORT. Already-started work runs to
                     // completion, so a nested raise returns regardless of the deadline.
                     if (claimed)
@@ -501,6 +528,7 @@ public sealed class NamedPipePluginServer : IDisposable
                         // ticks instead of answering the sentinel.
                         run.AuditId = first.AuditId;
                         dgnRun = run;
+                        _pendingDgnRun = run;
                         first = null;
                         return;
                     }

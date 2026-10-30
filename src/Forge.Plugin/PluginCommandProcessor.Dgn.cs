@@ -64,7 +64,6 @@ public sealed partial class PluginCommandProcessor
         public System.Exception? LegError { get; set; }
         public int EntityCount { get; set; }
         public int LayerCount { get; set; }
-        public bool Saved { get; set; }
     }
 
     private ForgeResult DgnImport(ForgeCommand command)
@@ -211,7 +210,6 @@ public sealed partial class PluginCommandProcessor
                     {
                         Directory.CreateDirectory(Path.GetDirectoryName(run.TargetPath)!);
                         run.TempDoc.Database.SaveAs(run.TargetPath, DwgVersion.Current);
-                        run.Saved = true;
                     }
                 }
                 catch (System.Exception ex)
@@ -265,7 +263,7 @@ public sealed partial class PluginCommandProcessor
                     "dgn_context_timeout",
                     "AutoCAD did not grant the temporary document's command context before the request deadline; -DGNIMPORT never ran.",
                     "The temporary document was discarded without importing. Retry; if it repeats, a dialog or a running command is likely blocking the command line.",
-                    data: new { run.TempClosed }));
+                    data: new { tempDocumentClosed = run.TempClosed }));
             }
 
             if (run.WrongDocument)
@@ -275,7 +273,7 @@ public sealed partial class PluginCommandProcessor
                     "dgn_temp_document_not_active",
                     $"The temporary document was not the active document when the command context opened (active: {run.ActiveAtDispatch ?? "<none>"}); -DGNIMPORT was not run.",
                     "Another drawing grabbed activation between document creation and command dispatch. Close modal dialogs or palettes that switch drawings and retry.",
-                    data: new { run.TempClosed }));
+                    data: new { tempDocumentClosed = run.TempClosed }));
             }
 
             if (run.LegError is { } legError)
@@ -285,7 +283,7 @@ public sealed partial class PluginCommandProcessor
                     "dgn_import_failed",
                     $"-DGNIMPORT failed: {legError.Message}",
                     "Verify the DGN is V8 and not password-protected. A large DGN can also exceed the plugin response timeout — raise FORGE_PLUGIN_RESPONSE_TIMEOUT_SECONDS and retry with the same args.",
-                    data: new { run.TempClosed }));
+                    data: new { tempDocumentClosed = run.TempClosed }));
             }
 
             if (run.EntityCount == 0)
@@ -295,7 +293,7 @@ public sealed partial class PluginCommandProcessor
                     "dgn_import_empty",
                     $"-DGNIMPORT finished but the fresh document's model space holds 0 entities (dgn: {run.DgnPath}, model: {run.ModelName ?? "<default>"}).",
                     "The DGN may use a differently named design model (pass modelName; the dialog-based DGNIMPORT lists them with '?') or the file may not be a readable V8 DGN.",
-                    data: new { run.TempClosed }));
+                    data: new { tempDocumentClosed = run.TempClosed }));
             }
 
             var outputBytes = new FileInfo(run.TargetPath).Length;
@@ -327,6 +325,17 @@ public sealed partial class PluginCommandProcessor
         {
             RestoreDgnSysvars(run);
         }
+    }
+
+    /// <summary>
+    /// Plugin teardown path for a run still pending at NETUNLOAD: close the temp document
+    /// and restore the scoped sysvars, best-effort throughout. Called from
+    /// NamedPipePluginServer.Dispose on the same application context the Idle lane uses.
+    /// </summary>
+    internal void CleanupDgnImport(DgnImportRun run)
+    {
+        RestoreDgnContext(run);
+        RestoreDgnSysvars(run);
     }
 
     // The previous active document first (so the temp close runs on a non-active doc), then
