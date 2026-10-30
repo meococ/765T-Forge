@@ -12,10 +12,10 @@ Honest status of MCP tools. AutoCAD targets: **2025 and 2026** through the typed
 
 | Tool | Status | Notes |
 |------|--------|-------|
-| `forge_system_health` | implemented | With no open document (Start tab) answers at once from a synthesized payload (`ok`, `documents: 0`, hint to call `forge_doc_new`/`forge_doc_open`); `forge_system_version` / `forge_doc_list_open` also answer there. Every other tool fails fast with `no_active_document` at zero documents, `no_command_context` when documents are open but none is active (fix-smoke-20261029-r2 D13) |
-| `forge_system_version` | implemented | Product + envelope versions |
-| `forge_system_getvar` / `_setvar` | implemented | |
-| `forge_system_capabilities` | implemented | Devices, media, page setups, layouts, layer states, plot styles |
+| `forge_system_health` | implemented | With no open document (Start tab) the real handler answers on the Idle marshal: `ok`, `pipe`, `targetYear`, `hostYear`, `documents: 0`, `hint` to call `forge_doc_new`/`forge_doc_open` — the pipe-token check and audit record apply before any routing (review-wp2-r1 findings 1–2). The document-free tools (`forge_system_version`, `forge_system_getvar`, `forge_system_tool_profile`, `forge_doc_list_open`, `forge_registry_load`/`_lookup`, `forge_pack_load`/`_status`) answer the same way; `forge_dgn_import` runs on the application lane. Every other tool fails fast with `no_active_document` at zero documents, `no_command_context` when documents are open but none is active (fix-smoke-20261029-r2 D13) |
+| `forge_system_version` | implemented | Product + envelope versions; answers at zero documents (document-free) |
+| `forge_system_getvar` / `_setvar` | implemented | `_getvar` answers at zero documents for application-scoped sysvars; a drawing-scoped variable fails typed (no document exists to read it from). `_setvar` still needs a document context |
+| `forge_system_capabilities` | implemented | Devices, media, page setups, layouts, layer states, plot styles — opens a transaction on the active database, so it stays refused with `no_active_document` at zero documents |
 
 ## Document / xref / layer
 
@@ -85,7 +85,7 @@ Authoring contract ([docs/cad-authoring-tools.md](cad-authoring-tools.md)): WCS 
 | `forge_qa_readback_after_timeout` | implemented | Recovery for `plugin_request_timeout` (plugin watchdog) — never retry write blind; pipe stays up |
 | `forge_qa_preflight` | implemented | QaReport + pack v2 + foreground plot + issue-set contract findings |
 | `forge_audit_summarize` | implemented | Server-side last-N audit summary (no raw args) |
-| `forge_issue_set_validate` | implemented | IssueSetContract layouts↔drawingNos↔rev |
+| `forge_issue_set_validate` | implemented | IssueSetContract layouts↔drawingNos↔rev — reads the active database (layout names + block attributes), so it stays refused with `no_active_document` at zero documents |
 | `forge_sheet_inventory_import` | implemented | Read-only CSV → contract (no DST/SSM write) |
 | `forge_issue_set_diff` | implemented | Diff two PublishReceipt artifacts |
 | `forge_recipe_issue_set` | implemented | Normalize → fill → gate → publish |
@@ -97,15 +97,15 @@ Authoring contract ([docs/cad-authoring-tools.md](cad-authoring-tools.md)): WCS 
 
 | Tool | Status | Notes |
 |------|--------|-------|
-| `forge_dgn_import` | partial | DGN **V8** → new DWG via `-DGNIMPORT` in a fresh temp document; V7 refused by header sniff; overwrite ack + destination backup; model-space entity count verification; scoped `PROXYNOTICE=0` during the import (fix-smoke-20261029-r2 D10). Logic unit-tested — **live AutoCAD smoke pending** (C15), incl. temp-document context behaviour |
+| `forge_dgn_import` | partial | DGN **V8** → new DWG via `-DGNIMPORT` in a fresh temp document; V7 refused by header sniff; overwrite ack + destination backup; model-space entity count verification; scoped `PROXYNOTICE=0` during the import (fix-smoke-20261029-r2 D10). Runs on the **application lane** at every document state (review-wp2-r1 finding 3): the handler creates a document (`Documents.Add` + `MdiActiveDocument` + `Editor.Command`), so it must not sit inside a locked command context — and it answers at zero documents. Logic unit-tested — **live AutoCAD smoke pending** (C15), incl. temp-document context behaviour |
 
 ## Registry / standards / viewport / profiles
 
 | Tool | Status | Notes |
 |------|--------|-------|
-| `forge_registry_load` / `_lookup` | implemented | Fail-closed drawing numbers for titleblock tags |
-| `forge_pack_load` / `_status` | implemented | Declarative project standards pack (v2 plot bindings) |
-| `forge_system_tool_profile` | implemented | Profiles `core` / `plot` / `qa` / `linework` / `authoring` (server-side) |
+| `forge_registry_load` / `_lookup` | implemented | Fail-closed drawing numbers for titleblock tags — file JSON + process-wide store only; answers at zero documents |
+| `forge_pack_load` / `_status` | implemented | Declarative project standards pack (v2 plot bindings) — file JSON + process-wide store only; answers at zero documents |
+| `forge_system_tool_profile` | implemented | Profiles `core` / `plot` / `qa` / `linework` / `authoring` (server-side) — static metadata; answers at zero documents |
 | `forge_viewport_list` | implemented | Paper-space viewports |
 | `forge_viewport_set_layer_freeze` | implemented | VP freeze/thaw by handle |
 

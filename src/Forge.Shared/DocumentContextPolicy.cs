@@ -34,7 +34,13 @@ public static class DocumentContextPolicy
         "forge_doc_activate",
         "forge_doc_close",
         "forge_doc_new",
-        "forge_doc_open"
+        "forge_doc_open",
+        // review-wp2-r1 finding 3: forge_dgn_import creates its own temp document
+        // (Documents.Add + MdiActiveDocument + Editor.Command in PluginCommandProcessor.Dgn.cs)
+        // — a document switch inside a locked command context is deferred until the command
+        // ends (same defect class as D1), so the import must run on the application-context
+        // Idle marshal. It also keeps working at zero documents for that reason.
+        "forge_dgn_import"
     };
 
     /// <summary>
@@ -43,12 +49,23 @@ public static class DocumentContextPolicy
     /// Idle marshal — the real handlers answer (health reports documents: 0 + the hint), so the
     /// token check, the audit record and every other Process gate still apply. With documents
     /// open but none active they ride the same Idle marshal.
+    /// Membership rule (finding 3): only a tool whose code provably touches no document or
+    /// database — registry/pack/contract stores, process metadata, application sysvars —
+    /// belongs here. Forge_issue_set_validate (QaAndPublish.cs — ListLayoutNames +
+    /// FindBlockAttributes read the active database) and forge_system_capabilities
+    /// (QaAndPublish.cs — opens a transaction on the active database) stay refused.
     /// </summary>
     public static readonly IReadOnlySet<string> ZeroDocumentTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "forge_system_health",
         "forge_system_version",
-        "forge_doc_list_open"
+        "forge_system_getvar",
+        "forge_system_tool_profile",
+        "forge_doc_list_open",
+        "forge_registry_load",
+        "forge_registry_lookup",
+        "forge_pack_load",
+        "forge_pack_status"
     };
 
     /// <summary>Tools that create, open or close a drawing: they may need longer than a plain switch to settle.</summary>
@@ -108,7 +125,7 @@ public static class DocumentContextPolicy
     /// the pipe-token check and the audit sink and dropped the pipe/targetYear/hostYear fields.
     /// </summary>
     public const string ZeroDocumentHint =
-        "AutoCAD is on the Start tab with no drawing open. Call forge_doc_new or forge_doc_open before using document tools; forge_system_health, forge_system_version and forge_doc_list_open still answer.";
+        "AutoCAD is on the Start tab with no drawing open. Call forge_doc_new or forge_doc_open before using document tools; forge_system_health/version/getvar/tool_profile, forge_doc_list_open and the registry/pack store tools still answer.";
 
     /// <summary>How long (ms since the request started) the Idle lane may keep re-reading the active document.</summary>
     public static long PollWindowMs(string tool, long requestDeadlineMs)

@@ -5,7 +5,7 @@ Use this skill when an agent drives AutoCAD through **765T-Forge** for metro/AEC
 ## Hard rules
 
 - Prefer **typed tools** (`forge_<group>_<action>`) before generic executors.
-- Always call `forge_system_health` first (and again after AutoCAD restart / NETLOAD). Confirm `Data.pipe` matches `FORGE_PIPE_NAME`. On the AutoCAD Start tab (no open drawing) health answers at once (`ok`, `documents: 0`, hint to call `forge_doc_new`/`forge_doc_open`), version/`forge_doc_list_open` still answer, and every other tool fails fast with `no_active_document` — open a drawing first. Drawings open but none active → `no_command_context`.
+- Always call `forge_system_health` first (and again after AutoCAD restart / NETLOAD). Confirm `Data.pipe` matches `FORGE_PIPE_NAME`. On the AutoCAD Start tab (no open drawing) health answers at once (`ok`, `pipe`, `documents: 0`, hint to call `forge_doc_new`/`forge_doc_open`); the other document-free tools (`forge_system_version`/`_getvar`/`_tool_profile`, `forge_doc_list_open`, `forge_registry_load`/`_lookup`, `forge_pack_load`/`_status`) and `forge_dgn_import` also answer there. Every other tool fails fast with `no_active_document` — open a drawing first. Drawings open but none active → `no_command_context`.
 - Use `dryRun=true` before write, publish, script, or executor calls.
 - **Never invent drawing numbers** — call `forge_registry_load` / `forge_registry_lookup` when a register exists; otherwise read from the drawing or ask the human.
 - Load `forge_pack_load` for project standards when available; preflight merges pack rules.

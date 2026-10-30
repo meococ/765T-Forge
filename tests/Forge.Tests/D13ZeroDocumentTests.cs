@@ -59,12 +59,69 @@ public sealed class D13ZeroDocumentPolicyTests
     }
 
     [Fact]
-    public void HealthVersionAndDocListAreTheZeroDocumentTools()
+    public void TheZeroDocumentToolsAreExactlyTheProvenDocumentFreeSet()
     {
-        Assert.True(DocumentContextPolicy.ZeroDocumentTools.Contains(Health));
-        Assert.True(DocumentContextPolicy.ZeroDocumentTools.Contains(Version));
-        Assert.True(DocumentContextPolicy.ZeroDocumentTools.Contains(DocList));
-        Assert.Equal(3, DocumentContextPolicy.ZeroDocumentTools.Count);
+        // review-wp2-r1 finding 3: only handlers whose code touches no document or database.
+        // Diagnostics: PluginCommandProcessor.cs Health/Version/GetVar (Application.Version /
+        // GetSystemVariable only); RegistryAndViewport.cs ToolProfile (static ToolProfiles);
+        // ListOpenDocuments iterates the DocumentCollection. Stores: RegistryAndViewport.cs
+        // RegistryLoad/RegistryLookup/PackLoad/PackStatus are file JSON + static stores only.
+        var expected = new[]
+        {
+            "forge_system_health",
+            "forge_system_version",
+            "forge_system_getvar",
+            "forge_system_tool_profile",
+            "forge_doc_list_open",
+            "forge_registry_load",
+            "forge_registry_lookup",
+            "forge_pack_load",
+            "forge_pack_status"
+        };
+        Assert.Equal(expected.OrderBy(x => x, StringComparer.OrdinalIgnoreCase),
+            DocumentContextPolicy.ZeroDocumentTools.OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void StoreAndSysvarToolsRideTheZeroDocumentAndIdleLanes()
+    {
+        // Every newly admitted doc-free tool answers at 0 docs and with docs open-but-none-active.
+        foreach (var tool in new[]
+        {
+            "forge_system_getvar", "forge_system_tool_profile",
+            "forge_registry_load", "forge_registry_lookup",
+            "forge_pack_load", "forge_pack_status"
+        })
+        {
+            Assert.Equal(DocDispatchDecision.ZeroDocumentLane, DocumentContextPolicy.Route(tool, 0, false));
+            Assert.Equal(DocDispatchDecision.IdleLane, DocumentContextPolicy.Route(tool, 2, false));
+            Assert.Equal(DocDispatchDecision.CommandContext, DocumentContextPolicy.Route(tool, 2, true));
+        }
+    }
+
+    [Fact]
+    public void DatabaseReadingToolsStayRefusedAtZeroDocuments()
+    {
+        // finding 3: these read the active database, so they keep the fail-fast refusals —
+        // IssueSetValidate (QaAndPublish.cs: ListLayoutNames + FindBlockAttributes on ActiveDb),
+        // SystemCapabilities (QaAndPublish.cs: transaction on ActiveDb).
+        foreach (var tool in new[] { "forge_issue_set_validate", "forge_system_capabilities" })
+        {
+            Assert.Equal(DocDispatchDecision.FailNoActiveDocument, DocumentContextPolicy.Route(tool, 0, false));
+            Assert.Equal(DocDispatchDecision.FailNoCommandContext, DocumentContextPolicy.Route(tool, 2, false));
+            Assert.Equal(DocDispatchDecision.CommandContext, DocumentContextPolicy.Route(tool, 2, true));
+        }
+    }
+
+    [Fact]
+    public void DgnImportRidesTheApplicationLaneAtEveryDocumentState()
+    {
+        // finding 3: the handler creates its own temp document (Documents.Add + MdiActiveDocument +
+        // Editor.Command), so it needs application context — and it must NOT be refused at 0 docs.
+        Assert.Equal(DocDispatchDecision.ApplicationLane, DocumentContextPolicy.Route("forge_dgn_import", 0, false));
+        Assert.Equal(DocDispatchDecision.ApplicationLane, DocumentContextPolicy.Route("forge_dgn_import", 2, false));
+        Assert.Equal(DocDispatchDecision.ApplicationLane, DocumentContextPolicy.Route("forge_dgn_import", 2, true));
+        Assert.True(DocumentContextPolicy.ApplicationContextTools.Contains("forge_dgn_import"));
     }
 
     [Fact]
