@@ -185,4 +185,17 @@ public sealed class D9PaperMatchSourceGuards
         Assert.Contains("plot_device_invalid", body, StringComparison.Ordinal);
         Assert.Contains("mapped_to_device_media", body, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void MediaFailuresReportThePc3CloneWrittenBeforeTheCheck()
+    {
+        // review-wp2-r2 Q3: PrepareNoViewerDevice(write:true) can create the no-viewer PC3 clone
+        // before TryResolveMedia fails typed — required ordering, idempotent, but the caller must
+        // see the file-system side effect. Every typed media failure data carries pc3Prepared
+        // (the path when THIS call wrote it) plus the full viewerSuppression record.
+        var body = MethodBody("private static ForgeResult? TryResolveMedia(");
+        Assert.Contains("pc3Prepared = viewer.Pc3Prepared", body, StringComparison.Ordinal);
+        Assert.Contains("viewerSuppression = viewer", body, StringComparison.Ordinal);
+        Assert.Contains("Pc3File.PreparedClonePath(", PlotSource(), StringComparison.Ordinal);
+    }
 }

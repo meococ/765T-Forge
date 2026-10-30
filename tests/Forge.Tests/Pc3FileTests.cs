@@ -125,4 +125,23 @@ public sealed class Pc3FileTests
     {
         Assert.Equal(expected, Pc3File.NoViewerCloneName(device));
     }
+
+    /// <summary>
+    /// review-wp2-r2 Q3: PrepareNoViewerDevice runs before the media check (required ordering),
+    /// so a typed media failure may already have written the clone — the failure data must name
+    /// it via pc3Prepared, but ONLY when this call actually created the file.
+    /// </summary>
+    [Theory]
+    [InlineData("clone", "created", @"C:\Plotters\765T-Forge DWG To PDF (no viewer).pc3", @"C:\Plotters\765T-Forge DWG To PDF (no viewer).pc3")]
+    [InlineData("clone", "reused", @"C:\Plotters\clone.pc3", null)] // existed already — nothing written
+    [InlineData("would_clone", "Dry run: the plot would use the no-viewer clone.", @"C:\Plotters\clone.pc3", null)]
+    [InlineData("already_off", null, null, null)]
+    [InlineData("property_absent", null, null, null)]
+    [InlineData("not_pc3", null, null, null)]
+    [InlineData("failed", "cannot write", @"C:\Plotters\clone.pc3", null)] // write failed — nothing to report
+    [InlineData("clone", "created", null, null)] // defensive: no path means nothing to name
+    public void PreparedClonePathNamesOnlyAFileThisCallWrote(string state, string? note, string? clonePath, string? expected)
+    {
+        Assert.Equal(expected, Pc3File.PreparedClonePath(state, note, clonePath));
+    }
 }

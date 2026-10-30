@@ -60,6 +60,20 @@ public readonly record struct PlotCentring(bool Centered, bool KeepStored)
             ? new PlotCentring(storedCentered, KeepStored: true)
             : new PlotCentring(Centered: true, KeepStored: false);
     }
+
+    /// <summary>
+    /// review-wp2-r2 M1 (D12): the -PLOT "plot offset (x,y) or [Center]" answer for the legacy
+    /// engine="command" path. KeepStored answers "" — Enter accepts the prompt's default, which is
+    /// the layout's own stored page-setup value, so the stored offset AND the stored centred flag
+    /// both survive (the same "do not touch" the API path gets by skipping
+    /// SetPlotCentered/SetPlotOrigin). An explicit stored "x,y" is never written: on a
+    /// stored-centred setup PlotOrigin can hold a stale/manual value, and answering it would
+    /// actively override centring — the r1 defect again.
+    /// </summary>
+    public string OffsetPromptAnswer(PlotAreaKind area)
+        => KeepStored
+            ? ""
+            : Centered && area != PlotAreaKind.Layout ? "Center" : "0,0";
 }
 
 /// <summary>fix-smoke-20261029 D4: what forge_plot_to_pdf must do so AutoCAD's plot validator accepts the layout.</summary>

@@ -135,6 +135,17 @@ public static class Pc3File
         return $"765T-Forge {stem} (no viewer).pc3";
     }
 
+    /// <summary>
+    /// review-wp2-r2 Q3: forge_plot_to_pdf prepares the no-viewer clone BEFORE the media check —
+    /// required ordering, since the device must exist for SetPlotConfigurationName — so a typed
+    /// media failure can already have written a file. This is the path to report as
+    /// `pc3Prepared` in failure data, and only when THIS call created the clone (state "clone",
+    /// note "created"): a reused clone, a dry run, an already-clean PC3 or a non-PC3 device
+    /// wrote nothing and must report null.
+    /// </summary>
+    public static string? PreparedClonePath(string state, string? note, string? clonePath)
+        => state == "clone" && note == "created" ? clonePath : null;
+
     private static Regex CustomProperty(string name) => new(
         "name=\"" + Regex.Escape(name) + @"\s*[\r\n]+\s*value=(?<value>[^\r\n]*)",
         RegexOptions.CultureInvariant);

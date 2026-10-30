@@ -35,6 +35,9 @@ public sealed partial class PluginCommandProcessor
     private sealed record ViewerSuppression(string State, string PlotDevice, string? SourcePc3, string? ClonePc3, string? Note)
     {
         public bool Failed => State == "failed";
+
+        /// <summary>review-wp2-r2 Q3: the clone path only when this call wrote it — see <see cref="Pc3File.PreparedClonePath"/>.</summary>
+        public string? Pc3Prepared => Pc3File.PreparedClonePath(State, Note, ClonePc3);
     }
 
     private static ForgeResult PlotToPdf(ForgeCommand command)
@@ -345,7 +348,9 @@ public sealed partial class PluginCommandProcessor
                         "paper_size_not_found",
                         $"Device '{requestedDevice}' has no paper size matching '{args.PaperSize}'.",
                         "Pass one of the candidates (localized or canonical name).",
-                        data: new { device = requestedDevice, candidates = MediaCandidates(args.PaperSize!, mediaList) });
+                        // review-wp2-r2 Q3: the no-viewer clone may already be written (required
+                        // ordering) — pc3Prepared names the file when this call created it.
+                        data: new { device = requestedDevice, candidates = MediaCandidates(args.PaperSize!, mediaList), pc3Prepared = viewer.Pc3Prepared, viewerSuppression = viewer });
                 }
 
                 canonicalMedia = resolved;
@@ -380,7 +385,11 @@ public sealed partial class PluginCommandProcessor
                             storedMedia = layoutMedia,
                             storedSizeMm = storedSheetMm is { } ss ? new[] { ss.WidthMm, ss.HeightMm } : null,
                             paperMatch.Ambiguous,
-                            nearest = paperMatch.Nearest
+                            nearest = paperMatch.Nearest,
+                            // review-wp2-r2 Q3: the no-viewer clone may already be written
+                            // (required ordering) — pc3Prepared names the file when this call created it.
+                            pc3Prepared = viewer.Pc3Prepared,
+                            viewerSuppression = viewer
                         });
                 }
 
@@ -422,7 +431,14 @@ public sealed partial class PluginCommandProcessor
         }
         catch (Autodesk.AutoCAD.Runtime.Exception ex)
         {
-            return ForgeResult.Failure(command.Id, "plot_device_invalid", $"Device/paper setup failed: {ex.Message}", "Check the device name with forge_system_capabilities.");
+            // review-wp2-r2 Q3: same pre-failure side effect — pc3Prepared names the clone
+            // file when this call already wrote it.
+            return ForgeResult.Failure(
+                command.Id,
+                "plot_device_invalid",
+                $"Device/paper setup failed: {ex.Message}",
+                "Check the device name with forge_system_capabilities.",
+                data: new { device = requestedDevice, pc3Prepared = viewer.Pc3Prepared, viewerSuppression = viewer });
         }
         finally
         {
@@ -547,8 +563,8 @@ public sealed partial class PluginCommandProcessor
 
         // review-wp2-r1 finding 6 (D12): a stored page setup keeps its own centring/offset —
         // CopyFrom already carried it into ps — unless the caller passed centered explicitly.
+        // review-wp2-r2 M1: centring (KeepStored included) also drives the legacy -PLOT path.
         var centring = PlotCentring.Resolve(args.Centered, areaSource, ps.PlotCentered);
-        var centered = centring.Centered;
         int rotationDeg;
         try
         {
@@ -797,7 +813,7 @@ public sealed partial class PluginCommandProcessor
             }
             else
             {
-                RunLegacyPlotCommand(layoutName, isModel, viewer.PlotDevice, readBack, area, window, storedViewName, centered, args.PlotStyle, outputPath);
+                RunLegacyPlotCommand(layoutName, isModel, viewer.PlotDevice, readBack, area, window, storedViewName, centring, args.PlotStyle, outputPath);
             }
         }
         catch (System.Exception ex)
@@ -1082,7 +1098,7 @@ public sealed partial class PluginCommandProcessor
         PlotAreaKind area,
         double[]? window,
         string? viewName,
-        bool centered,
+        PlotCentring centring,
         string? plotStyle,
         string outputPath)
     {
@@ -1121,7 +1137,10 @@ public sealed partial class PluginCommandProcessor
             }
 
             tokens.Add(readBack.UsesFit ? "Fit" : readBack.CustomScale is { } s ? string.Create(CultureInfo.InvariantCulture, $"{s[0]}:{s[1]}") : "1:1");
-            tokens.Add(centered && area != PlotAreaKind.Layout ? "Center" : "0,0");
+            // review-wp2-r2 M1: a stored, uncentred Window/View must NOT be answered "0,0" — that
+            // overrides the stored offset. KeepStored answers "" (Enter = keep the page setup's
+            // stored offset and stored centred flag); see PlotCentring.OffsetPromptAnswer.
+            tokens.Add(centring.OffsetPromptAnswer(area));
             tokens.Add("Yes");
             tokens.Add(string.IsNullOrWhiteSpace(plotStyle) ? "" : plotStyle!.Trim());
             tokens.Add("Yes");

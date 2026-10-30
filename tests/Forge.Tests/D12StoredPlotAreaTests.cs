@@ -174,6 +174,60 @@ public sealed class D12StoredCentringTests
     }
 }
 
+/// <summary>
+/// review-wp2-r2 M1 (D12): the -PLOT offset-prompt answer on engine="command". A stored page
+/// setup answers "" (Enter = keep the stored offset AND the stored centred flag) — the r2
+/// defect answered "0,0", which actively overrides a stored, uncentred Window/View offset.
+/// </summary>
+public sealed class D12LegacyOffsetPromptTests
+{
+    [Theory]
+    [InlineData(PlotAreaKind.Window)]
+    [InlineData(PlotAreaKind.View)]
+    [InlineData(PlotAreaKind.Layout)]
+    [InlineData(PlotAreaKind.Extents)]
+    public void AStoredAreaAnswersEnterSoTheStoredOffsetSurvives(PlotAreaKind area)
+    {
+        // KeepStored is only produced for a stored source: both stored centring states keep
+        // the prompt's stored default — "0,0" would clobber a stored offset, "x,y" could
+        // clobber a stored centred flag.
+        foreach (var storedCentered in new[] { true, false })
+        {
+            var c = PlotCentring.Resolve(null, "stored", storedCentered);
+            Assert.True(c.KeepStored);
+            Assert.Equal("", c.OffsetPromptAnswer(area));
+        }
+    }
+
+    [Fact]
+    public void AnExplicitCentredNonLayoutAreaAnswersCenter()
+    {
+        foreach (var area in new[] { PlotAreaKind.Window, PlotAreaKind.Extents, PlotAreaKind.Display, PlotAreaKind.Limits, PlotAreaKind.View })
+        {
+            Assert.Equal("Center", PlotCentring.Resolve(true, "requested", false).OffsetPromptAnswer(area));
+            Assert.Equal("Center", PlotCentring.Resolve(null, "default_model_extents", false).OffsetPromptAnswer(area));
+        }
+    }
+
+    [Fact]
+    public void CentringNeverAppliesToTheLayoutAreaToken()
+    {
+        // Layout plots at its own stored origin; "Center" is not a valid answer for it.
+        Assert.Equal("0,0", PlotCentring.Resolve(true, "requested", false).OffsetPromptAnswer(PlotAreaKind.Layout));
+        Assert.Equal("0,0", PlotCentring.Resolve(null, "default_layout", false).OffsetPromptAnswer(PlotAreaKind.Layout));
+    }
+
+    [Fact]
+    public void AnExplicitUncentredAnswerKeepsTheOriginOffset()
+    {
+        // Caller passed centered=false on a stored window: KeepStored is off, so "0,0" is the
+        // honest uncentred answer — only the stored-source-without-centered case keeps "".
+        var c = PlotCentring.Resolve(false, "stored", storedCentered: true);
+        Assert.False(c.KeepStored);
+        Assert.Equal("0,0", c.OffsetPromptAnswer(PlotAreaKind.Window));
+    }
+}
+
 /// <summary>D12 plugin wiring guards.</summary>
 public sealed class D12StoredPlotAreaSourceGuards
 {
@@ -200,5 +254,16 @@ public sealed class D12StoredPlotAreaSourceGuards
         Assert.Contains("PlotCentring.Resolve(", source, StringComparison.Ordinal);
         Assert.DoesNotContain("args.Centered ?? true", source, StringComparison.Ordinal);
         Assert.Contains("centring.KeepStored", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheLegacyCommandPathHonoursKeepStored()
+    {
+        // review-wp2-r2 M1: the -PLOT offset prompt is answered by the shared policy — never a
+        // bare "0,0"/"Center" decision that drops KeepStored (and with it the stored offset).
+        var source = PlotSource();
+        Assert.Contains("PlotCentring centring", source, StringComparison.Ordinal);
+        Assert.Contains("centring.OffsetPromptAnswer(area)", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("centered && area != PlotAreaKind.Layout ? \"Center\" : \"0,0\"", source, StringComparison.Ordinal);
     }
 }
