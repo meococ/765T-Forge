@@ -61,8 +61,8 @@
   "<Destination>.prev-old-<utc>-<id>" are ever deleted; nothing else is
   touched. Leftover "<Destination>.staging-*", "<Destination>.prev-pending-*"
   and "<Destination>.prev-old-*" siblings from killed or failed runs are
-  never deleted automatically - every run (including -DryRun) lists them in a
-  warning so they can be removed by hand.
+  never deleted automatically - every run (including -DryRun and runs that
+  are then refused) lists them in a warning so they can be removed by hand.
 
   -DryRun prints the full plan ([WOULD-*] lines) and writes nothing: no build,
   no staging folder, no destination changes. The refusal checks still run.
@@ -191,20 +191,85 @@ try {
 
 # ---------------------------------------------------------------- paths
 
-if (-not (Test-Path -LiteralPath $RepoRoot -PathType Container)) {
-    throw "RepoRoot not found: $RepoRoot"
+# RepoRoot/Destination are resolved before the refusals below so the
+# leftover-sibling listing can run even on a run that is then refused: an
+# early refusal still lists the leftover siblings it can find. The refusals
+# keep their original order and messages.
+$repoRootMissing = -not (Test-Path -LiteralPath $RepoRoot -PathType Container)
+if (-not $repoRootMissing) {
+    $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path.TrimEnd('\')
 }
-$RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path.TrimEnd('\')
 if (-not $Destination) { $Destination = Join-Path $RepoRoot 'deploy\server' }
+$destFull = $null
 try {
     $destFull = [IO.Path]::GetFullPath($Destination)
+    $Destination = $destFull.TrimEnd('\')
 } catch {
+    $destFull = $null
+}
+
+$stampUtc   = (Get-Date).ToUniversalTime()
+# Milliseconds plus a random suffix: unique even for two runs inside the same
+# second, so the per-run build/staging/pending folders can never collide.
+$stampText  = $stampUtc.ToString('yyyyMMddTHHmmssfffZ') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+$stagingDir = "$Destination.staging-$stampText"
+$pendingDir = "$Destination.prev-pending-$stampText"
+$prevOldDir = "$Destination.prev-old-$stampText"
+
+# Leftover siblings from killed or failed runs are never deleted
+# automatically: list them on every run (including -DryRun and the refusals
+# below) with their DEPLOYED.json identity, so they can be removed by hand.
+# This run's own folders are excluded.
+if ($destFull) {
+    # Split-Path -Parent throws on a path it cannot resolve against the file
+    # system (a missing drive, an unreachable share) - such a destination has
+    # no listable siblings and is refused below anyway.
+    $destParentDir = $null
+    $destLeafName  = $null
+    try {
+        $destParentDir = Split-Path -Parent $Destination
+        $destLeafName  = Split-Path -Leaf $Destination
+    } catch { }
+    $leftovers = @()
+    if ($destParentDir -and (Test-Path -LiteralPath $destParentDir)) {
+        $leftovers = @(Get-ChildItem -LiteralPath $destParentDir -Directory -Force | Where-Object {
+            ($_.Name.StartsWith("$destLeafName.staging-", [StringComparison]::OrdinalIgnoreCase) -or
+             $_.Name.StartsWith("$destLeafName.prev-pending-", [StringComparison]::OrdinalIgnoreCase) -or
+             $_.Name.StartsWith("$destLeafName.prev-old-", [StringComparison]::OrdinalIgnoreCase)) -and
+            $_.FullName -ne $stagingDir -and $_.FullName -ne $pendingDir -and $_.FullName -ne $prevOldDir
+        })
+    }
+    if ($leftovers.Count) {
+        $leftoverLines = foreach ($o in $leftovers) {
+            $oNote = 'no DEPLOYED.json'
+            $oManifest = Join-Path $o.FullName 'DEPLOYED.json'
+            if (Test-Path -LiteralPath $oManifest -PathType Leaf) {
+                try {
+                    $oJson = Get-Content -LiteralPath $oManifest -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+                    # pwsh converts ISO date strings to DateTimeOffset at parse
+                    # time - print them back round-trip so both engines agree.
+                    $oUtc = $oJson.utc
+                    if ($oUtc -is [datetime] -or $oUtc -is [datetimeoffset]) { $oUtc = $oUtc.ToString('o') }
+                    $oNote = "commit $(if ($oJson.commit) { $oJson.commit } else { '<null>' }), utc $(if ($oUtc) { $oUtc } else { '<null>' })"
+                } catch { $oNote = 'unreadable DEPLOYED.json' }
+            } elseif (Test-Path -LiteralPath $oManifest) {
+                $oNote = 'DEPLOYED.json is not a file'
+            }
+            "  $($o.FullName)  [$oNote]"
+        }
+        Write-Warning ("Leftover deploy folder(s) next to '$Destination' - they are kept, remove by hand:`n" + ($leftoverLines -join "`n"))
+    }
+}
+
+if ($repoRootMissing) {
+    throw "RepoRoot not found: $RepoRoot"
+}
+if (-not $destFull) {
     throw "Destination is not a valid absolute path: '$Destination'"
 }
 if ($destFull -ieq [IO.Path]::GetPathRoot($destFull)) {
     throw "Destination '$destFull' is a drive root - refusing to deploy onto a whole drive."
 }
-$Destination = $destFull.TrimEnd('\')
 
 # The swap renames whatever -Destination points at, so it must never be the
 # checkout itself, an ancestor of it, or inside the folders a rename would gut.
@@ -221,6 +286,11 @@ if (Test-Path -LiteralPath $Destination) {
     $destHasContent = [bool]@(Get-ChildItem -LiteralPath $Destination -Force | Select-Object -First 1)
     if ($destHasContent) {
         $destManifest = Join-Path $Destination 'DEPLOYED.json'
+        # A DEPLOYED.json that is not a file (a folder, ...) is reported as
+        # itself - it is neither parsed like ours nor treated as absent.
+        if ((Test-Path -LiteralPath $destManifest) -and -not (Test-Path -LiteralPath $destManifest -PathType Leaf)) {
+            throw "Destination '$Destination' exists and is not empty but its DEPLOYED.json is not a file - it does not look like a deploy made by this script. Refusing to replace it; move it aside by hand, then retry."
+        }
         $isOurs = $false
         if (Test-Path -LiteralPath $destManifest -PathType Leaf) {
             try {
@@ -237,48 +307,6 @@ if (Test-Path -LiteralPath $Destination) {
 }
 $prevDir = "$Destination.prev"
 $destExe = Join-Path $Destination 'Forge.Server.exe'
-
-$stampUtc   = (Get-Date).ToUniversalTime()
-# Milliseconds plus a random suffix: unique even for two runs inside the same
-# second, so the per-run build/staging/pending folders can never collide.
-$stampText  = $stampUtc.ToString('yyyyMMddTHHmmssfffZ') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
-$stagingDir = "$Destination.staging-$stampText"
-$pendingDir = "$Destination.prev-pending-$stampText"
-$prevOldDir = "$Destination.prev-old-$stampText"
-
-# Leftover siblings from killed or failed runs are never deleted
-# automatically: list them on every run (including -DryRun) with their
-# DEPLOYED.json identity, so they can be removed by hand. This run's own
-# folders are excluded.
-$destParentDir = Split-Path -Parent $Destination
-$destLeafName  = Split-Path -Leaf $Destination
-$leftovers = @()
-if ($destParentDir -and (Test-Path -LiteralPath $destParentDir)) {
-    $leftovers = @(Get-ChildItem -LiteralPath $destParentDir -Directory -Force | Where-Object {
-        ($_.Name.StartsWith("$destLeafName.staging-", [StringComparison]::OrdinalIgnoreCase) -or
-         $_.Name.StartsWith("$destLeafName.prev-pending-", [StringComparison]::OrdinalIgnoreCase) -or
-         $_.Name.StartsWith("$destLeafName.prev-old-", [StringComparison]::OrdinalIgnoreCase)) -and
-        $_.FullName -ne $stagingDir -and $_.FullName -ne $pendingDir -and $_.FullName -ne $prevOldDir
-    })
-}
-if ($leftovers.Count) {
-    $leftoverLines = foreach ($o in $leftovers) {
-        $oNote = 'no DEPLOYED.json'
-        $oManifest = Join-Path $o.FullName 'DEPLOYED.json'
-        if (Test-Path -LiteralPath $oManifest -PathType Leaf) {
-            try {
-                $oJson = Get-Content -LiteralPath $oManifest -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-                # pwsh converts ISO date strings to DateTimeOffset at parse
-                # time - print them back round-trip so both engines agree.
-                $oUtc = $oJson.utc
-                if ($oUtc -is [datetime] -or $oUtc -is [datetimeoffset]) { $oUtc = $oUtc.ToString('o') }
-                $oNote = "commit $(if ($oJson.commit) { $oJson.commit } else { '<null>' }), utc $(if ($oUtc) { $oUtc } else { '<null>' })"
-            } catch { $oNote = 'unreadable DEPLOYED.json' }
-        }
-        "  $($o.FullName)  [$oNote]"
-    }
-    Write-Warning ("Leftover deploy folder(s) next to '$Destination' - they are kept, remove by hand:`n" + ($leftoverLines -join "`n"))
-}
 
 # ---------------------------------------------------------------- git state
 

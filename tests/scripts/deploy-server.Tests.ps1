@@ -684,6 +684,67 @@ Test-Case 'a locked file inside .prev leaves .prev complete and keeps the pendin
     Assert-Match ($out2 -replace '\s+', '') ([regex]::Escape($pend[0].FullName)) 'the next run must list the kept pending folder'
 }
 
+Test-Case 'an early refusal still lists the leftover siblings it finds' {
+    $dest = Join-Path $testRoot 'refusals\server'
+    New-Item -ItemType Directory -Force -Path $dest | Out-Null
+    [IO.File]::WriteAllText((Join-Path $dest 'someone-elses.txt'), 'precious')
+    $oPend = "$dest.prev-pending-19990101T000000000Z-deadbeef"
+    New-Item -ItemType Directory -Force -Path $oPend | Out-Null
+
+    # Takeover-guard refusal: refused, but the orphan must still be listed.
+    $log = Join-Path $testRoot 'refuse-takeover.log'
+    $err = $null
+    try { & $deploy -SourceDir $srcA -Destination $dest -RepoRoot $nonRepo -ProcessFixture $fxEmpty *> $log } catch { $err = $_ }
+    Assert-True ($null -ne $err) 'a foreign destination must still be refused'
+    Assert-Match $err.Exception.Message 'does not look like a deploy' 'the takeover refusal must keep its message'
+    $out = ((Get-Content -LiteralPath $log -Raw) -replace '\s+', '')
+    Assert-Match $out ([regex]::Escape($oPend)) 'the refused run must list the leftover sibling'
+    Assert-Match $out 'removebyhand' 'the listing must keep its kept/remove-by-hand wording'
+
+    # An early path refusal (-RepoRoot missing) must list the same leftovers.
+    $log = Join-Path $testRoot 'refuse-root.log'
+    $err = $null
+    try { & $deploy -SourceDir $srcA -Destination $dest -RepoRoot (Join-Path $testRoot 'missing-root') -ProcessFixture $fxEmpty *> $log } catch { $err = $_ }
+    Assert-True ($null -ne $err) 'a missing -RepoRoot must still be refused'
+    Assert-Match $err.Exception.Message 'RepoRoot not found' 'the RepoRoot refusal must keep its message'
+    $out = ((Get-Content -LiteralPath $log -Raw) -replace '\s+', '')
+    Assert-Match $out ([regex]::Escape($oPend)) 'the early refusal must list the leftover sibling'
+
+    # The checkout-overlap refusal lists siblings it finds next to its destination.
+    New-Item -ItemType Directory -Force -Path (Join-Path $nonRepo 'src') | Out-Null
+    $insideDest = Join-Path $nonRepo 'src\server'
+    $oStage = "$insideDest.staging-19990101T000000000Z-deadbeef"
+    New-Item -ItemType Directory -Force -Path $oStage | Out-Null
+    $log = Join-Path $testRoot 'refuse-overlap.log'
+    $err = $null
+    try { & $deploy -SourceDir $srcA -Destination $insideDest -RepoRoot $nonRepo -ProcessFixture $fxEmpty *> $log } catch { $err = $_ }
+    Assert-True ($null -ne $err) 'an overlapping destination must still be refused'
+    Assert-Match $err.Exception.Message 'overlaps the checkout' 'the overlap refusal must keep its message'
+    $out = ((Get-Content -LiteralPath $log -Raw) -replace '\s+', '')
+    Assert-Match $out ([regex]::Escape($oStage)) 'the overlap refusal must list the leftover sibling'
+}
+
+Test-Case 'a DEPLOYED.json that is a directory is reported as not-a-file' {
+    $dest = Join-Path $testRoot 'dirmanifest\server'
+    New-Item -ItemType Directory -Force -Path (Join-Path $dest 'DEPLOYED.json') | Out-Null
+    [IO.File]::WriteAllText((Join-Path $dest 'payload.dll'), 'x')
+    $before = Get-TreeHashes $dest
+
+    $err = $null
+    try { & $deploy -SourceDir $srcA -Destination $dest -RepoRoot $nonRepo -ProcessFixture $fxEmpty | Out-Null } catch { $err = $_ }
+    Assert-True ($null -ne $err) 'a directory DEPLOYED.json must be refused'
+    Assert-Match $err.Exception.Message 'DEPLOYED\.json is not a file' 'the refusal must say the manifest is not a file'
+    Assert-True ($err.Exception.Message -notmatch 'has no DEPLOYED\.json') 'a directory manifest must not be reported as absent'
+    Assert-TreeEqual $before (Get-TreeHashes $dest) 'the destination must be untouched'
+
+    # The same distinction shows in the leftover listing annotation.
+    $dest2 = Join-Path $testRoot 'dirmanifest2\server'
+    $oStage = "$dest2.staging-19990101T000000000Z-deadbeef"
+    New-Item -ItemType Directory -Force -Path (Join-Path $oStage 'DEPLOYED.json') | Out-Null
+    $out = (& $deploy -SourceDir $srcA -Destination $dest2 -RepoRoot $nonRepo -ProcessFixture $fxEmpty -DryRun 3>&1) | Out-String
+    Assert-Match ($out -replace '\s+', '') 'DEPLOYED\.jsonisnotafile' 'a leftover whose manifest is a folder must be annotated distinctly'
+}
+
 } finally {
     Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
