@@ -216,8 +216,7 @@ configuration, and every file hash. Leftover `*.staging-*`,
 never deleted — every run (including `-DryRun`) lists them so they can be
 removed by hand.
 
-Switching the live entry to `deploy\server` is a Supervisor job done at a live
-window with `claude mcp` — nothing here touches MCP configuration. Until that
-switch, the launcher snippet above keeps pointing at the live `bin\Debug`
-path; afterwards, the launcher default moves to `deploy\server\Forge.Server.exe`
-(a one-line follow-up in `launch-acad-instance.ps1`).
+The live entry has been switched to `deploy\server` — a Supervisor job done at
+a live window with `claude mcp`; nothing here touches MCP configuration. The
+launcher snippet now defaults to `deploy\server\Forge.Server.exe` (`-ServerExe`
+overrides it).
