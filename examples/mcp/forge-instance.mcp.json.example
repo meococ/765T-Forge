@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "765t-forge-<n>": {
-      "command": "D:\\765T-Forge\\src\\Forge.Server\\bin\\Debug\\net8.0\\Forge.Server.exe",
+      "command": "D:\\765T-Forge\\deploy\\server\\Forge.Server.exe",
       "args": [],
       "env": {
         "FORGE_AUTOCAD_TOKEN": "<same as the existing 765t-forge entry>",

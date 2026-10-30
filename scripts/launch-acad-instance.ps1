@@ -45,11 +45,11 @@
   file. A named mutex (Local\765T-Forge-Launch-<Name>) makes concurrent
   launches for the same name fail instead of racing the checks.
 
-  The printed MCP server entry points at src\Forge.Server\bin\Debug\net8.0\
-  Forge.Server.exe under the repo root so the snippet matches the live entry;
-  -ServerExe <path> overrides it. That default moves to
-  deploy\server\Forge.Server.exe once the live entry is switched to the
-  deploy folder (scripts\deploy-server.ps1).
+  The printed MCP server entry points at deploy\server\Forge.Server.exe
+  under the repo root so the snippet matches the live entry;
+  -ServerExe <path> overrides it. The deploy folder is produced by
+  scripts\deploy-server.ps1 (see "Deploying the server" in
+  docs\parallel-acad-instances.md).
 
   -DryRun performs every check and prints the full plan
   ([WOULD-COPY] / [WOULD-RECREATE] / [WOULD-SET] / [WOULD-RESTORE] / [WOULD-ENV]
@@ -541,13 +541,13 @@ try {
     }
 
     $repoRoot  = Split-Path -Parent $PSScriptRoot
-    # The live MCP entry currently runs the Debug build under src\Forge.Server\bin,
-    # so the snippet below must point there. This default moves to
-    # 'deploy\server\Forge.Server.exe' once the live entry is switched to the
-    # deploy folder (see deploy-server.ps1).
-    $serverExePath = Join-Path $repoRoot 'src\Forge.Server\bin\Debug\net8.0\Forge.Server.exe'
+    # The live MCP entry runs the deployed server under deploy\server, so
+    # the snippet below must point there. The deploy folder is produced by
+    # scripts\deploy-server.ps1 (see "Deploying the server" in
+    # docs\parallel-acad-instances.md). -ServerExe overrides this default.
+    $serverExePath = Join-Path $repoRoot 'deploy\server\Forge.Server.exe'
     if ($ServerExe) { $serverExePath = $ServerExe }
-    $serverExeNote = if (Test-Path -LiteralPath $serverExePath) { $null } else { '  (not found on this machine - build the server first or pass -ServerExe)' }
+    $serverExeNote = if (Test-Path -LiteralPath $serverExePath) { $null } else { '  (not found on this machine - run scripts\deploy-server.ps1 first or pass -ServerExe)' }
 
     $mcpEntry = [ordered]@{
         command = $serverExePath
