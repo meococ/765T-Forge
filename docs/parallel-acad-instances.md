@@ -66,8 +66,10 @@ The **default value** of `...\Profiles` is the current-profile pointer every
 normal `acad.exe` start reads. On R19.1, starting `acad.exe /p B` rewrote it to
 `B` at startup (Autodesk forums), so the user's *next* normal launch would open
 on `Forge-<n>` instead of their own profile — the profile-hijack risk the copy
-alone does not cover. Whether R25.0 still writes the pointer is **unverified**;
-the guards below make it safe either way:
+alone does not cover. R25.0 does it too: in the live smoke of 2026-10-30
+(AutoCAD 2025 R25.0.171) the launch rewrote it to `Forge-smoke` once at
+startup, and the launcher restored `<<Unnamed Profile>>` (see "Live smoke
+result" below). The guards below make it safe either way:
 
 - At launch the pointer is recorded into `instance.json` as `profilesDefault`.
   If it already reads `Forge-*` (a leftover from an earlier run or crashed
@@ -116,16 +118,18 @@ treats it as a leftover and reverts it — don't name your own profiles
   (inherited unchanged — both sides must resolve the same token), the
   ApplicationPlugins bundle (it autoloads via `LoadOnAutoCADStartup`
   regardless of `/p` profile), the AutoCAD install, and the licence seat —
-  **UNVERIFIED:** a second GUI `acad.exe` may consume an additional licence
-  seat on single-user licences; confirm in the smoke window. Two shared writes
+  in the 2026-10-30 smoke a second GUI `acad.exe` started next to the first
+  and answered on its pipe with no licence prompt on this machine's licence;
+  other licence types are not verified. Two shared writes
   remain outside `Profiles`: the product-level `...\ACAD-8101:409\Loaded\*`
   records (same content as the existing instance writes, harmless) and the
   `Profiles` (Default) pointer itself, guarded above. Per-session paths not on
   the retarget list also stay shared — e.g. a crashed Forge instance can still
   leave stray files in the user's Temp if a path was not recognised.
-- **Note:** the repo bundle manifest
+- **Note:** on master the repo bundle manifest
   `plugin-bundle/765T-Forge.bundle/PackageContents.xml` declares
-  `SeriesMin=R25.1` while the deployed bundle at
+  `SeriesMin=R25.1` (fixed to `R25.0` on branch `forge-fix-d9-d13`, commit
+  `bd82ad5`, not merged yet) while the deployed bundle at
   `%APPDATA%\Autodesk\ApplicationPlugins\765T-Forge.bundle` covers `R25.0`–
   `R25.1`. AutoCAD 2025 (R25.0) autoloads the plugin only because the
   *deployed* manifest allows it — redeploying the repo copy as-is would stop
@@ -161,3 +165,20 @@ treats it as a leftover and reverts it — don't name your own profiles
    `-RestoreOnly` and repeat the `reg query /ve` check.
 8. Re-run launch to confirm idempotent reuse of `Forge-smoke1` (`SKIP-COPY`
    via the `ForgeManaged` marker).
+
+## Live smoke result (2026-10-30, AutoCAD 2025 R25.0.171)
+
+Run by the Lead in a granted window, with the name `smoke` instead of `smoke1`:
+
+- Step 2 (dry run): full plan printed, every `[WOULD-SET]` under `Profiles\Forge-smoke`.
+- Step 3: exit 0 in 11 s, pid 29888, `/nologo /p "Forge-smoke"`. Output:
+  `[RESTORED] ...\Profiles (Default): 'Forge-smoke' -> '<<Unnamed Profile>>'`
+  (1 rewrite). Step 4 then read `<<Unnamed Profile>>`.
+- Step 5: pipe `765T.Forge.AutoCAD.smoke` present next to `765T.Forge.AutoCAD`.
+- Step 6 was done over the pipe directly, not through a registered MCP entry.
+  `forge_system_health` answered `ok` on the new pipe. A bad token got `unauthorized`.
+  One audit record was written to the instance's `audit/` folder. The original
+  `765t-forge` server still answered on its own pipe.
+- Step 7: the stop script stopped only pid 29888 (1 s). The pointer was already
+  `<<Unnamed Profile>>`. The user's `LogFilePath` / `SaveFilePath` were unchanged.
+- Step 8 (idempotent reuse) was not run; the test profile key was removed after the smoke.
