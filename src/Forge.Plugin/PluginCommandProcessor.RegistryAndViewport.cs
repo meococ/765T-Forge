@@ -154,7 +154,12 @@ public sealed partial class PluginCommandProcessor
             var space = (BlockTableRecord)tr.GetObject(layout.BlockTableRecordId, OpenMode.ForRead);
             foreach (ObjectId id in space)
             {
-                if (tr.GetObject(id, OpenMode.ForRead) is not Viewport vp || vp.Number <= 1)
+                if (tr.GetObject(id, OpenMode.ForRead) is not Viewport vp ||
+                    ViewportSheetFilter.IsSheetViewport(
+                        vp.Number,
+                        vp.CenterPoint.X, vp.CenterPoint.Y,
+                        vp.ViewCenter.X, vp.ViewCenter.Y,
+                        vp.Height, vp.ViewHeight))
                 {
                     continue;
                 }

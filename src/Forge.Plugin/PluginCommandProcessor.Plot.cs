@@ -458,6 +458,17 @@ public sealed partial class PluginCommandProcessor
         var layout = (Layout)tr.GetObject(layoutId, OpenMode.ForRead);
         layoutName = layout.LayoutName;
         var isModel = layout.ModelType;
+
+        // TOOL-GAP #26: a loaded underlay whose file does not resolve plots silently without it —
+        // a PDF-only sheet can issue blank while the probe still passes (V-101). Every underlay
+        // definition is checked in the open transaction before any plot work (incl. UpdateExt).
+        var underlays = EnumerateUnderlayDefinitions(tr, db);
+        if (UnderlayPreflightFailure(command, underlays) is { } underlayFailure)
+        {
+            tr.Commit();
+            return underlayFailure;
+        }
+
         var layoutMedia = media.LayoutMedia;
 
         // review-wp2-r1 finding 4 (D9): media, device and paper units were resolved before any
@@ -807,6 +818,9 @@ public sealed partial class PluginCommandProcessor
             plotStyle = readBack.StyleSheet,
             fitEstimate = fit,
             coverageEstimate = coverage,
+            underlayCount = underlays.Count,
+            underlaysResolved = true,
+            underlays,
             warnings
         };
 
@@ -928,6 +942,9 @@ public sealed partial class PluginCommandProcessor
                 coverage = coverageDecision,
                 pdfContent,
                 plan.coverageEstimate,
+                plan.underlayCount,
+                plan.underlaysResolved,
+                plan.underlays,
                 plan.warnings,
                 bytes = probe.Bytes,
                 pdfProbe = probe
@@ -1485,6 +1502,219 @@ public sealed partial class PluginCommandProcessor
         }
 
         return new ViewerSuppression("clone", cloneName, pc3Path, clonePath, note);
+    }
+
+    /// <summary>One underlay/raster-image definition as the preflight sees it. Status: resolved|missing|unloaded|unreferenced.
+    /// DefinitionId stays out of the payload: a live ObjectId does not serialize (cycle via Database).</summary>
+    private sealed record UnderlayEntry(
+        string Kind,
+        string Name,
+        string Path,
+        string? ResolvedPath,
+        string Status,
+        string? ItemName,
+        [property: System.Text.Json.Serialization.JsonIgnore] ObjectId DefinitionId);
+
+    private static readonly (string Dict, string Kind)[] UnderlayDictionaries =
+    [
+        ("ACAD_PDFDEFINITIONS", "pdf"),
+        ("ACAD_DWFDEFINITIONS", "dwf"),
+        ("ACAD_DGNDEFINITIONS", "dgn"),
+        ("ACAD_IMAGE_DICT", "image"),
+    ];
+
+    /// <summary>
+    /// TOOL-GAP #26: every underlay definition (PDF/DWF/DGN underlay + raster image) in the drawing
+    /// with resolved status. Definitions live in the named-object dictionaries the DXF OBJECTS
+    /// section serialises — ACAD_PDFDEFINITIONS holds the PDFDEFINITION whose group-1 path was
+    /// relative in sheet-set_R1.dxf (the exact shape DxfUnderlaySniff parses offline). Managed
+    /// member names vary by release, so the stored path / load flag are read by reflection:
+    /// UnderlayDefinition and RasterImageDef expose SourceFileName/FileName/ActiveFileName +
+    /// IsLoaded. IsLoaded=false means AutoCAD does not plot it — recorded "unloaded", not a failure.
+    /// </summary>
+    private static List<UnderlayEntry> EnumerateUnderlayDefinitions(Transaction tr, Database db)
+    {
+        var drawingFolder = DrawingFolder(db);
+        var result = new List<UnderlayEntry>();
+        var nod = (DBDictionary)tr.GetObject(db.NamedObjectsDictionaryId, OpenMode.ForRead);
+        foreach (var (dictName, kind) in UnderlayDictionaries)
+        {
+            if (!nod.Contains(dictName) || tr.GetObject(nod.GetAt(dictName), OpenMode.ForRead) is not DBDictionary dict)
+            {
+                continue;
+            }
+
+            foreach (DBDictionaryEntry entry in dict)
+            {
+                DBObject? def;
+                try
+                {
+                    def = tr.GetObject(entry.Value, OpenMode.ForRead);
+                }
+                catch
+                {
+                    continue; // erased dictionary entry — nothing to resolve
+                }
+
+                if (def is null)
+                {
+                    continue;
+                }
+
+                var name = string.IsNullOrWhiteSpace(entry.Key) ? def.Handle.ToString() : entry.Key;
+                var storedPath = ReflectedString(def, "SourceFileName", "FileName");
+                var activePath = ReflectedString(def, "ActiveFileName"); // AutoCAD's resolved path after re-pathing
+                var itemName = ReflectedString(def, "ItemName");
+                if (!(ReflectedBool(def, "IsLoaded", "Loaded") ?? true))
+                {
+                    result.Add(new UnderlayEntry(kind, name, storedPath ?? "", null, "unloaded", itemName, def.ObjectId));
+                    continue;
+                }
+
+                var resolved = ResolveUnderlayFile(db, storedPath, drawingFolder)
+                    ?? ResolveUnderlayFile(db, activePath, drawingFolder);
+                result.Add(resolved is not null
+                    ? new UnderlayEntry(kind, name, storedPath ?? "", resolved, "resolved", itemName, def.ObjectId)
+                    : new UnderlayEntry(kind, name, storedPath ?? "", UnderlayResolution.ResolveCandidatePath(storedPath, drawingFolder), "missing", itemName, def.ObjectId));
+            }
+        }
+
+        // Detached underlays/images leave their definition behind until PURGE. An unreferenced
+        // def cannot paint anything, so it is reported but never a failure (F3).
+        var missingIds = result.Where(u => u.Status == "missing").Select(u => u.DefinitionId).ToHashSet();
+        if (missingIds.Count > 0)
+        {
+            var referenced = CollectReferencedUnderlayIds(tr, db, missingIds);
+            result = result
+                .Select(u => u.Status == "missing" && !referenced.Contains(u.DefinitionId) ? u with { Status = "unreferenced" } : u)
+                .ToList();
+        }
+
+        return result;
+    }
+
+    /// <summary>Which of <paramref name="wanted"/> underlay-definition ids are still referenced by an entity somewhere in the drawing.</summary>
+    private static HashSet<ObjectId> CollectReferencedUnderlayIds(Transaction tr, Database db, HashSet<ObjectId> wanted)
+    {
+        var referenced = new HashSet<ObjectId>();
+        var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+        foreach (ObjectId btrId in bt)
+        {
+            var btr = (BlockTableRecord)tr.GetObject(btrId, OpenMode.ForRead);
+            foreach (ObjectId id in btr)
+            {
+                if (id.IsErased)
+                {
+                    continue;
+                }
+
+                Entity? entity;
+                try
+                {
+                    entity = tr.GetObject(id, OpenMode.ForRead) as Entity;
+                }
+                catch
+                {
+                    continue; // unopenable/proxy entity — not an underlay reference
+                }
+
+                var defId = entity switch
+                {
+                    UnderlayReference ur => ur.DefinitionId,
+                    RasterImage ri => ri.ImageDefId,
+                    _ => ObjectId.Null
+                };
+                if (wanted.Contains(defId))
+                {
+                    referenced.Add(defId);
+                    if (referenced.Count == wanted.Count)
+                    {
+                        return referenced; // every wanted id accounted for — stop scanning
+                    }
+                }
+            }
+        }
+
+        return referenced;
+    }
+
+    private static string? DrawingFolder(Database db)
+    {
+        try
+        {
+            return Path.GetDirectoryName(db.Filename);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? ResolveUnderlayFile(Database db, string? storedPath, string? drawingFolder)
+    {
+        if (UnderlayResolution.ResolveCandidatePath(storedPath, drawingFolder) is { } candidate && File.Exists(candidate))
+        {
+            return candidate;
+        }
+
+        // Support-search-path fallback — the same FindFile the linetype loader already uses.
+        return string.IsNullOrWhiteSpace(storedPath) ? null : TryFindSupportFile(db, storedPath);
+    }
+
+    /// <summary>Shared missing-underlay failure for the plot and publish entry points; null when all resolve.</summary>
+    private static ForgeResult? UnderlayPreflightFailure(ForgeCommand command, IReadOnlyList<UnderlayEntry> underlays)
+    {
+        var missing = underlays.Where(u => u.Status == "missing").ToArray();
+        if (missing.Length == 0)
+        {
+            return null;
+        }
+
+        return ForgeResult.Failure(
+            command.Id,
+            "plot_underlay_unresolved",
+            $"Unresolved underlay file(s): {string.Join("; ", missing.Select(m => $"{m.Kind} '{m.Name}' -> {(m.Path.Length > 0 ? m.Path : "(no file name)")}"))}. The plot would come out without the underlay image.",
+            "Repath the underlay to an existing file (absolute paths are safest), or detach/unload it (-IMAGE, -PDFATTACH or the Reference palette) and re-plot. Orphaned definitions left after detach can be removed with PURGE.",
+            data: new { underlays, missing, underlayCount = underlays.Count, underlaysResolved = false });
+    }
+
+    private static string? ReflectedString(object target, params string[] propertyNames)
+    {
+        foreach (var name in propertyNames)
+        {
+            try
+            {
+                if (target.GetType().GetProperty(name) is { } property && property.GetValue(target) is string value && !string.IsNullOrWhiteSpace(value))
+                {
+                    return value;
+                }
+            }
+            catch
+            {
+                // Getter threw (erased/unimplemented member) — try the next name.
+            }
+        }
+
+        return null;
+    }
+
+    private static bool? ReflectedBool(object target, params string[] propertyNames)
+    {
+        foreach (var name in propertyNames)
+        {
+            try
+            {
+                if (target.GetType().GetProperty(name) is { } property && property.GetValue(target) is bool value)
+                {
+                    return value;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

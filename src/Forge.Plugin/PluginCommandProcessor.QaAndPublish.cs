@@ -358,6 +358,23 @@ public sealed partial class PluginCommandProcessor
             $"PSTYLEMODE={pstyleMode} (1=CTB color-dependent, 0=STB named).",
             "Confirm plot style type matches office CTB/STB standards."));
 
+        // TOOL-GAP #26: same enumeration the plot/publish gate runs — a missing loaded underlay
+        // fails preflight up front instead of surprising the plot call with plot_underlay_unresolved.
+        using (var underlayTr = ActiveDb.TransactionManager.StartTransaction())
+        {
+            foreach (var u in EnumerateUnderlayDefinitions(underlayTr, ActiveDb).Where(u => u.Status == "missing"))
+            {
+                findings.Add(new QaFinding(
+                    "underlay_unresolved",
+                    "error",
+                    $"{u.Kind} underlay '{u.Name}' does not resolve: '{(u.Path.Length > 0 ? u.Path : "(no file name)")}'.",
+                    "Repath the underlay to an existing file, or detach/unload it and re-check.",
+                    "forge_plot_to_pdf"));
+            }
+
+            underlayTr.Commit();
+        }
+
         if (requiredTags is { Length: > 0 })
         {
             var attrs = FindBlockAttributes(titleblockBlockName, null, forWrite: false).ToArray();

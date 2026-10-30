@@ -132,6 +132,13 @@ public sealed partial class PluginCommandProcessor
         var stats = new BlockWalkStats();
         var options = new BlockWalkOptions(args.IncludeBlocks, BlockWalk.ClampDepth(args.BlockDepth), window, args.IncludeXrefs);
 
+        // TOOL-GAP #30a: set only while walking model space through a floating viewport — the
+        // viewport's paper rectangle clips every item and each one is tagged "model/VP<n>".
+        double[]? vpClipRect = null;
+        Vec2[]? vpClipPoly = null;
+        HashSet<string>? vpFrozenLayers = null;
+        string? pathPrefix = null;
+
         using var tr = db.TransactionManager.StartTransaction();
         var space = ResolveSpace(tr, db, spaceName);
         if (space is null)
@@ -167,9 +174,14 @@ public sealed partial class PluginCommandProcessor
             return (handle, insertSizes.TryGetValue(BaseHandle(handle), out var size) ? size : double.MaxValue);
         }
 
-        string? PathLabel(BlockWalkFrame frame) => frame.Path.Count > 0 ? BlockWalk.InsertPathLabel(frame.Path) : null;
+        // Viewport walks tag every model item "model/VP<n>[/insertPath]" (TOOL-GAP #30a).
+        string? TaggedPath(BlockWalkFrame frame) =>
+            frame.Path.Count > 0
+                ? pathPrefix is null ? BlockWalk.InsertPathLabel(frame.Path) : $"{pathPrefix}/{BlockWalk.InsertPathLabel(frame.Path)}"
+                : pathPrefix;
 
-        bool LayerVisible(string effectiveLayer) => !hiddenLayers.Contains(effectiveLayer);
+        bool LayerVisible(string effectiveLayer) =>
+            !hiddenLayers.Contains(effectiveLayer) && (vpFrozenLayers is null || !vpFrozenLayers.Contains(effectiveLayer));
 
         bool TextWanted(string own, string effective) =>
             textFilter.Matches(effective, emptyMatchesAll: true) || textFilter.Matches(own);
@@ -204,6 +216,15 @@ public sealed partial class PluginCommandProcessor
             }
 
             var corners = frame.IsIdentity ? localCorners : localCorners.Select(c => frame.Affine.Apply2D(c.X, c.Y)).ToArray();
+            if (vpClipPoly is { } clipPoly)
+            {
+                corners = AnnotationClash.ClipConvex(corners, clipPoly);
+                if (corners.Length < 3)
+                {
+                    return; // fully outside this viewport
+                }
+            }
+
             if (!InWindow(corners))
             {
                 return;
@@ -222,11 +243,31 @@ public sealed partial class PluginCommandProcessor
                 Masked = masked,
                 Owner = owner,
                 OwnerSize = size,
-                Path = PathLabel(frame)
+                Path = TaggedPath(frame)
             });
         }
 
         void AddCurve(string handle, string type, string ownLayer, Vec2[] worldPoints, bool closed, ClashCurveKind kind, Vec2? apex, BlockWalkFrame frame, string? ownerOverride = null)
+        {
+            if (vpClipRect is { } clip)
+            {
+                // Viewport walk: keep only the parts inside the paper rect. Runs arrive already
+                // materialised (a fully-inside ring ends at its first point), so they stay open.
+                // The door-swing apex rides the first run only — one arc yields one sector (F13).
+                var first = true;
+                foreach (var run in ViewportClip.Polyline(worldPoints, closed, clip[0], clip[1], clip[2], clip[3]))
+                {
+                    EmitCurve(handle, type, ownLayer, run, closed: false, kind, first ? apex : null, frame, ownerOverride);
+                    first = false;
+                }
+
+                return;
+            }
+
+            EmitCurve(handle, type, ownLayer, worldPoints, closed, kind, apex, frame, ownerOverride);
+        }
+
+        void EmitCurve(string handle, string type, string ownLayer, Vec2[] worldPoints, bool closed, ClashCurveKind kind, Vec2? apex, BlockWalkFrame frame, string? ownerOverride)
         {
             if (worldPoints.Length < 2)
             {
@@ -258,11 +299,11 @@ public sealed partial class PluginCommandProcessor
                 SectorApex = apex,
                 Owner = owner,
                 OwnerSize = size,
-                Path = PathLabel(frame)
+                Path = TaggedPath(frame)
             });
         }
 
-        WalkBlockSpace(tr, space, options, stats, (entity, id, frame) =>
+        Func<Entity, ObjectId, BlockWalkFrame, bool> visit = (entity, id, frame) =>
         {
             if (frame.Depth > 0 && InHiddenInsert(frame))
             {
@@ -346,7 +387,110 @@ public sealed partial class PluginCommandProcessor
             }
 
             return texts.Count < ClashMaxTexts || segments < ClashMaxSegments;
-        });
+        };
+
+        WalkBlockSpace(tr, space, options, stats, visit);
+
+        // TOOL-GAP #30a: model-space texts and curves visible through each floating viewport,
+        // projected into paper coordinates and clipped to the viewport's paper rectangle — the
+        // check the sample set had to do by hand with scripts/cloud_text_check.py.
+        var paperspaceTexts = texts.Count;
+        var paperspaceCurves = curves.Count;
+        var viewportScans = new List<object>();
+        if (isPaper && ResolveSpace(tr, db, "Model") is { } modelSpace)
+        {
+            var modelOptions = new BlockWalkOptions(options.IncludeBlocks, options.MaxDepth, null, options.IncludeXrefs);
+            foreach (ObjectId id in space)
+            {
+                Viewport? vp = null;
+                var textsBefore = texts.Count;
+                var curvesBefore = curves.Count;
+                var tag = "";
+                try
+                {
+                    if (id.IsErased || tr.GetObject(id, OpenMode.ForRead) is not Viewport v ||
+                        ViewportSheetFilter.IsSheetViewport(
+                            v.Number,
+                            v.CenterPoint.X, v.CenterPoint.Y,
+                            v.ViewCenter.X, v.ViewCenter.Y,
+                            v.Height, v.ViewHeight) || !v.On)
+                    {
+                        continue;
+                    }
+
+                    vp = v;
+
+                    // A viewport on an off/frozen layer shows nothing (non-plottable is fine —
+                    // the frame doesn't print but the content does, e.g. defpoints).
+                    if (tr.GetObject(vp.LayerId, OpenMode.ForRead) is LayerTableRecord vpLayer && (vpLayer.IsOff || vpLayer.IsFrozen))
+                    {
+                        continue;
+                    }
+
+                    tag = $"model/VP{vp.Number}@{vp.Handle}";
+                    if (!TryViewportModelToPaper(vp, out var matrix, out var scale, out var clipRect))
+                    {
+                        warnings.Add($"Viewport {vp.Number} on '{spaceName}': unusable model→paper transform (bad geometry/scale); its model-space content was not checked.");
+                        continue;
+                    }
+
+                    vpClipRect = clipRect;
+                    vpClipPoly = ViewportTransform.PaperRectCcw(vp.CenterPoint.X, vp.CenterPoint.Y, vp.Width, vp.Height);
+                    pathPrefix = tag;
+                    vpFrozenLayers = FrozenLayerNames(tr, vp);
+                    if (vpFrozenLayers is null)
+                    {
+                        warnings.Add($"Viewport {vp.Number} on '{spaceName}': viewport-frozen layers could not be determined; content is over-inclusive.");
+                    }
+
+                    if (vp.NonRectClipOn)
+                    {
+                        warnings.Add($"Viewport {vp.Number} on '{spaceName}': non-rectangular clip; content is checked against the viewport rectangle (slightly over-inclusive).");
+                    }
+
+                    // Per-viewport reset: hiddenInserts carries layer-visibility state that
+                    // differs per viewport (F1). The rooted frame's Depth=1 gives model walks
+                    // one less descend budget than the paper walk (accepted — frame.Depth > 0
+                    // is what enables Visible/hidden-insert semantics).
+                    hiddenInserts.Clear();
+                    WalkBlockSpace(tr, modelSpace, new BlockWalkFrame(matrix, 1, [], null, []), modelOptions, stats, visit);
+                    viewportScans.Add(new
+                    {
+                        number = vp.Number,
+                        tag,
+                        scale,
+                        failed = false,
+                        nonRectClip = vp.NonRectClipOn ? true : (bool?)null,
+                        texts = texts.Count - textsBefore,
+                        curves = curves.Count - curvesBefore
+                    });
+                }
+                catch (Exception ex)
+                {
+                    warnings.Add($"Viewport {vp?.Number.ToString() ?? id.Handle.ToString()} on '{spaceName}': model-space scan failed ({ex.GetType().Name}: {ex.Message}); its content was only partially checked.");
+                    if (vp is not null)
+                    {
+                        viewportScans.Add(new
+                        {
+                            number = vp.Number,
+                            tag,
+                            scale = (double?)null,
+                            failed = true,
+                            nonRectClip = vp.NonRectClipOn ? true : (bool?)null,
+                            texts = texts.Count - textsBefore,
+                            curves = curves.Count - curvesBefore
+                        });
+                    }
+                }
+                finally
+                {
+                    vpClipRect = null;
+                    vpClipPoly = null;
+                    pathPrefix = null;
+                    vpFrozenLayers = null;
+                }
+            }
+        }
 
         void AddAttribute(AttributeReference ar, string value, BlockWalkFrame frame, string insertLayer, string owner, double ownerSize)
         {
@@ -365,6 +509,15 @@ public sealed partial class PluginCommandProcessor
 
             var local = LocalTextBox(ar, ar.Rotation, ar.Height);
             var corners = frame.IsIdentity ? local : local.Select(c => frame.Affine.Apply2D(c.X, c.Y)).ToArray();
+            if (vpClipPoly is { } clipPoly)
+            {
+                corners = AnnotationClash.ClipConvex(corners, clipPoly);
+                if (corners.Length < 3)
+                {
+                    return;
+                }
+            }
+
             if (!InWindow(corners))
             {
                 return;
@@ -380,7 +533,7 @@ public sealed partial class PluginCommandProcessor
                 Height = frame.IsIdentity ? ar.Height : TextRead.WorldMetrics(frame.Affine, ar.Rotation, ar.Height).Height,
                 Owner = owner,
                 OwnerSize = ownerSize,
-                Path = PathLabel(frame)
+                Path = TaggedPath(frame)
             });
         }
 
@@ -560,6 +713,20 @@ public sealed partial class PluginCommandProcessor
             findingsTruncated = report.Truncated,
             unitsPerPaperMm,
             blockTraversal = BlockTraversalReport(options, stats),
+            scope = new
+            {
+                space = spaceName,
+                modelSpaceThroughViewports = isPaper,
+                viewportsChecked = viewportScans.Count,
+                paperspaceTexts,
+                paperspaceCurves,
+                modelSpaceTexts = texts.Count - paperspaceTexts,
+                modelSpaceCurves = curves.Count - paperspaceCurves,
+                note = isPaper
+                    ? "Model-space content visible through the layout's floating viewports was projected into paper coordinates and clipped to each viewport's rectangle before the checks ran (tag 'model/VP<n>'); a viewport's non-rectangular clip is approximated by its rectangle."
+                    : "Model space was scanned directly; there is no viewport indirection."
+            },
+            viewportScans,
             warnings,
             elapsedMs = watch.ElapsedMilliseconds
         });
@@ -640,6 +807,65 @@ public sealed partial class PluginCommandProcessor
     {
         var cut = insertHandle.IndexOf('[', StringComparison.Ordinal);
         return cut > 0 ? insertHandle[..cut] : insertHandle;
+    }
+
+    /// <summary>
+    /// TOOL-GAP #30a: model→paper transform of a floating viewport, composed with the same
+    /// canonical WCS→DCS chain the view code uses (Rotation(−twist)·Displacement(target)·
+    /// PlaneToWorld(dir); see Capture.cs). paper = vpCenter + scale·(DCS(p) − viewCenter),
+    /// scale = Height/ViewHeight (≡ CustomScale). The pure twin is Forge.Shared.ViewportTransform,
+    /// which is unit-tested.
+    /// </summary>
+    private static bool TryViewportModelToPaper(Viewport vp, out Matrix3d matrix, out double scale, out double[] clipRect)
+    {
+        matrix = Matrix3d.Identity;
+        scale = 0;
+        clipRect = [];
+        if (vp.Width <= 0 || vp.Height <= 0)
+        {
+            return false;
+        }
+
+        scale = ViewportTransform.PaperScale(vp.Height, vp.ViewHeight, vp.CustomScale);
+        if (!(scale > 0 && double.IsFinite(scale)))
+        {
+            return false;
+        }
+
+        var dir = vp.ViewDirection.Length < 1e-9 ? Vector3d.ZAxis : vp.ViewDirection;
+        var target = vp.ViewTarget;
+        var viewCenter = vp.ViewCenter;
+        var center = vp.CenterPoint;
+        var dcsToWcs = Matrix3d.Rotation(-vp.TwistAngle, dir, target)
+                       * Matrix3d.Displacement(target - Point3d.Origin)
+                       * Matrix3d.PlaneToWorld(dir);
+        var dcsToPaper = Matrix3d.Displacement(new Vector3d(center.X - scale * viewCenter.X, center.Y - scale * viewCenter.Y, 0))
+                         * Matrix3d.Scaling(scale, Point3d.Origin);
+        matrix = dcsToPaper * dcsToWcs.Inverse();
+        clipRect = ViewportTransform.PaperRect(center.X, center.Y, vp.Width, vp.Height);
+        return true;
+    }
+
+    /// <summary>Layers frozen in just this viewport; null when the query fails (caller warns — over-inclusive).</summary>
+    private static HashSet<string>? FrozenLayerNames(Transaction tr, Viewport vp)
+    {
+        try
+        {
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (ObjectId layerId in vp.GetFrozenLayers())
+            {
+                if (!layerId.IsErased && tr.GetObject(layerId, OpenMode.ForRead) is LayerTableRecord layer)
+                {
+                    names.Add(layer.Name);
+                }
+            }
+
+            return names;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static double? ParseDrawingUnits(string? units) => units?.Trim().ToLowerInvariant() switch
