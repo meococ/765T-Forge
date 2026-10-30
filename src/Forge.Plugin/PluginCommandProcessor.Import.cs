@@ -13,7 +13,9 @@ namespace Forge.Plugin;
 // lands it with one native call:
 //   • block — Database.Insert(tempName, side) → rename (or redefine an existing block in place,
 //     keeping every existing INSERT pointing at it) → one INSERT with scale/rotation/layer;
-//   • merge — Database.Insert(matrix, side): the source model space exploded into ours;
+//   • merge — the source model space cloned into OUR model space (WblockCloneObjects into
+//     the model-space BTR, then the position/scale/rotation matrix on the clones) — never
+//     into the current space, which is a paper layout whenever CTAB is not Model (D11);
 //   • xref  — AttachXref (a DXF is first saved to xrefSavePath as DWG) + one INSERT.
 // There is no per-entity round trip: counts/extents come from one pass over the new objects.
 // Safety: registry Destructive + RequiresBackup (redefining a block changes existing geometry),
@@ -177,6 +179,17 @@ public sealed partial class PluginCommandProcessor
         }
 
         // ---- read the source into a side database (no document, no UI) ----
+        // fix-smoke-20261029-r2 D10 + review-wp2-r1 finding 5: a DWG with proxy objects
+        // raises the modal "Proxy Information" dialog during DxfIn/ReadDwgFile/Insert/
+        // AttachXref and wedges every later pipe call. PROXYNOTICE=0 for the whole
+        // foreign-database section, restored on Dispose — and the call fails closed with
+        // proxynotice_scope_failed when it cannot be applied (no foreign load without
+        // suppression).
+        using var proxyNotice = ProxyNoticeScope.EnterOrFail(command, out var scopeFailure);
+        if (scopeFailure is not null)
+        {
+            return scopeFailure;
+        }
         var phase = Stopwatch.StartNew();
         using var side = new Database(false, true);
         string? dxfLog = null;
@@ -309,6 +322,7 @@ public sealed partial class PluginCommandProcessor
                 xrefSavePath,
                 layerPlan = LayerPlanReport(layerPlan),
                 nestedBlockConflicts = nestedConflicts,
+                proxynotice = proxyNotice,
                 warnings
             });
         }
@@ -357,6 +371,7 @@ public sealed partial class PluginCommandProcessor
                 existingReferences = outcome.ExistingReferences,
                 xrefPath = outcome.XrefPath,
                 created = outcome.Created,
+                skippedOrUntransformed = outcome.SkippedOrUntransformed > 0 ? outcome.SkippedOrUntransformed : (int?)null,
 
                 // An xref copies nothing into this drawing: its counts are the source inventory.
                 countsByType = mode == DrawingImportMode.Xref ? sourceTypes : outcome.CountsByType,
@@ -368,27 +383,53 @@ public sealed partial class PluginCommandProcessor
                 handles = outcome.Handles,
                 handlesTruncated = outcome.HandlesTruncated ? true : (bool?)null,
                 nestedBlockConflicts = nestedConflicts.Count > 0 ? nestedConflicts : null,
+                proxynotice = proxyNotice,
                 warnings,
                 timingsMs = new { read = readMs, layerMap = mapMs, insert = insertMs, total = total.ElapsedMilliseconds }
             };
 
-            return ForgeResult.Success(
-                command.Id,
-                data,
-                verification: new ForgeVerification
+            // fix-smoke-20261029-r2 D11: ok derives from the read-back, never from "the call
+            // ran" — a merge that lands nothing in model space fails import_verification_failed.
+            var verified = DrawingImport.ImportVerified(
+                mode, outcome.Created, outcome.InsertHandle is not null, outcome.BlockHandle is not null);
+            var verification = new ForgeVerification
+            {
+                Attempted = true,
+                Passed = verified,
+                Message = mode switch
                 {
-                    Attempted = true,
-                    Passed = outcome.Created > 0 || outcome.InsertHandle is not null,
-                    Message = mode == DrawingImportMode.Xref
-                        ? $"Attached as an xref after one native AttachXref call ({sourceCount} source entities stay in the xref file; nothing was copied into this drawing). Read back the xref INSERT and its world extents."
-                        : $"Read back {outcome.Created} {(mode == DrawingImportMode.Merge ? "new model-space entities" : "entities in the definition")} from the database after one native Database.Insert call.",
-                    ReadBack = new { created = outcome.Created, extents = outcome.Extents, insertHandle = outcome.InsertHandle }
-                });
+                    DrawingImportMode.Xref => $"Attached as an xref after one native AttachXref call ({sourceCount} source entities stay in the xref file; nothing was copied into this drawing). Read back the xref INSERT and its world extents.",
+                    DrawingImportMode.Merge => $"Read back {outcome.Created} new model-space entities after cloning the source model space into this drawing's model-space block table record.",
+                    _ => $"Read back {outcome.Created} entities in the definition from the database after one native Database.Insert call."
+                },
+                ReadBack = new { created = outcome.Created, extents = outcome.Extents, insertHandle = outcome.InsertHandle }
+            };
+
+            // review-wp2-r1 finding 10 (D11): a partial import is success-with-warning — when
+            // fewer entities land than the source model space held, or clones were skipped or
+            // untransformed, the warning names BOTH counts.
+            if (DrawingImport.PartialImportWarning(mode, outcome.Created, sourceCount, outcome.SkippedOrUntransformed) is { } partialWarning)
+            {
+                warnings.Add(partialWarning);
+            }
+
+            return DrawingImport.ImportResult(
+                command.Id,
+                verified,
+                data,
+                verification,
+                mode switch
+                {
+                    DrawingImportMode.Merge => $"Merge read back {outcome.Created} entities in model space (the source model space had {sourceCount}); the import could not be verified.",
+                    DrawingImportMode.Xref => "The xref attach produced no block-table definition; the attach could not be verified.",
+                    _ => $"The import read back {outcome.Created} entities in '{blockName}' and produced no INSERT handle; the import could not be verified."
+                },
+                "Run with dryRun=true to inspect the source; the failed import was rolled back by the UNDO group.");
         }
         catch (System.Exception ex) when (ex is Autodesk.AutoCAD.Runtime.Exception or InvalidOperationException or ArgumentException or IOException or UnauthorizedAccessException)
         {
             // Process() pops the UNDO group on a failed result, which also reverts the native insert.
-            return ForgeResult.Failure(command.Id, "import_failed", $"Import failed: {ex.Message}", "Run with dryRun=true to inspect the source; nothing was kept (the UNDO group is rolled back).", data: new { warnings });
+            return ForgeResult.Failure(command.Id, "import_failed", $"Import failed: {ex.Message}", "Run with dryRun=true to inspect the source; nothing was kept (the UNDO group is rolled back).", data: new { proxynotice = proxyNotice, warnings });
         }
     }
 
@@ -403,13 +444,35 @@ public sealed partial class PluginCommandProcessor
         int? ExistingReferences,
         string? XrefPath,
         string[]? Handles,
-        bool HandlesTruncated);
+        bool HandlesTruncated,
+        int SkippedOrUntransformed);
 
     private static ImportOutcome ImportMerge(Database db, Database side, double[] position, double scale, double rotationDeg, double[] basePoint, DocImportArgs args, List<string> warnings)
     {
         var seed = db.Handseed.Value;
         var matrix = new Matrix3d(DrawingImport.MergeTransform(position, scale, DegreesToRadians(rotationDeg), basePoint));
-        db.Insert(matrix, side, false);
+        // fix-smoke-20261029-r2 D11: Database.Insert lands in the database's CURRENT space —
+        // with CTAB on a paper layout the entities went there while the model-space readback
+        // below stayed 0, and managed CurrentSpaceId is read-only. The merge now clones the
+        // source model space into this drawing's model-space BTR explicitly (existing
+        // definitions win, AutoCAD INSERT rule) and applies the matrix to the clones, so the
+        // target is always model space regardless of CTAB.
+        var sourceIds = new ObjectIdCollection();
+        using (var str = side.TransactionManager.StartTransaction())
+        {
+            var sbt = (BlockTable)str.GetObject(side.BlockTableId, OpenMode.ForRead);
+            var sms = (BlockTableRecord)str.GetObject(sbt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+            foreach (ObjectId id in sms)
+            {
+                sourceIds.Add(id);
+            }
+
+            str.Commit();
+        }
+
+        var modelSpaceId = SymbolUtilityServices.GetBlockModelSpaceId(db);
+        var mapping = new IdMapping();
+        db.WblockCloneObjects(sourceIds, modelSpaceId, mapping, DuplicateRecordCloning.Ignore, false);
 
         var types = new SortedDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var layers = new SortedDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -417,6 +480,8 @@ public sealed partial class PluginCommandProcessor
         var handles = args.ReturnHandles ? new List<string>() : null;
         var truncated = false;
         var created = 0;
+        var skipped = 0;
+        var transformFailures = 0;
         using var tr = db.TransactionManager.StartTransaction();
         var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
         var ms = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
@@ -424,6 +489,42 @@ public sealed partial class PluginCommandProcessor
         if (args.Layer is not null)
         {
             forcedLayer = ((LayerTable)tr.GetObject(db.LayerTableId, OpenMode.ForRead))[args.Layer];
+        }
+
+        // The position/scale/rotation matrix applies to the top-level clones only — entities
+        // pulled in as part of a nested definition keep their definition coordinates.
+        foreach (IdPair pair in mapping)
+        {
+            if (!pair.IsPrimary)
+            {
+                continue;
+            }
+
+            if (!pair.IsCloned)
+            {
+                skipped++;
+                continue;
+            }
+
+            if (tr.GetObject(pair.Value, OpenMode.ForWrite) is not Entity clone || clone.BlockId != modelSpaceId)
+            {
+                skipped++;
+                continue;
+            }
+
+            try
+            {
+                clone.TransformBy(matrix);
+            }
+            catch (Autodesk.AutoCAD.Runtime.Exception)
+            {
+                transformFailures++;
+            }
+        }
+
+        if (transformFailures > 0)
+        {
+            warnings.Add($"{transformFailures} merged entit(ies) could not be transformed (proxy content?); they kept their source coordinates.");
         }
 
         foreach (ObjectId id in ms)
@@ -467,7 +568,7 @@ public sealed partial class PluginCommandProcessor
             warnings.Add("The source model space was empty (paper-space content is not imported by merge).");
         }
 
-        return new ImportOutcome(created, types, layers, extents, null, null, false, null, null, handles?.ToArray(), truncated);
+        return new ImportOutcome(created, types, layers, extents, null, null, false, null, null, handles?.ToArray(), truncated, skipped + transformFailures);
     }
 
     private static ImportOutcome ImportBlock(Database db, Database side, string blockName, ObjectId existingId, double[] position, double scale, double rotationDeg, DocImportArgs args, List<string> warnings)
@@ -576,7 +677,7 @@ public sealed partial class PluginCommandProcessor
             }
 
             tr.Commit();
-            return new ImportOutcome(created, types, layers, extents, definition.Handle.ToString(), insertHandle, replaced, existingRefs, null, null, false);
+            return new ImportOutcome(created, types, layers, extents, definition.Handle.ToString(), insertHandle, replaced, existingRefs, null, null, false, 0);
         }
         catch
         {
@@ -630,7 +731,7 @@ public sealed partial class PluginCommandProcessor
         tr.Commit();
         var types = new SortedDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var layers = new SortedDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        return new ImportOutcome(0, types, layers, extents, definition.Handle.ToString(), insertHandle, false, null, xrefPath, null, false);
+        return new ImportOutcome(0, types, layers, extents, definition.Handle.ToString(), insertHandle, false, null, xrefPath, null, false, 0);
     }
 
     /// <summary>Renames/merges layers in the side database before the native insert copies them.</summary>

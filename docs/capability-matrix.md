@@ -12,10 +12,10 @@ Honest status of MCP tools. AutoCAD targets: **2025 and 2026** through the typed
 
 | Tool | Status | Notes |
 |------|--------|-------|
-| `forge_system_health` | implemented | Also answers with no open document (Start tab), alongside `forge_system_version` / `forge_doc_list_open`; other tools fail `no_command_context` there |
-| `forge_system_version` | implemented | Product + envelope versions |
-| `forge_system_getvar` / `_setvar` | implemented | |
-| `forge_system_capabilities` | implemented | Devices, media, page setups, layouts, layer states, plot styles |
+| `forge_system_health` | implemented | With no open document (Start tab) the real handler answers on the Idle marshal: `ok`, `pipe`, `targetYear`, `hostYear`, `documents: 0`, `hint` to call `forge_doc_new`/`forge_doc_open` — the pipe-token check and audit record apply before any routing (review-wp2-r1 findings 1–2). The document-free tools (`forge_system_version`, `forge_system_getvar`, `forge_system_tool_profile`, `forge_doc_list_open`, `forge_registry_load`/`_lookup`, `forge_pack_load`/`_status`) answer the same way; `forge_dgn_import` runs on the application lane. Every other tool fails fast with `no_active_document` at zero documents, `no_command_context` when documents are open but none is active — both authenticated refusals write an audit record and carry `AuditId` (an unauthenticated call is refused `unauthorized` first, unrecorded) (fix-smoke-20261029-r2 D13, review-wp2-r2 Q2) |
+| `forge_system_version` | implemented | Product + envelope versions; answers at zero documents (document-free) |
+| `forge_system_getvar` / `_setvar` | implemented | `_getvar` answers at zero documents for application-scoped sysvars; a drawing-scoped variable fails typed (no document exists to read it from). `_setvar` still needs a document context |
+| `forge_system_capabilities` | implemented | Devices, media, page setups, layouts, layer states, plot styles — opens a transaction on the active database, so it stays refused with `no_active_document` at zero documents |
 
 ## Document / xref / layer
 
@@ -24,11 +24,11 @@ Honest status of MCP tools. AutoCAD targets: **2025 and 2026** through the typed
 | `forge_doc_*` (list/open/save/layouts) | implemented | SaveAs overwrite ack. `forge_doc_open` runs in application context and is `ok` only when the opened drawing reads back as active (`doc_open_unconfirmed` otherwise; an already-open drawing is activated). `forge_doc_save path=` renames the open document (`SaveAs` with bak-and-rename) and is `ok` only when the fresh file, document name, database file name and DWGNAME agree (`saveas_not_renamed` / `save_unconfirmed`) — fix-smoke-20261029 D1/D7 |
 | `forge_doc_close` | implemented | Close one open drawing by exact file name or full path (fix-smoke-20261029 D8). Application context (Idle lane); refuses `last_document`, `command_active`, `discard_not_acknowledged` (unsaved changes; unknown counts as unsaved), `save_requires_path`, `document_read_only`, `invalid_path`. `save=true` backs up and saves the drawing to its own .dwg and reads the file back before closing; `discardAcknowledged=true` closes without saving. `ok` only when the Document is gone from the document list (by reference); `doc_close_unconfirmed` / `doc_close_busy` / `doc_close_failed`. **Live AutoCAD smoke pending** |
 | `forge_doc_activate` | implemented | Switch the active drawing among open ones by exact file name or full path (no suffix match; `ambiguous_document` fails closed); runs in application context via the Idle marshal and reads the active document back (`doc_activate_unconfirmed` when AutoCAD has not switched within ~2 s). **Live AutoCAD smoke pending** |
-| `forge_xref_list` / `_reload` / `_repath` | implemented | |
+| `forge_xref_list` / `_reload` / `_repath` | implemented | `_reload`/`_repath` (and `_normalize_relative` reloads) run inside a scoped `PROXYNOTICE=0`, restored afterwards — the modal Proxy Information dialog cannot block the pipe (fix-smoke-20261029-r2 D10) |
 | `forge_xref_normalize_relative` | implemented | Absolute → host-relative + optional reload |
 | `forge_layer_list` / `_state_list` | implemented | |
 | `forge_layer_state_restore` | implemented | Sync via `LayerStateManager` |
-| `forge_doc_import` | implemented | DXF/DWG into the active drawing in one call: `mode=block` (definition + one INSERT; `replaceExisting` redefines in place), `merge` (`Database.Insert` with position/scale/rotation/basePoint) or `xref` (DXF saved as DWG to `xrefSavePath` first). Side-database read, INSUNITS match, `layerMap`/`layerPrefix` applied before the insert, counts by type/layer, `layersCreated`/`layersReused`, world extents, `timingsMs`. Destructive + backup. Headless accoreconsole smoke 2026-10-29: 8,900-entity ezdxf DXF in ~190 ms (read 61 ms + insert 115 ms) per mode; undo removes the import as one step. **Live AutoCAD (acad.exe) smoke pending** |
+| `forge_doc_import` | implemented | DXF/DWG into the active drawing in one call: `mode=block` (definition + one INSERT; `replaceExisting` redefines in place), `merge` (model-space `WblockCloneObjects` with position/scale/rotation/basePoint — targets model space regardless of CTAB, fix-smoke-20261029-r2 D11) or `xref` (DXF saved as DWG to `xrefSavePath` first). Scoped `PROXYNOTICE=0` during the load (proxy dialog cannot block the pipe, D10). `ok` derives from the read-back verification — an unverified import fails `import_verification_failed` (D11). A partial import is success-with-warning, never silent: when `created < source.entities` or clones are skipped/untransformed, the warning names both counts and `skippedOrUntransformed` rides in the data (review-wp2-r1 finding 10). Side-database read, INSUNITS match, `layerMap`/`layerPrefix` applied before the insert, counts by type/layer, `layersCreated`/`layersReused`, world extents, `timingsMs`. Destructive + backup. Headless accoreconsole smoke 2026-10-29: 8,900-entity ezdxf DXF in ~190 ms (read 61 ms + insert 115 ms) per mode; undo removes the import as one step. **Live AutoCAD (acad.exe) smoke pending** |
 | `forge_standards_import` | implemented | Linetypes, text/dim/mleader/table styles, layers, page setups from a template DWG/DWT (dependency order, one `WblockCloneObjects` per kind); `onConflict=skip|overwrite`, name `filter`, protected names kept; change report read back. Headless smoke passed; page setups and mleader/table styles **live AutoCAD smoke pending** |
 
 ## Authoring, Precision Editing, Spatial Intelligence & AEC Generators (C20–C30)
@@ -71,7 +71,7 @@ Authoring contract ([docs/cad-authoring-tools.md](cad-authoring-tools.md)): WCS 
 |------|--------|-------|
 | `forge_block_list/get/set_attr` | implemented | |
 | `forge_block_campaign` | implemented | Multi-entry dry-run diffs, Unicode |
-| `forge_layout_page_setup_import` | implemented | Prefers sync PlotSettings copy from template DWG/DWT; falls back to queued `-PSETUPIN` with `completed=false` |
+| `forge_layout_page_setup_import` | implemented | Prefers sync PlotSettings copy from template DWG/DWT under a fail-closed `PROXYNOTICE=0` scope; falls back to queued `-PSETUPIN` with `completed=false`. Known gap: the queued `-PSETUPIN` cannot be scoped (it runs after the call returns), so a proxy DWG template can still raise the dialog on that path — prefer the sync path or `forge_layout_page_setup_apply` |
 | `forge_layout_page_setup_apply` | implemented | Sync `PlotSettings` copy onto layout |
 | `forge_plot_preset_apply` | implemented | Device (default no-viewer PDF clone), paper, CTB, area, scale/fit, centring, units, orientation on one or many layouts (`"*"` = all paper layouts) in one validated, all-or-nothing call; optional named page setup. Headless smoke: 2 layouts → A3 fit + `monochrome.ctb` + setup `BENCH-A3`, Model window 1:100 on A1. **Live AutoCAD smoke pending** |
 
@@ -79,13 +79,13 @@ Authoring contract ([docs/cad-authoring-tools.md](cad-authoring-tools.md)): WCS 
 
 | Tool | Status | Notes |
 |------|--------|-------|
-| `forge_plot_to_pdf` | implemented | Never opens a viewer: plots through a Forge-owned PC3 clone with `View_New_File=FALSE` (fails closed with `plot_viewer_suppression_failed`). `plotArea` = `extents` (Model default, and the default whenever the paper differs from the layout's own) / `layout` / `display` / `limits` / `window` (+ `window=[[x1,y1],[x2,y2]]`); `scale=fit` centered by default; orientation honoured against the real media. A layout that is not current is made current for the plot and restored (`layoutSwitched`/`layoutRestored`; dry run: `validation=deferred`); Model extents are refreshed before an extents plot. Read-back: validated plot settings, fit/fill estimate, coverage measured from the PDF ink (`coverageSource=pdf`, `looksTiny`, `pdfContent`; extents + fit fails with `plot_content_tiny` / `plot_content_empty`), PDF probe + sheet size from `/MediaBox` (fix-smoke-20261029 D4/D5). `dryRun` returns the plan. Overwrite ack. Plot engine path **live AutoCAD smoke pending** |
+| `forge_plot_to_pdf` | implemented | Never opens a viewer: plots through a Forge-owned PC3 clone with `View_New_File=FALSE` (fails closed with `plot_viewer_suppression_failed`). `plotArea` = `extents` (Model default) / `layout` / `display` / `limits` / `window` (+ `window=[[x1,y1],[x2,y2]]`); with no caller `plotArea` a paper layout's own stored plot type wins (`plotAreaSource: "stored"` — stored Window coordinates and named View honoured; `storedPlotType` reports the stored type by NAME — `"Window"`, `"View"`, `"Layout"`, …, fix-smoke-20261029-r2 D12, live-smoke-20261030 fix4). Stored media missing on the device is mapped by sheet size (mm or inches, ±0.5 mm, either orientation): `mediaMapped`/`mediaSource` + warning, or `plot_paper_not_on_device` with up to 3 nearest media (D9). `scale=fit` centered by default; an explicit `centered` is ignored on `plotArea=layout` and stored-View areas — the layout's stored centring and offset stand (warned on both engines, fix4-r4 F1); orientation honoured against the real media. A layout that is not current is made current for the plot and restored (`layoutSwitched`/`layoutRestored`; dry run: `validation=deferred`); Model extents are refreshed before an extents plot. Read-back: validated plot settings, fit/fill estimate, coverage measured from the PDF ink (`coverageSource=pdf`, `looksTiny`, `pdfContent`); an empty PDF always fails `plot_content_empty` and a tiny one fails `plot_content_tiny` under extents+fit / filled-window gates (D5/D12), PDF probe + sheet size from `/MediaBox` (fix-smoke-20261029 D4/D5/r2 D9+D12). `dryRun` returns the plan. `engine="command"` (legacy `-PLOT` fallback) honours the same stored centring/offset — a stored setup keeps its stored origin instead of being reset to 0,0, and for Layout/View areas the offset prompt is answered with Enter exactly like `engine="api"` (a Layout-area prompt offers no `[Center]` option) (review-wp2-r2 M1, live-smoke-20261030 fix4). A typed media failure (`paper_size_not_found`, `plot_paper_not_on_device`, `plot_device_invalid`) reports `pc3Prepared` — the no-viewer clone path when the call already wrote it, a file-system side effect that precedes the media check (review-wp2-r2 Q3). Overwrite ack. Plot engine path **live AutoCAD smoke pending** |
 | `forge_plot_publish` | implemented | DSD + `Publisher.PublishDsd`; **PublishReceipt** + PDF probe; preflight gate |
 | `forge_qa_*` (verify/check/audit/readback) | implemented | |
 | `forge_qa_readback_after_timeout` | implemented | Recovery for `plugin_request_timeout` (plugin watchdog) — never retry write blind; pipe stays up |
 | `forge_qa_preflight` | implemented | QaReport + pack v2 + foreground plot + issue-set contract findings |
 | `forge_audit_summarize` | implemented | Server-side last-N audit summary (no raw args) |
-| `forge_issue_set_validate` | implemented | IssueSetContract layouts↔drawingNos↔rev |
+| `forge_issue_set_validate` | implemented | IssueSetContract layouts↔drawingNos↔rev — reads the active database (layout names + block attributes), so it stays refused with `no_active_document` at zero documents |
 | `forge_sheet_inventory_import` | implemented | Read-only CSV → contract (no DST/SSM write) |
 | `forge_issue_set_diff` | implemented | Diff two PublishReceipt artifacts |
 | `forge_recipe_issue_set` | implemented | Normalize → fill → gate → publish |
@@ -97,15 +97,15 @@ Authoring contract ([docs/cad-authoring-tools.md](cad-authoring-tools.md)): WCS 
 
 | Tool | Status | Notes |
 |------|--------|-------|
-| `forge_dgn_import` | partial | DGN **V8** → new DWG via `-DGNIMPORT` in a fresh temp document; V7 refused by header sniff; overwrite ack + destination backup; model-space entity count verification. Logic unit-tested — **live AutoCAD smoke pending** (C15), incl. temp-document context behaviour |
+| `forge_dgn_import` | partial | DGN **V8** → new DWG via `-DGNIMPORT` in a fresh temp document; V7 refused by header sniff; overwrite ack + destination backup; model-space entity count verification; scoped `PROXYNOTICE=0` during the import (fix-smoke-20261029-r2 D10). Runs on the **application lane** at every document state (review-wp2-r1 finding 3): the handler creates a document (`Documents.Add` + `MdiActiveDocument` + `Editor.Command`), so it must not sit inside a locked command context — and it answers at zero documents. Logic unit-tested — **live AutoCAD smoke pending** (C15), incl. temp-document context behaviour |
 
 ## Registry / standards / viewport / profiles
 
 | Tool | Status | Notes |
 |------|--------|-------|
-| `forge_registry_load` / `_lookup` | implemented | Fail-closed drawing numbers for titleblock tags |
-| `forge_pack_load` / `_status` | implemented | Declarative project standards pack (v2 plot bindings) |
-| `forge_system_tool_profile` | implemented | Profiles `core` / `plot` / `qa` / `linework` / `authoring` (server-side) |
+| `forge_registry_load` / `_lookup` | implemented | Fail-closed drawing numbers for titleblock tags — file JSON + process-wide store only; answers at zero documents |
+| `forge_pack_load` / `_status` | implemented | Declarative project standards pack (v2 plot bindings) — file JSON + process-wide store only; answers at zero documents |
+| `forge_system_tool_profile` | implemented | Profiles `core` / `plot` / `qa` / `linework` / `authoring` (server-side) — static metadata; answers at zero documents |
 | `forge_viewport_list` | implemented | Paper-space viewports |
 | `forge_viewport_set_layer_freeze` | implemented | VP freeze/thaw by handle |
 

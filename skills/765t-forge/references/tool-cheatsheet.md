@@ -2,7 +2,7 @@
 
 | Goal | Tools |
 |------|-------|
-| Health | `forge_system_health`, `forge_system_version` (answers on the Start tab; other tools need an open drawing — `no_command_context`) |
+| Health | `forge_system_health`, `forge_system_version` (answers on the Start tab; other tools need an open drawing — `no_active_document`; drawings open but none active — `no_command_context`) |
 | Profiles | `forge_system_tool_profile` (`core`/`plot`/`qa`) |
 | Registry | `forge_registry_load`, `forge_registry_lookup` |
 | Standards | `forge_pack_load`, `forge_pack_status` |

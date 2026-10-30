@@ -50,7 +50,7 @@ They communicate over a **named pipe** (`765T.Forge.AutoCAD`), one JSON line eac
 
 Transport hardening (why a stuck AutoCAD can no longer take the plugin down):
 
-- **No-document state (Start tab):** `forge_system_health`, `forge_system_version`, `forge_doc_list_open` still answer via an `Application.Idle` marshal; every other tool fails fast with `no_command_context` when no documents are open at all (with documents open but none active, the request still tries the command context — the watchdog backstops a wedge).
+- **No-document state (Start tab):** `Forge.Shared.DocumentContextPolicy.Route` decides dispatch before any marshal (fix-smoke-20261029-r2 D13). With zero open documents, `forge_system_health` / `forge_doc_list_open` get a synthesized zero-document answer (`ok`, `documents: 0`, plus a `forge_doc_new`/`forge_doc_open` hint), `forge_system_version` rides the `Application.Idle` marshal, and every other tool fails fast with `no_active_document`. With documents open but none active, document tools fail fast with `no_command_context` (a command context cannot exist either); the watchdog backstops any wedge.
 - **Per-request watchdog:** the plugin abandons a request after `FORGE_PLUGIN_RESPONSE_TIMEOUT_SECONDS - 5`s and answers `plugin_request_timeout`; the pipe keeps serving. Callbacks AutoCAD never started are refused as `plugin_request_stale` so an abandoned write cannot execute late; work already started still runs to completion (read-back-after-timeout protocol applies).
 
 ### Request lifecycle (follow it across files)

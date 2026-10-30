@@ -83,10 +83,10 @@ public sealed partial class PluginCommandProcessor
             }
             else
             {
-                var loaded = LoadLibraryBlocks(db, libraryPath, fromLibrary, args.Redefine, out var notInLibrary, out var loadError);
-                if (loadError is not null)
+                var loaded = LoadLibraryBlocks(db, libraryPath, fromLibrary, args.Redefine, command, out var notInLibrary, out var loadFailure);
+                if (loadFailure is not null)
                 {
-                    return ForgeResult.Failure(command.Id, "library_read_failed", loadError);
+                    return loadFailure;
                 }
 
                 // With redefine=true a name that only exists here simply keeps its definition.
@@ -292,10 +292,19 @@ public sealed partial class PluginCommandProcessor
             data: new { errors = errors.Take(200).Select(e => new { index = e.Index, code = e.Code, message = e.Message }).ToArray(), errorCount = errors.Count });
 
     /// <summary>Copies the named block definitions from a library DWG (one read, one clone call).</summary>
-    private static string[] LoadLibraryBlocks(Database db, string libraryPath, IReadOnlyList<string> names, bool redefine, out List<string> notFound, out string? error)
+    private static string[] LoadLibraryBlocks(Database db, string libraryPath, IReadOnlyList<string> names, bool redefine, ForgeCommand command, out List<string> notFound, out ForgeResult? failure)
     {
         notFound = [];
-        error = null;
+        failure = null;
+        // D10 + r1 finding 5: reading the library DWG loads a foreign database — fail closed
+        // when the proxy dialog cannot be suppressed.
+        using var proxyNotice = ProxyNoticeScope.EnterOrFail(command, out var scopeFailure);
+        if (scopeFailure is not null)
+        {
+            failure = scopeFailure;
+            return [];
+        }
+
         using var side = new Database(false, true);
         try
         {
@@ -304,7 +313,7 @@ public sealed partial class PluginCommandProcessor
         }
         catch (System.Exception ex)
         {
-            error = $"Could not read {libraryPath}: {ex.Message}";
+            failure = ForgeResult.Failure(command.Id, "library_read_failed", $"Could not read {libraryPath}: {ex.Message}");
             return [];
         }
 

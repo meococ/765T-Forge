@@ -11,7 +11,29 @@ public enum PlotAreaKind
     Extents,
     Display,
     Limits,
-    Window
+    Window,
+
+    /// <summary>A named view — only reachable via a layout's stored plot type (D12), never a caller word.</summary>
+    View
+}
+
+/// <summary>
+/// live-smoke-20261030 fix4 (D12): a paper layout's stored plot type, carried by NAME.
+/// AutoCAD's managed Autodesk.AutoCAD.DatabaseServices.PlotType is 0-based
+/// (Display=0, Extents=1, Limits=2, View=3, Window=4, Layout=5) — one below the 1-based
+/// ActiveX AcPlotType numbering the r2 code assumed (live readback: a stored Window read
+/// 4, a stored View 3, a stored Layout 5). Forge.Shared cannot reference the AutoCAD
+/// assemblies (ServerOnly CI), so the plugin converts member-by-member by name and no int
+/// ever crosses this boundary.
+/// </summary>
+public enum StoredPlotType
+{
+    Display,
+    Extents,
+    Limits,
+    View,
+    Window,
+    Layout
 }
 
 /// <summary>Parsed plot scale: fit-to-sheet, or paper units : drawing units.</summary>
@@ -33,6 +55,64 @@ public sealed record PlotFitResult(double PaperUnitsPerDrawingUnit, double FillX
 
 /// <summary>Content-vs-area coverage: how much of the plotted area the drawing's own geometry actually occupies.</summary>
 public sealed record PlotCoverage(double ContentFillX, double ContentFillY, double AreaFraction, bool LooksTiny, string? Warning);
+
+/// <summary>D12: how the plotted area was chosen and the window to apply when it is a stored Window.</summary>
+public sealed record PlotAreaResolution(PlotAreaKind Area, string Source, double[]? Window);
+
+/// <summary>
+/// review-wp2-r1 finding 6 (D12): centring for a plot. When the plotted area came from the
+/// stored page setup (areaSource == "stored") the setup's own centring/offset wins — unless
+/// the caller passed centered explicitly. KeepStored=true means the plugin must NOT call
+/// SetPlotCentered/SetPlotOrigin: the CopyFrom already carried the stored values into the
+/// settings (writing centered=true there is what dropped the stored offset in r1).
+/// </summary>
+public readonly record struct PlotCentring(bool Centered, bool KeepStored)
+{
+    public static PlotCentring Resolve(bool? callerCentered, string? areaSource, bool storedCentered)
+    {
+        if (callerCentered is { } explicitCentered)
+        {
+            return new PlotCentring(explicitCentered, KeepStored: false);
+        }
+
+        return areaSource == "stored"
+            ? new PlotCentring(storedCentered, KeepStored: true)
+            : new PlotCentring(Centered: true, KeepStored: false);
+    }
+
+    /// <summary>
+    /// review-wp2-r2 M1 (D12): the -PLOT "plot offset (x,y) or [Center]" answer for the legacy
+    /// engine="command" path. KeepStored answers "" — Enter accepts the prompt's default, which is
+    /// the layout's own stored page-setup value, so the stored offset AND the stored centred flag
+    /// both survive (the same "do not touch" the API path gets by skipping
+    /// SetPlotCentered/SetPlotOrigin). An explicit stored "x,y" is never written: on a
+    /// stored-centred setup PlotOrigin can hold a stale/manual value, and answering it would
+    /// actively override centring — the r1 defect again.
+    ///
+    /// live-smoke-20261030 fix4 (D12): Layout and View answer "" unconditionally — the api
+    /// engine never calls SetPlotCentered/SetPlotOrigin for those two areas, so Enter is the
+    /// only answer that makes the engines agree. The r2 "0,0" for Layout is what reset a
+    /// stored Layout's 12,8 mm offset to 0,0 live; and on AutoCAD 2025 a Layout-area offset
+    /// prompt reads "Enter plot offset (x,y) &lt;…&gt;:" with no [Center] option, so "Center"
+    /// must never be sent for it.
+    /// </summary>
+    public string OffsetPromptAnswer(PlotAreaKind area)
+        => KeepStored || area is PlotAreaKind.Layout or PlotAreaKind.View
+            ? ""
+            : Centered ? "Center" : "0,0";
+
+    /// <summary>
+    /// live-smoke-20261030 fix4-r4 (review F1): the warning for a caller who passed centered
+    /// explicitly on a Layout or View area. Both engines ignore centring there — api never
+    /// calls SetPlotCentered/SetPlotOrigin for them, command answers Enter at the offset
+    /// prompt — so the layout's stored centring and offset stand and the argument is dropped.
+    /// Null when centered was not passed or the area honours it; mirrors the scale=fit warning.
+    /// </summary>
+    public static string? CenteredIgnoredWarning(bool? callerCentered, PlotAreaKind area)
+        => callerCentered is not null && area is PlotAreaKind.Layout or PlotAreaKind.View
+            ? $"centered does not apply to plotArea={area.ToString().ToLowerInvariant()}; the layout's stored centring and offset stand."
+            : null;
+}
 
 /// <summary>fix-smoke-20261029 D4: what forge_plot_to_pdf must do so AutoCAD's plot validator accepts the layout.</summary>
 public enum PlotLayoutAction
@@ -165,6 +245,55 @@ public static class PlotLayoutMath
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// fix-smoke-20261029-r2 D12: chooses the plot area. An explicit caller area always wins;
+    /// Model keeps the extents default; a PAPER layout with no caller area falls back to its
+    /// own stored plot type (<see cref="StoredPlotType"/> by name — stored Window carries the
+    /// layout's stored window box, stored View needs its stored view name), and only when the
+    /// stored type is unusable do the media/default rules apply. The stored-window case is
+    /// what the r2 smoke missed: client sheets store Window and the old code silently plotted
+    /// "layout" into an empty PDF.
+    /// </summary>
+    public static PlotAreaResolution ResolveArea(
+        PlotAreaKind? requested,
+        bool isModel,
+        StoredPlotType? storedPlotType,
+        double[]? storedWindow,
+        string? storedViewName,
+        bool mediaChanged)
+    {
+        if (requested is { } r)
+        {
+            return new PlotAreaResolution(r, "requested", null);
+        }
+
+        if (isModel)
+        {
+            return new PlotAreaResolution(PlotAreaKind.Extents, "default_model_extents", null);
+        }
+
+        var storedKind = storedPlotType switch
+        {
+            StoredPlotType.Display => PlotAreaKind.Display,
+            StoredPlotType.Extents => PlotAreaKind.Extents,
+            StoredPlotType.Limits => PlotAreaKind.Limits,
+            StoredPlotType.View when !string.IsNullOrWhiteSpace(storedViewName) => PlotAreaKind.View,
+            StoredPlotType.Window when storedWindow is { Length: 4 } w && w[2] - w[0] > 0 && w[3] - w[1] > 0 => PlotAreaKind.Window,
+            StoredPlotType.Layout => PlotAreaKind.Layout,
+            _ => (PlotAreaKind?)null
+        };
+
+        if (storedKind is { } kind)
+        {
+            return new PlotAreaResolution(kind, "stored", kind == PlotAreaKind.Window ? storedWindow : null);
+        }
+
+        return new PlotAreaResolution(
+            mediaChanged ? PlotAreaKind.Extents : PlotAreaKind.Layout,
+            mediaChanged ? "default_extents_because_paper_differs_from_layout" : "default_layout",
+            null);
     }
 
     /// <summary>

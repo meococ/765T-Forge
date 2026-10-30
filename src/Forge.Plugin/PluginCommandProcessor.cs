@@ -64,13 +64,44 @@ public sealed partial class PluginCommandProcessor
         _auditSink = auditSink;
     }
 
+    /// <summary>
+    /// review-wp2-r1 finding 1 (D13): the pipe-token gate, hoisted so the dispatcher can
+    /// authenticate before routing — the zero-document lane and the fast refusals must answer
+    /// `unauthorized` to a bad token, never `ok`. Process keeps its own check because it stays
+    /// the single enforcement point for every lane that runs through it.
+    /// </summary>
+    internal ForgeResult? VerifyToken(ForgeCommand command)
+    {
+        return PipeAuth.TokenMatches(command.AuthToken, _environment.Token)
+            ? null
+            : ForgeResult.Failure(command.Id, PipeAuth.UnauthorizedCode, "Invalid Forge named pipe token.");
+    }
+
+    /// <summary>
+    /// review-wp2-r2 Q2 (D13): the dispatcher's authenticated fast refusals
+    /// (no_active_document / no_command_context) bypass Process — without this record they were
+    /// visible in the pipe answer but invisible in the audit trail. Same sink and same shape as
+    /// the refusal records Process writes (tool, command id, dry-run flag, the refusal code as
+    /// the decision, the call's args). The unauthenticated path is untouched: a bad token is
+    /// still refused before routing and still writes no record.
+    /// </summary>
+    internal string AuditRefusal(ForgeCommand command, string code)
+        => _auditSink.WriteBestEffort(new AuditRecord
+        {
+            Source = "plugin",
+            Tool = command.Tool,
+            CommandId = command.Id,
+            DryRun = command.DryRun,
+            Allowed = false,
+            DecisionCode = code,
+            Args = command.Args
+        });
+
     public ForgeResult Process(ForgeCommand command)
     {
-        var tokenBytes = Encoding.UTF8.GetBytes(command.AuthToken ?? "");
-        var expectedBytes = Encoding.UTF8.GetBytes(_environment.Token ?? "");
-        if (!CryptographicOperations.FixedTimeEquals(tokenBytes, expectedBytes))
+        if (VerifyToken(command) is { } unauthorized)
         {
-            return ForgeResult.Failure(command.Id, "unauthorized", "Invalid Forge named pipe token.");
+            return unauthorized;
         }
 
         // fix-smoke-20261029 D3: every authenticated call opens an undo-ledger scope, so object changes
@@ -387,6 +418,10 @@ public sealed partial class PluginCommandProcessor
     private ForgeResult Health(ForgeCommand command)
     {
         MeasureHostYear();
+        // review-wp2-r1 findings 1–2 (D13): the real handler answers at zero documents too —
+        // it is document-free (ActiveDocumentPath is null-safe) — so the Start-tab answer
+        // carries the same fields as always plus documents: 0 and the recovery hint.
+        var documentCount = Documents.Count;
         return ForgeResult.Success(command.Id, new
         {
             status = "ok",
@@ -394,7 +429,9 @@ public sealed partial class PluginCommandProcessor
             pipe = _environment.PipeName,
             targetYear = TargetYear,
             hostYear = _hostYear,
-            activeDocument = ActiveDocumentPath()
+            documents = documentCount,
+            activeDocument = ActiveDocumentPath(),
+            hint = documentCount == 0 ? DocumentContextPolicy.ZeroDocumentHint : null
         });
     }
 
@@ -538,6 +575,14 @@ public sealed partial class PluginCommandProcessor
         }
         else
         {
+            // D10 + r1 finding 5: opening a proxy DWG could show the modal Proxy Information
+            // dialog — fail closed when it cannot be suppressed.
+            using var proxyNotice = ProxyNoticeScope.EnterOrFail(command, out var scopeFailure);
+            if (scopeFailure is not null)
+            {
+                return scopeFailure;
+            }
+
             var previousFileDia = Application.GetSystemVariable("FILEDIA");
             try
             {
@@ -809,9 +854,17 @@ public sealed partial class PluginCommandProcessor
             return DryRun(command, new { args.Name, count = ids.Count });
         }
 
+        // D10 + r1 finding 5: reloading an xref loads a foreign database — fail closed
+        // when the proxy dialog cannot be suppressed.
+        using var proxyNotice = ProxyNoticeScope.EnterOrFail(command, out var scopeFailure);
+        if (scopeFailure is not null)
+        {
+            return scopeFailure;
+        }
+
         ActiveDb.ReloadXrefs(ids);
         tr.Commit();
-        return ForgeResult.Success(command.Id, new { reloaded = ids.Count }, verification: new ForgeVerification { Attempted = true, Passed = true, ReadBack = ReadXrefs() });
+        return ForgeResult.Success(command.Id, new { reloaded = ids.Count, proxynotice = proxyNotice }, verification: new ForgeVerification { Attempted = true, Passed = true, ReadBack = ReadXrefs() });
     }
 
     private static ForgeResult RepathXref(ForgeCommand command)
@@ -841,13 +894,29 @@ public sealed partial class PluginCommandProcessor
         }
 
         tr.Commit();
+        ProxyNoticeScope? proxyNotice = null;
         if (args.Reload)
         {
-            ActiveDb.ReloadXrefs(ids);
+            // D10 + r1 finding 5: the reload loads a foreign database — fail closed. The
+            // repath above is already committed, so the failure carries that truth.
+            proxyNotice = ProxyNoticeScope.EnterOrFail(command, out var scopeFailure, new { repathed = args.Name, repathCommitted = true });
+            if (scopeFailure is not null)
+            {
+                return scopeFailure;
+            }
+
+            try
+            {
+                ActiveDb.ReloadXrefs(ids);
+            }
+            finally
+            {
+                proxyNotice?.Dispose();
+            }
         }
 
         var readBack = ReadXrefs();
-        return ForgeResult.Success(command.Id, new { repathed = args.Name, args.Path }, verification: new ForgeVerification { Attempted = true, Passed = true, ReadBack = readBack });
+        return ForgeResult.Success(command.Id, new { repathed = args.Name, args.Path, proxynotice = proxyNotice }, verification: new ForgeVerification { Attempted = true, Passed = true, ReadBack = readBack });
     }
 
     private static ObjectIdCollection FindXrefIds(Transaction tr, string? name)
@@ -1150,6 +1219,14 @@ public sealed partial class PluginCommandProcessor
             return DryRun(command, new { args.TemplatePath, args.SetupName, mode = "sync_copy_preferred" });
         }
 
+        // D10 + r1 finding 5: reading the template DWG loads a foreign database — fail
+        // closed when the proxy dialog cannot be suppressed.
+        using var proxyNotice = ProxyNoticeScope.EnterOrFail(command, out var scopeFailure);
+        if (scopeFailure is not null)
+        {
+            return scopeFailure;
+        }
+
         try
         {
             using var sourceDb = new Database(false, true);
@@ -1186,12 +1263,17 @@ public sealed partial class PluginCommandProcessor
                 completed = true,
                 mode = "sync_copy",
                 args.TemplatePath,
-                args.SetupName
+                args.SetupName,
+                proxynotice = proxyNotice
             });
         }
         catch (System.Exception ex)
         {
             // Fall back to classic command queue — honesty flags required.
+            // r1 finding 8 (D10 gap, documented): the queued -PSETUPIN runs AFTER this call
+            // returns and the PROXYNOTICE scope has disposed, so the proxy dialog is NOT
+            // suppressed on this path — a template DWG with proxies can still raise it.
+            // The sync Database path above is the scoped one; callers should prefer it.
             ActiveDoc.SendStringToExecute($"_.-PSETUPIN \"{EscapeCommand(args.TemplatePath)}\" \"{EscapeCommand(args.SetupName)}\" ", true, false, false);
             return ForgeResult.Success(command.Id, new
             {
@@ -1200,7 +1282,8 @@ public sealed partial class PluginCommandProcessor
                 mode = "queued_psetupin",
                 fallbackReason = ex.Message,
                 args.TemplatePath,
-                args.SetupName
+                args.SetupName,
+                proxynotice = proxyNotice
             });
         }
     }
@@ -1790,6 +1873,71 @@ public sealed partial class PluginCommandProcessor
     private sealed record ExecLispArgs { public string? Lisp { get; init; } }
     private sealed record ExecDotNetArgs { public string? Code { get; init; } }
     private sealed record BlockAttributeValue(string BlockHandle, string BlockName, string Tag, string Value);
+
+    /// <summary>
+    /// smoke-r2 D10: PROXYNOTICE=0 while a foreign database is loaded (ReadDwgFile/DxfIn,
+    /// db.Insert/AttachXref, xref reload, -DGNIMPORT, template/document opens). Without it
+    /// AutoCAD raises the modal "Proxy Information" dialog and every later pipe call waits
+    /// out the timeout until a human clicks OK. The serialized report reads the scope's
+    /// final state (the result leaves the method after Dispose ran), so `restored` is the
+    /// truth rather than a plan. review-wp2-r1 finding 5: entry fails closed — a
+    /// proxynotice_scope_failed is returned instead of loading unguarded.
+    /// </summary>
+    private sealed class ProxyNoticeScope : IDisposable
+    {
+        /// <summary>review-wp2-r1 finding 5 (D10): the typed failure when suppression cannot be applied.</summary>
+        public const string ScopeFailedCode = "proxynotice_scope_failed";
+
+        private readonly ScopedSysvar _scope;
+
+        private ProxyNoticeScope(ScopedSysvar scope)
+        {
+            _scope = scope;
+        }
+
+        public bool Applied => _scope.Applied;
+        public bool Restored => _scope.Restored;
+        public object? Original => _scope.Original;
+        public string? Error => null;
+
+        /// <summary>Throws when PROXYNOTICE cannot be read or written — callers go through <see cref="EnterOrFail"/>.</summary>
+        private static ProxyNoticeScope Enter()
+        {
+            return new ProxyNoticeScope(
+                ScopedSysvar.Set(
+                    "PROXYNOTICE",
+                    0,
+                    name => Application.GetSystemVariable(name),
+                    (name, value) => Application.SetSystemVariable(name, value)));
+        }
+
+        /// <summary>
+        /// review-wp2-r1 finding 5 (D10): fail closed — when PROXYNOTICE cannot be read or
+        /// written the foreign load must NOT proceed (no foreign load without suppression;
+        /// the r1 code proceeded and only reported a dead scope). Returns the scope and null
+        /// on success; null + the typed proxynotice_scope_failed result otherwise.
+        /// </summary>
+        public static ProxyNoticeScope? EnterOrFail(ForgeCommand command, out ForgeResult? failure, object? failureData = null)
+        {
+            try
+            {
+                failure = null;
+                return Enter();
+            }
+            catch (System.Exception ex)
+            {
+                failure = ForgeResult.Failure(
+                    command.Id,
+                    ScopeFailedCode,
+                    $"PROXYNOTICE could not be suppressed: {ex.Message}",
+                    "No foreign load was attempted — the call is safe to retry once system variables respond.",
+                    data: failureData);
+                return null;
+            }
+        }
+
+        public void Dispose() => _scope.Dispose();
+    }
 }
 
 public sealed record DotNetScriptGlobals(Document Document, Database Database, Editor Editor);

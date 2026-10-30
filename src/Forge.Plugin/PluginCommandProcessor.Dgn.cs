@@ -83,6 +83,14 @@ public sealed partial class PluginCommandProcessor
 
         var previous = Documents.MdiActiveDocument;
         var previousFileDia = Application.GetSystemVariable("FILEDIA");
+        // D10 + r1 finding 5: -DGNIMPORT converts a foreign file into a temporary document —
+        // suppress the proxy dialog the same way the DxfIn/ReadDwgFile paths do, and fail
+        // closed when it cannot be suppressed (no foreign load without suppression).
+        using var proxyNotice = ProxyNoticeScope.EnterOrFail(command, out var scopeFailure);
+        if (scopeFailure is not null)
+        {
+            return scopeFailure;
+        }
         Document? tempDoc = null;
         var tempClosed = false;
 
@@ -157,7 +165,8 @@ public sealed partial class PluginCommandProcessor
                     sourceBytes,
                     outputBytes,
                     targetBackup,
-                    tempDocumentClosed = tempClosed
+                    tempDocumentClosed = tempClosed,
+                    proxynotice = proxyNotice
                 },
                 verification: new ForgeVerification
                 {

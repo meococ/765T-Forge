@@ -223,15 +223,16 @@ public sealed class PlotPdfCoverageTests
     }
 
     [Fact]
-    public void AnEmptyPdfFailsWhenTheDrawingHadContent()
+    public void AnEmptyPdfFailsWhetherOrNotTheDrawingHadContent()
     {
         var d = Decide(PlotAreaKind.Extents, fit: true, "empty", tiny: false, planHadContent: true);
         Assert.Equal(PlotPdfGate.ContentEmptyCode, d.FailureCode);
         Assert.Equal(PlotPdfGate.SourcePdfEmpty, d.CoverageSource);
 
+        // fix-smoke-20261029-r2 D12: nothing on the sheet is never a success, whatever the plan expected.
         var blank = Decide(PlotAreaKind.Extents, fit: true, "empty", tiny: false, planHadContent: false);
-        Assert.False(blank.Failed);
-        Assert.NotNull(blank.Warning);
+        Assert.True(blank.Failed);
+        Assert.Equal(PlotPdfGate.ContentEmptyCode, blank.FailureCode);
     }
 
     [Fact]
@@ -369,9 +370,14 @@ public sealed class FixSmoke20261029SourceGuards
     {
         var server = PluginSource("NamedPipePluginServer.cs");
         var body = MethodBody(server, "private Task<ForgeResult> ExecuteOnMainThreadAsync(");
-        var route = body.IndexOf("DocumentContextPolicy.RunsInApplicationContext(command.Tool)", StringComparison.Ordinal);
-        var startTab = body.IndexOf("MdiActiveDocument is null", StringComparison.Ordinal);
-        Assert.True(route >= 0 && route < startTab, "doc_new/doc_open/doc_activate must go to the Idle lane before any document-context path");
+        var route = body.IndexOf("DocumentContextPolicy.Route(", StringComparison.Ordinal);
+        var appLane = body.IndexOf("DocDispatchDecision.ApplicationLane", StringComparison.Ordinal);
+        var docContext = body.IndexOf("ExecuteInCommandContextAsync(command)", StringComparison.Ordinal);
+        // D1 (kept under D13): the Shared decision table routes doc_new/doc_open/doc_activate to
+        // the Idle lane before any document-context path can run.
+        Assert.True(route >= 0 && appLane > route && appLane < docContext,
+            "doc_new/doc_open/doc_activate must go to the Idle lane before any document-context path");
+        Assert.Contains("ExecuteDocActivateWhenIdleAsync", body, StringComparison.Ordinal);
     }
 
     [Fact]

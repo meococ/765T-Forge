@@ -53,6 +53,60 @@ public static class DrawingImport
 {
     public const int MaxReturnedHandles = 5000;
 
+    /// <summary>D11 failure code: the import ran but the read-back could not prove it.</summary>
+    public const string ImportVerificationFailedCode = "import_verification_failed";
+
+    /// <summary>
+    /// smoke-r2 D11 result rule: ok derives from verification, and the created count is what
+    /// the read-back actually counted — never "the call returned without throwing".
+    /// - merge: only entities read back in MODEL SPACE count (the bug let them land on a
+    ///   paper layout while model space stayed empty — verified=false).
+    /// - block: entities in the new definition, or a produced INSERT handle.
+    /// - xref:  the attach produced a definition (block handle); an INSERT is optional.
+    /// </summary>
+    public static bool ImportVerified(DrawingImportMode mode, int created, bool hasInsert, bool xrefAttached)
+        => mode switch
+        {
+            DrawingImportMode.Merge => created > 0,
+            DrawingImportMode.Xref => xrefAttached,
+            _ => created > 0 || hasInsert
+        };
+
+    /// <summary>
+    /// review-wp2-r1 finding 10 (D11): a partial import is success-with-warning, never silent.
+    /// When fewer entities land than the source model space held, or clones were skipped or
+    /// left untransformed, the warning names BOTH counts (created of sourceCount). An xref is
+    /// exempt: it copies nothing into the drawing by design.
+    /// </summary>
+    public static string? PartialImportWarning(DrawingImportMode mode, int created, int sourceCount, int skippedOrUntransformed)
+    {
+        if (mode == DrawingImportMode.Xref || (created >= sourceCount && skippedOrUntransformed <= 0))
+        {
+            return null;
+        }
+
+        var detail = skippedOrUntransformed > 0
+            ? $" ({skippedOrUntransformed} clone(s) skipped or left untransformed — proxied or non-entity content?)"
+            : "";
+        return $"Partial import: {created} of {sourceCount} source model-space entities landed in the target{detail}. Inspect the drawing before relying on the import.";
+    }
+
+    /// <summary>
+    /// D11 result composition: success only when verification passed; otherwise
+    /// <see cref="ImportVerificationFailedCode"/> carrying the same data and verification,
+    /// so callers see the real read-back instead of a silent ok=true.
+    /// </summary>
+    public static ForgeResult ImportResult(
+        string commandId,
+        bool verified,
+        object? data,
+        ForgeVerification verification,
+        string failureMessage,
+        string? suggestion = null)
+        => verified
+            ? ForgeResult.Success(commandId, data, verification: verification)
+            : ForgeResult.Failure(commandId, ImportVerificationFailedCode, failureMessage, suggestion, data: data, verification: verification);
+
     /// <summary>Layers that can never be renamed or merged away.</summary>
     public static readonly string[] ProtectedLayers = ["0", "Defpoints"];
 

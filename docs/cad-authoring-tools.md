@@ -26,8 +26,9 @@ pinned coordinates, no dialogs, serialized execution.
 - **Dry-run:** all writes accept `dryRun=true`, run full parameter/layer/geometry validation, and return the plan without touching the drawing.
 - **No dialogs, no prompts:** pure DB API for all C20–C28 geometry/edit/style handlers (`forge_undo` invokes `Editor.Command("_.U")` and verifies the revert by readback).
 - **No-document state:** all authoring tools need a drawing; on the Start tab they return
-  `no_command_context` like every other document tool. Exception: `forge_doc_new` and
-  `forge_doc_open` run in application context and work from the Start tab (fix-smoke-20261029 D1).
+  `no_active_document` like every other document tool (`no_command_context` when drawings are open
+  but none is active). Exception: `forge_doc_new` and
+  `forge_doc_open` run in application context and work from the Start tab (fix-smoke-20261029 D1/r2-D13).
 
 ## C20 & C25 — forge_draw_* (group `draw`)
 

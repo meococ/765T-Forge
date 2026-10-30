@@ -134,7 +134,7 @@ public sealed class ProjectConfigurationTests
         var pipe = File.ReadAllText(Path.Combine(root, "src", "Forge.Plugin", "NamedPipePluginServer.cs"));
         var tool = File.ReadAllText(Path.Combine(root, "src", "Forge.Plugin", "PluginCommandProcessor.DocActivate.cs"));
 
-        Assert.Contains("DocumentContextPolicy.RunsInApplicationContext", pipe); // fix-smoke-20261029 D1: doc_activate/new/open share the Idle lane
+        Assert.Contains("DocumentContextPolicy.Route(", pipe); // fix-smoke-20261029 D1/r2-D13: doc_activate/new/open share the Idle lane via the Shared decision table
         Assert.Contains("ExecuteDocActivateWhenIdleAsync", pipe);
         Assert.Contains("DocumentMatcher.Match", pipe);
         Assert.Contains("DocumentMatcher.Match", tool);
