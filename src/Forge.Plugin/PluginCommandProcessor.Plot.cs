@@ -160,93 +160,113 @@ public sealed partial class PluginCommandProcessor
         // A real plot makes the target layout current, gates on the readback, plots, and restores the
         // previous layout in finally. A dry run never switches; it defers validation instead.
         bool targetIsModel;
+        MediaPlan? media;
         using (var ltr = db.TransactionManager.StartOpenCloseTransaction())
         {
             var target = (Layout)ltr.GetObject(layoutId, OpenMode.ForRead);
             layoutName = target.LayoutName;
             targetIsModel = target.ModelType;
+            // review-wp2-r1 finding 4 (D9): the stored-media-vs-device check and paperSize
+            // resolution run here — while the layout is merely open, not current — so a typed
+            // failure precedes the layout switch and leaves no side effect (no initialized
+            // layout, DBMOD unchanged).
+            if (TryResolveMedia(target, targetIsModel, requestedDevice, viewer, args, requestedUnits, command, out media) is { } mediaFailure)
+            {
+                ltr.Commit();
+                return mediaFailure;
+            }
+
             ltr.Commit();
         }
 
         var before = ReadLayoutState();
         var action = PlotLayoutMath.PlanLayoutSwitch(LayoutManager.Current.CurrentLayout, layoutName, targetIsModel, before.Tilemode, before.Cvport, command.DryRun);
-        var request = new PlotRequest(command, args, outputPath, engine, requestedArea, window, scaleSpec, scaleRequested, orientationWord, requestedUnits, layoutId, layoutName, requestedDevice, viewer, action == PlotLayoutAction.DeferValidation);
-        if (action is PlotLayoutAction.None or PlotLayoutAction.DeferValidation)
-        {
-            var plain = PlotOnLayout(request);
-            return command.DryRun ? plain : AttachLayoutReport(plain, new PlotLayoutReport { DbmodBefore = before.Dbmod, DbmodAfter = ReadLayoutState().Dbmod });
-        }
-
-        var report = new PlotLayoutReport
-        {
-            Switched = true,
-            SwitchKind = action == PlotLayoutAction.SwitchToPaperSpace ? "paper_space" : "layout",
-            DbmodBefore = before.Dbmod,
-            Before = before
-        };
-        string? switchError = null;
-        var appended = new List<string>();
-        void OnAppended(object? sender, ObjectEventArgs e)
-        {
-            try
-            {
-                appended.Add(e.DBObject.Handle.ToString());
-            }
-            catch
-            {
-                // Never throw into AutoCAD.
-            }
-        }
-
-        ForgeResult result;
+        var request = new PlotRequest(command, args, outputPath, engine, requestedArea, window, scaleSpec, scaleRequested, orientationWord, layoutId, layoutName, requestedDevice, viewer, action == PlotLayoutAction.DeferValidation, media!);
         try
         {
-            db.ObjectAppended += OnAppended;
-            try
+            if (action is PlotLayoutAction.None or PlotLayoutAction.DeferValidation)
             {
-                if (action == PlotLayoutAction.Switch)
-                {
-                    LayoutManager.Current.CurrentLayout = layoutName;
-                }
+                var plain = PlotOnLayout(request);
+                return command.DryRun ? plain : AttachLayoutReport(plain, new PlotLayoutReport { DbmodBefore = before.Dbmod, DbmodAfter = ReadLayoutState().Dbmod });
+            }
 
-                if (!targetIsModel && ReadLayoutState().Cvport != 1)
+            var report = new PlotLayoutReport
+            {
+                Switched = true,
+                SwitchKind = action == PlotLayoutAction.SwitchToPaperSpace ? "paper_space" : "layout",
+                DbmodBefore = before.Dbmod,
+                Before = before
+            };
+            string? switchError = null;
+            var appended = new List<string>();
+            void OnAppended(object? sender, ObjectEventArgs e)
+            {
+                try
                 {
-                    doc.Editor.SwitchToPaperSpace();
+                    appended.Add(e.DBObject.Handle.ToString());
+                }
+                catch
+                {
+                    // Never throw into AutoCAD.
                 }
             }
-            catch (System.Exception ex)
+
+            ForgeResult result;
+            try
             {
-                switchError = ex.Message;
+                db.ObjectAppended += OnAppended;
+                try
+                {
+                    if (action == PlotLayoutAction.Switch)
+                    {
+                        LayoutManager.Current.CurrentLayout = layoutName;
+                    }
+
+                    if (!targetIsModel && ReadLayoutState().Cvport != 1)
+                    {
+                        doc.Editor.SwitchToPaperSpace();
+                    }
+                }
+                catch (System.Exception ex)
+                {
+                    switchError = ex.Message;
+                }
+                finally
+                {
+                    db.ObjectAppended -= OnAppended;
+                }
+
+                report.Initialized = appended.Count > 0;
+                report.AppendedCount = appended.Count;
+                report.AppendedSample = appended.Take(50).ToArray();
+                var now = ReadLayoutState();
+                if (switchError is null && PlotLayoutMath.IsLayoutReady(layoutName, now.Ctab, LayoutManager.Current.CurrentLayout, targetIsModel, now.Tilemode, now.Cvport))
+                {
+                    result = PlotOnLayout(request);
+                }
+                else
+                {
+                    result = ForgeResult.Failure(
+                        command.Id,
+                        "plot_layout_not_current",
+                        $"Layout '{layoutName}' could not be made current for plotting (CTAB={now.Ctab}, TILEMODE={now.Tilemode}, CVPORT={now.Cvport}{(switchError is null ? "" : "; " + switchError)}). Nothing was plotted.",
+                        "Make the layout current in AutoCAD (and paper space active) and retry.");
+                }
             }
             finally
             {
-                db.ObjectAppended -= OnAppended;
+                RestoreLayout(doc, before, report);
             }
 
-            report.Initialized = appended.Count > 0;
-            report.AppendedCount = appended.Count;
-            report.AppendedSample = appended.Take(50).ToArray();
-            var now = ReadLayoutState();
-            if (switchError is null && PlotLayoutMath.IsLayoutReady(layoutName, now.Ctab, LayoutManager.Current.CurrentLayout, targetIsModel, now.Tilemode, now.Cvport))
-            {
-                result = PlotOnLayout(request);
-            }
-            else
-            {
-                result = ForgeResult.Failure(
-                    command.Id,
-                    "plot_layout_not_current",
-                    $"Layout '{layoutName}' could not be made current for plotting (CTAB={now.Ctab}, TILEMODE={now.Tilemode}, CVPORT={now.Cvport}{(switchError is null ? "" : "; " + switchError)}). Nothing was plotted.",
-                    "Make the layout current in AutoCAD (and paper space active) and retry.");
-            }
+            report.DbmodAfter = ReadLayoutState().Dbmod;
+            return AttachLayoutReport(result, report);
         }
         finally
         {
-            RestoreLayout(doc, before, report);
+            // The cloned PlotSettings rides the request into PlotOnLayout but is owned here,
+            // so the plot_layout_not_current early-out cannot leak it.
+            media!.Settings.Dispose();
         }
-
-        report.DbmodAfter = ReadLayoutState().Dbmod;
-        return AttachLayoutReport(result, report);
     }
 
     private sealed record PlotRequest(
@@ -259,38 +279,54 @@ public sealed partial class PluginCommandProcessor
         PlotScaleSpec ScaleSpec,
         bool ScaleRequested,
         string? OrientationWord,
-        PlotPaperUnit? RequestedUnits,
         ObjectId LayoutId,
         string LayoutName,
         string RequestedDevice,
         ViewerSuppression Viewer,
-        bool DeferValidation);
+        bool DeferValidation,
+        MediaPlan Media);
 
-    /// <summary>Plots the layout (already made current, or a dry run). Everything after the D4 layout switch.</summary>
-    private static ForgeResult PlotOnLayout(PlotRequest request)
+    /// <summary>The media/device outcome resolved before any layout switch (review-wp2-r1 finding 4, D9).</summary>
+    private sealed record MediaPlan(
+        PlotSettings Settings,
+        string CanonicalMedia,
+        string MediaSource,
+        string? MappedFromMedia,
+        (double WidthMm, double HeightMm)? StoredSheetMm,
+        string LayoutMedia,
+        bool MediaChanged);
+
+    /// <summary>
+    /// review-wp2-r1 finding 4 (D9): device media list, stored-paper mapping and paperSize
+    /// resolve on a cloned PlotSettings while the layout is only open (never current), so a
+    /// typed failure — paper_size_not_found, plot_paper_not_on_device, plot_device_invalid —
+    /// cannot leave behind a switched/initialized layout or a DBMOD bump. The returned
+    /// settings object is not database-resident; ownership passes to the caller.
+    /// </summary>
+    private static ForgeResult? TryResolveMedia(
+        Layout layout,
+        bool isModel,
+        string requestedDevice,
+        ViewerSuppression viewer,
+        PlotArgs args,
+        PlotPaperUnit? requestedUnits,
+        ForgeCommand command,
+        out MediaPlan? plan)
     {
-        var (command, args, outputPath, engine, requestedArea, window, scaleSpec, scaleRequested, orientationWord, requestedUnits, layoutId, _, requestedDevice, viewer, deferValidation) = request;
-        var layoutName = request.LayoutName;
-        var doc = ActiveDoc;
-        var db = doc.Database;
-        var warnings = new List<string>();
-        using var tr = db.TransactionManager.StartTransaction();
-        var layout = (Layout)tr.GetObject(layoutId, OpenMode.ForRead);
-        layoutName = layout.LayoutName;
-        var isModel = layout.ModelType;
-        var layoutMedia = layout.CanonicalMediaName;
-        var layoutPaperUnits = layout.PlotPaperUnits;
-
-        using var ps = new PlotSettings(isModel);
-        ps.CopyFrom(layout);
-        var psv = PlotSettingsValidator.Current;
-
-        string canonicalMedia;
-        string mediaSource;
-        string? mappedFromMedia = null;
-        (double WidthMm, double HeightMm)? storedSheetMm = null;
+        plan = null;
+        PlotSettings? ps = new PlotSettings(isModel);
         try
         {
+            ps.CopyFrom(layout);
+            var psv = PlotSettingsValidator.Current;
+            var layoutMedia = layout.CanonicalMediaName;
+            var layoutPaperUnits = layout.PlotPaperUnits;
+
+            string canonicalMedia;
+            string mediaSource;
+            string? mappedFromMedia = null;
+            (double WidthMm, double HeightMm)? storedSheetMm = null;
+
             psv.SetPlotConfigurationName(ps, viewer.PlotDevice, null);
             psv.RefreshLists(ps);
             var mediaList = psv.GetCanonicalMediaNameList(ps)
@@ -304,7 +340,6 @@ public sealed partial class PluginCommandProcessor
                 var resolved = PlotLayoutMath.ResolveMedia(args.PaperSize, mediaList);
                 if (resolved is null)
                 {
-                    tr.Commit();
                     return ForgeResult.Failure(
                         command.Id,
                         "paper_size_not_found",
@@ -331,7 +366,6 @@ public sealed partial class PluginCommandProcessor
                 var paperMatch = PaperMatch.MatchBySize(storedSheetMm?.WidthMm, storedSheetMm?.HeightMm, deviceMedia);
                 if (!paperMatch.Matched)
                 {
-                    tr.Commit();
                     var sizeText = storedSheetMm is { } sz ? $"{sz.WidthMm:0.###} x {sz.HeightMm:0.###} mm" : "unknown size";
                     return ForgeResult.Failure(
                         command.Id,
@@ -374,14 +408,53 @@ public sealed partial class PluginCommandProcessor
             var units = requestedUnits
                 ?? (mediaSource == "layout" ? layoutPaperUnits : GuessPaperUnits(canonicalMedia, layoutPaperUnits));
             psv.SetPlotPaperUnits(ps, units);
+
+            plan = new MediaPlan(
+                ps,
+                canonicalMedia,
+                mediaSource,
+                mappedFromMedia,
+                storedSheetMm,
+                layoutMedia,
+                !string.Equals(canonicalMedia, layoutMedia, StringComparison.Ordinal));
+            ps = null;
+            return null;
         }
         catch (Autodesk.AutoCAD.Runtime.Exception ex)
         {
-            tr.Commit();
             return ForgeResult.Failure(command.Id, "plot_device_invalid", $"Device/paper setup failed: {ex.Message}", "Check the device name with forge_system_capabilities.");
         }
+        finally
+        {
+            ps?.Dispose();
+        }
+    }
 
-        var mediaChanged = !string.Equals(canonicalMedia, layoutMedia, StringComparison.Ordinal);
+    /// <summary>Plots the layout (already made current, or a dry run). Everything after the D4 layout switch.</summary>
+    private static ForgeResult PlotOnLayout(PlotRequest request)
+    {
+        var (command, args, outputPath, engine, requestedArea, window, scaleSpec, scaleRequested, orientationWord, layoutId, _, requestedDevice, viewer, deferValidation, media) = request;
+        var layoutName = request.LayoutName;
+        var doc = ActiveDoc;
+        var db = doc.Database;
+        var warnings = new List<string>();
+        using var tr = db.TransactionManager.StartTransaction();
+        var layout = (Layout)tr.GetObject(layoutId, OpenMode.ForRead);
+        layoutName = layout.LayoutName;
+        var isModel = layout.ModelType;
+        var layoutMedia = media.LayoutMedia;
+
+        // review-wp2-r1 finding 4 (D9): media, device and paper units were resolved before any
+        // layout switch; this settings object already carries canonicalMedia + paper units.
+        // Disposed by PlotToPdf (it is also needed on paths that never reach this method).
+        var ps = media.Settings;
+        var psv = PlotSettingsValidator.Current;
+        var canonicalMedia = media.CanonicalMedia;
+        var mediaSource = media.MediaSource;
+        var mappedFromMedia = media.MappedFromMedia;
+        var storedSheetMm = media.StoredSheetMm;
+        var mediaChanged = media.MediaChanged;
+
         if (mappedFromMedia is not null)
         {
             warnings.Add(
@@ -472,7 +545,10 @@ public sealed partial class PluginCommandProcessor
             _ => null
         };
 
-        var centered = args.Centered ?? true;
+        // review-wp2-r1 finding 6 (D12): a stored page setup keeps its own centring/offset —
+        // CopyFrom already carried it into ps — unless the caller passed centered explicitly.
+        var centring = PlotCentring.Resolve(args.Centered, areaSource, ps.PlotCentered);
+        var centered = centring.Centered;
         int rotationDeg;
         try
         {
@@ -557,10 +633,13 @@ public sealed partial class PluginCommandProcessor
                     psv.SetCustomPrintScale(ps, new CustomScale(scaleSpec.PaperUnits, scaleSpec.DrawingUnits));
                 }
 
-                psv.SetPlotCentered(ps, centered);
-                if (!centered)
+                if (!centring.KeepStored)
                 {
-                    psv.SetPlotOrigin(ps, Point2d.Origin);
+                    psv.SetPlotCentered(ps, centring.Centered);
+                    if (!centring.Centered)
+                    {
+                        psv.SetPlotOrigin(ps, Point2d.Origin);
+                    }
                 }
             }
 

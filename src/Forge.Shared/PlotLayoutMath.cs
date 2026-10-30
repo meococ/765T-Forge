@@ -40,6 +40,28 @@ public sealed record PlotCoverage(double ContentFillX, double ContentFillY, doub
 /// <summary>D12: how the plotted area was chosen and the window to apply when it is a stored Window.</summary>
 public sealed record PlotAreaResolution(PlotAreaKind Area, string Source, double[]? Window);
 
+/// <summary>
+/// review-wp2-r1 finding 6 (D12): centring for a plot. When the plotted area came from the
+/// stored page setup (areaSource == "stored") the setup's own centring/offset wins — unless
+/// the caller passed centered explicitly. KeepStored=true means the plugin must NOT call
+/// SetPlotCentered/SetPlotOrigin: the CopyFrom already carried the stored values into the
+/// settings (writing centered=true there is what dropped the stored offset in r1).
+/// </summary>
+public readonly record struct PlotCentring(bool Centered, bool KeepStored)
+{
+    public static PlotCentring Resolve(bool? callerCentered, string? areaSource, bool storedCentered)
+    {
+        if (callerCentered is { } explicitCentered)
+        {
+            return new PlotCentring(explicitCentered, KeepStored: false);
+        }
+
+        return areaSource == "stored"
+            ? new PlotCentring(storedCentered, KeepStored: true)
+            : new PlotCentring(Centered: true, KeepStored: false);
+    }
+}
+
 /// <summary>fix-smoke-20261029 D4: what forge_plot_to_pdf must do so AutoCAD's plot validator accepts the layout.</summary>
 public enum PlotLayoutAction
 {

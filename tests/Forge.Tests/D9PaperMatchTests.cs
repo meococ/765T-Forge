@@ -123,6 +123,16 @@ public sealed class D9PaperMatchSourceGuards
     private static string PlotSource()
         => File.ReadAllText(Path.Combine(PluginDispatchSyncTests.RepoPath("src", "Forge.Plugin"), "PluginCommandProcessor.Plot.cs"));
 
+    private static string MethodBody(string signature)
+    {
+        var source = PlotSource();
+        var start = source.IndexOf(signature, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"method not found: {signature}");
+        var end = System.Text.RegularExpressions.Regex.Match(source[start..], @"\n    \}\r?\n");
+        Assert.True(end.Success, $"end of method not found: {signature}");
+        return source.Substring(start, end.Index + end.Length);
+    }
+
     [Fact]
     public void StoredMediaMappingGoesThroughPaperMatchAndFailsClosed()
     {
@@ -135,5 +145,44 @@ public sealed class D9PaperMatchSourceGuards
         // eInvalidInput behind plot_device_invalid.
         Assert.DoesNotContain("closest_to_layout", source);
         Assert.DoesNotContain("SetClosestMediaName(ps, layout.PlotPaperSize", source);
+    }
+
+    [Fact]
+    public void MediaAndPaperResolutionRunBeforeAnyLayoutSwitch()
+    {
+        // review-wp2-r1 finding 4 (D9): a typed media/paper failure on a non-current layout
+        // must leave no side effect — no initialized layout, DBMOD unchanged. That only holds
+        // when TryResolveMedia runs before PlanLayoutSwitch decides and before CurrentLayout
+        // is ever assigned.
+        var body = MethodBody("private static ForgeResult PlotToPdf(");
+        var resolve = body.IndexOf("TryResolveMedia(", StringComparison.Ordinal);
+        var plan = body.IndexOf("PlanLayoutSwitch(", StringComparison.Ordinal);
+        var assign = body.IndexOf("CurrentLayout = layoutName", StringComparison.Ordinal);
+        Assert.True(resolve >= 0, "TryResolveMedia must run inside PlotToPdf");
+        Assert.True(resolve < plan, "media/paperSize resolution must precede PlanLayoutSwitch");
+        Assert.True(plan >= 0 && plan < assign, "the switch decision must precede the CurrentLayout assignment");
+    }
+
+    [Fact]
+    public void PostSwitchCodeCannotEmitMediaFailures()
+    {
+        // After the switch the plot body must be unable to fail on media/paper — every media
+        // failure code lives in the pre-switch TryResolveMedia.
+        var body = MethodBody("private static ForgeResult PlotOnLayout(");
+        Assert.DoesNotContain("GetCanonicalMediaNameList", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("NotOnDeviceCode", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("paper_size_not_found", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("plot_device_invalid", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("CopyFrom(", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MediaFailureCodesLiveInThePreSwitchResolver()
+    {
+        var body = MethodBody("private static ForgeResult? TryResolveMedia(");
+        Assert.Contains("paper_size_not_found", body, StringComparison.Ordinal);
+        Assert.Contains("PaperMatch.NotOnDeviceCode", body, StringComparison.Ordinal);
+        Assert.Contains("plot_device_invalid", body, StringComparison.Ordinal);
+        Assert.Contains("mapped_to_device_media", body, StringComparison.Ordinal);
     }
 }

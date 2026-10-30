@@ -128,6 +128,52 @@ public sealed class D12EmptyPdfGateTests
     }
 }
 
+/// <summary>
+/// review-wp2-r1 finding 6 (D12): when the plot area comes from the stored page setup, the
+/// stored centring/offset wins — the r1 code wrote centered=true over it whenever the caller
+/// had not passed centered. An explicit caller centered always wins.
+/// </summary>
+public sealed class D12StoredCentringTests
+{
+    [Fact]
+    public void AStoredAreaWithNoCallerCentringKeepsTheStoredCentring()
+    {
+        var on = PlotCentring.Resolve(null, "stored", storedCentered: true);
+        Assert.True(on.Centered);
+        Assert.True(on.KeepStored);
+
+        var off = PlotCentring.Resolve(null, "stored", storedCentered: false);
+        Assert.False(off.Centered);
+        Assert.True(off.KeepStored);
+    }
+
+    [Fact]
+    public void AnExplicitCallerCentringAlwaysWins()
+    {
+        foreach (var source in new[] { "stored", "requested", "default_layout", "default_model_extents" })
+        {
+            var c = PlotCentring.Resolve(true, source, storedCentered: false);
+            Assert.True(c.Centered);
+            Assert.False(c.KeepStored);
+
+            c = PlotCentring.Resolve(false, source, storedCentered: true);
+            Assert.False(c.Centered);
+            Assert.False(c.KeepStored);
+        }
+    }
+
+    [Fact]
+    public void NonStoredAreasKeepTheCenteredDefault()
+    {
+        foreach (var source in new[] { "requested", "default_layout", "default_extents_because_paper_differs_from_layout", "default_model_extents", null })
+        {
+            var c = PlotCentring.Resolve(null, source, storedCentered: false);
+            Assert.True(c.Centered);
+            Assert.False(c.KeepStored);
+        }
+    }
+}
+
 /// <summary>D12 plugin wiring guards.</summary>
 public sealed class D12StoredPlotAreaSourceGuards
 {
@@ -142,5 +188,17 @@ public sealed class D12StoredPlotAreaSourceGuards
         Assert.Contains("layout.PlotWindowArea", source, StringComparison.Ordinal);
         Assert.Contains("(int)layout.PlotType", source, StringComparison.Ordinal);
         Assert.Contains("AcPlotType.View", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CentringResolvesThroughTheSharedPolicy()
+    {
+        // finding 6 (D12): no unconditional `args.Centered ?? true` — the stored setup's
+        // centring/offset must survive, and SetPlotOrigin must only fire on an explicit or
+        // defaulted non-stored centered=false.
+        var source = PlotSource();
+        Assert.Contains("PlotCentring.Resolve(", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("args.Centered ?? true", source, StringComparison.Ordinal);
+        Assert.Contains("centring.KeepStored", source, StringComparison.Ordinal);
     }
 }
