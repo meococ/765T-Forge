@@ -261,6 +261,48 @@ public sealed class D12LegacyOffsetPromptTests
     }
 }
 
+/// <summary>
+/// live-smoke-20261030 fix4-r4 (review F1): an explicit caller centered on a Layout or View
+/// area is dropped by BOTH engines — api never writes centring/origin there and command
+/// answers Enter at the offset prompt — so the caller gets a warning like the scale=fit one
+/// instead of silence.
+/// </summary>
+public sealed class D12CenteredIgnoredWarningTests
+{
+    [Theory]
+    [InlineData(PlotAreaKind.Layout, true)]
+    [InlineData(PlotAreaKind.Layout, false)]
+    [InlineData(PlotAreaKind.View, true)]
+    [InlineData(PlotAreaKind.View, false)]
+    public void AnExplicitCenteredOnLayoutOrViewWarns(PlotAreaKind area, bool centered)
+    {
+        var warning = PlotCentring.CenteredIgnoredWarning(centered, area);
+        Assert.NotNull(warning);
+        Assert.Contains("centered does not apply", warning, StringComparison.Ordinal);
+        Assert.Contains($"plotArea={area.ToString().ToLowerInvariant()}", warning, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NoWarningWhenCenteredWasNotPassed()
+    {
+        foreach (var area in Enum.GetValues<PlotAreaKind>())
+        {
+            Assert.Null(PlotCentring.CenteredIgnoredWarning(null, area));
+        }
+    }
+
+    [Theory]
+    [InlineData(PlotAreaKind.Window)]
+    [InlineData(PlotAreaKind.Extents)]
+    [InlineData(PlotAreaKind.Display)]
+    [InlineData(PlotAreaKind.Limits)]
+    public void NoWarningForTheAreasThatHonourCentring(PlotAreaKind area)
+    {
+        Assert.Null(PlotCentring.CenteredIgnoredWarning(true, area));
+        Assert.Null(PlotCentring.CenteredIgnoredWarning(false, area));
+    }
+}
+
 /// <summary>D12 plugin wiring guards.</summary>
 public sealed class D12StoredPlotAreaSourceGuards
 {

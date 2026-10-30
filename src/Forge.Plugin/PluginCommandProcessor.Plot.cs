@@ -647,6 +647,15 @@ public sealed partial class PluginCommandProcessor
                 {
                     warnings.Add($"scale=fit does not apply to plotArea={area.ToString().ToLowerInvariant()}; it plots at its own scale. Use plotArea=extents for fit-to-sheet.");
                 }
+
+                // live-smoke-20261030 fix4-r4 (review F1): an explicit centered is dropped for
+                // Layout/View on BOTH engines — api skips the SetPlotCentered/SetPlotOrigin
+                // writes below and command answers Enter at the offset prompt. Warn like the
+                // scale=fit one above so the caller knows the argument did nothing.
+                if (PlotCentring.CenteredIgnoredWarning(args.Centered, area) is { } centeredWarning)
+                {
+                    warnings.Add(centeredWarning);
+                }
             }
             else
             {

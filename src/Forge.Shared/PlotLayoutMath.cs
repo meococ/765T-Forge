@@ -100,6 +100,18 @@ public readonly record struct PlotCentring(bool Centered, bool KeepStored)
         => KeepStored || area is PlotAreaKind.Layout or PlotAreaKind.View
             ? ""
             : Centered ? "Center" : "0,0";
+
+    /// <summary>
+    /// live-smoke-20261030 fix4-r4 (review F1): the warning for a caller who passed centered
+    /// explicitly on a Layout or View area. Both engines ignore centring there — api never
+    /// calls SetPlotCentered/SetPlotOrigin for them, command answers Enter at the offset
+    /// prompt — so the layout's stored centring and offset stand and the argument is dropped.
+    /// Null when centered was not passed or the area honours it; mirrors the scale=fit warning.
+    /// </summary>
+    public static string? CenteredIgnoredWarning(bool? callerCentered, PlotAreaKind area)
+        => callerCentered is not null && area is PlotAreaKind.Layout or PlotAreaKind.View
+            ? $"centered does not apply to plotArea={area.ToString().ToLowerInvariant()}; the layout's stored centring and offset stand."
+            : null;
 }
 
 /// <summary>fix-smoke-20261029 D4: what forge_plot_to_pdf must do so AutoCAD's plot validator accepts the layout.</summary>
