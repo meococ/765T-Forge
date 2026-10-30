@@ -272,7 +272,7 @@ Test-Case 'uncommitted src changes are refused; -AllowDirty deploys and records 
     [IO.File]::WriteAllText((Join-Path $repo 'src\main.cs'), 'v2 - uncommitted')
     Assert-Throws {
         & $deploy -SourceDir $srcB -Destination $dest -RepoRoot $repo | Out-Null
-    } 'Uncommitted changes under src' 'a dirty src tree must refuse without -AllowDirty'
+    } 'Uncommitted changes' 'a dirty tree must refuse without -AllowDirty'
 
     & $deploy -SourceDir $srcB -Destination $dest -RepoRoot $repo -AllowDirty | Out-Null
     $dep = Get-Content -LiteralPath (Join-Path $dest 'DEPLOYED.json') -Raw | ConvertFrom-Json
@@ -331,6 +331,235 @@ Test-Case 'bad inputs are refused before anything is written' {
         & $deploy -SourceDir $srcA -Destination $dest -RepoRoot $nonRepo -ProcessFixture (Join-Path $testRoot 'missing.json') | Out-Null
     } '-ProcessFixture not found' 'a missing fixture file must refuse'
     Assert-True (-not (Test-Path -LiteralPath (Split-Path -Parent $dest))) 'no deploy folders may be created by refused runs'
+}
+
+Test-Case 'destination overlapping the checkout is refused (P1, P12)' {
+    $fakeRepo = Join-Path $testRoot 'p1\reporoot'
+    New-Item -ItemType Directory -Force -Path (Join-Path $fakeRepo 'src\Forge.Server') | Out-Null
+    New-Item -ItemType Directory -Force -Path (Join-Path $fakeRepo '.git') | Out-Null
+    [IO.File]::WriteAllText((Join-Path $fakeRepo 'precious.txt'), 'keep me')
+    $before = Get-TreeHashes $fakeRepo
+
+    # P1: -Destination IS the checkout root.
+    Assert-Throws {
+        & $deploy -SourceDir $srcA -Destination $fakeRepo -RepoRoot $fakeRepo | Out-Null
+    } 'overlaps the checkout' 'P1: destination = RepoRoot must refuse'
+
+    # P12: -Destination is an ancestor of the checkout root.
+    Assert-Throws {
+        & $deploy -SourceDir $srcA -Destination (Split-Path -Parent $fakeRepo) -RepoRoot $fakeRepo | Out-Null
+    } 'overlaps the checkout' 'P12: destination = ancestor of RepoRoot must refuse'
+
+    # Inside <RepoRoot>\src or <RepoRoot>\.git.
+    Assert-Throws {
+        & $deploy -SourceDir $srcA -Destination (Join-Path $fakeRepo 'src\server') -RepoRoot $fakeRepo | Out-Null
+    } 'overlaps the checkout' 'a destination inside src\ must refuse'
+    Assert-Throws {
+        & $deploy -SourceDir $srcA -Destination (Join-Path $fakeRepo '.git\server') -RepoRoot $fakeRepo | Out-Null
+    } 'overlaps the checkout' 'a destination inside .git\ must refuse'
+
+    Assert-TreeEqual $before (Get-TreeHashes $fakeRepo) 'the fake checkout must be byte-identical after the refused runs'
+    Assert-Equal @(Get-DeploySiblings $fakeRepo '.prev*').Count 0 'no .prev sibling of the repo may exist'
+    Assert-Equal @(Get-DeploySiblings $fakeRepo '.staging-*').Count 0 'no staging sibling of the repo may exist'
+}
+
+Test-Case 'drive-root destination is refused (P11)' {
+    # A fake root string: the guard is pure path logic, nothing is touched.
+    Assert-Throws {
+        & $deploy -SourceDir $srcA -Destination 'X:\' -RepoRoot $nonRepo | Out-Null
+    } 'drive root' 'a drive-root destination must refuse with a clear message'
+}
+
+Test-Case 'a non-empty destination without DEPLOYED.json is not taken over' {
+    $dest = Join-Path $testRoot 'foreign\server'
+    New-Item -ItemType Directory -Force -Path $dest | Out-Null
+    [IO.File]::WriteAllText((Join-Path $dest 'someone-elses.txt'), 'precious')
+    $before = Get-TreeHashes $dest
+    Assert-Throws {
+        & $deploy -SourceDir $srcA -Destination $dest -RepoRoot $nonRepo | Out-Null
+    } 'move it aside' 'a foreign folder must be refused, not renamed aside'
+    Assert-TreeEqual $before (Get-TreeHashes $dest) 'the foreign folder must be untouched'
+
+    # An existing EMPTY folder is still deployable.
+    $emptyDest = Join-Path $testRoot 'emptydest\server'
+    New-Item -ItemType Directory -Force -Path $emptyDest | Out-Null
+    & $deploy -SourceDir $srcA -Destination $emptyDest -RepoRoot $nonRepo | Out-Null
+    Assert-True (Test-Path -LiteralPath (Join-Path $emptyDest 'Forge.Server.exe')) 'an existing empty folder may be deployed into'
+}
+
+Test-Case 'dirty check: tracked changes anywhere, untracked under src or root build inputs' {
+    $repo = Join-Path $testRoot 'repo2'
+    New-Item -ItemType Directory -Force -Path (Join-Path $repo 'src') | Out-Null
+    New-Item -ItemType Directory -Force -Path (Join-Path $repo 'docs') | Out-Null
+    [IO.File]::WriteAllText((Join-Path $repo 'src\a.cs'), 'a')
+    [IO.File]::WriteAllText((Join-Path $repo 'docs\cap.md'), 'cap')
+    [IO.File]::WriteAllText((Join-Path $repo 'Directory.Build.props'), '<Project/>')
+    $r = Invoke-TestGit $repo @('init', '-q');            Assert-Equal $r.Code 0 "git init failed: $($r.Out)"
+    $r = Invoke-TestGit $repo @('-c', 'core.autocrlf=false', 'add', '.'); Assert-Equal $r.Code 0 "git add failed: $($r.Out)"
+    $r = Invoke-TestGit $repo @('-c', 'user.name=Deploy Tests', '-c', 'user.email=deploy-tests@local', 'commit', '-qm', 'init')
+    Assert-Equal $r.Code 0 "git commit failed: $($r.Out)"
+
+    $dest = Join-Path $testRoot 'dirtydep\server'
+
+    # Untracked files outside the deploy payload must NOT make it dirty.
+    [IO.File]::WriteAllText((Join-Path $repo 'docs\wp3-note.md'), 'wip')
+    [IO.File]::WriteAllText((Join-Path $repo 'scratch.txt'), 'wip')
+    & $deploy -SourceDir $srcA -Destination $dest -RepoRoot $repo | Out-Null
+    $dep = Get-Content -LiteralPath (Join-Path $dest 'DEPLOYED.json') -Raw | ConvertFrom-Json
+    Assert-True ($dep.dirty -eq $false) 'untracked docs\ and root scratch files must not count as dirty'
+    Assert-True (@($dep.dirtyPaths).Count -eq 0) 'a clean deploy must record an empty dirtyPaths list'
+
+    # Untracked file under src\ -> dirty.
+    [IO.File]::WriteAllText((Join-Path $repo 'src\new.cs'), 'new')
+    Assert-Throws {
+        & $deploy -SourceDir $srcB -Destination $dest -RepoRoot $repo | Out-Null
+    } 'src/new\.cs' 'an untracked file under src\ must refuse and be listed'
+    Remove-Item -LiteralPath (Join-Path $repo 'src\new.cs')
+
+    # Untracked root build inputs -> dirty.
+    [IO.File]::WriteAllText((Join-Path $repo 'Directory.Packages.props'), '<Project/>')
+    Assert-Throws {
+        & $deploy -SourceDir $srcB -Destination $dest -RepoRoot $repo | Out-Null
+    } 'Directory\.Packages\.props' 'an untracked Directory.Packages.props must refuse and be listed'
+    Remove-Item -LiteralPath (Join-Path $repo 'Directory.Packages.props')
+    [IO.File]::WriteAllText((Join-Path $repo 'extra.slnf'), '{}')
+    Assert-Throws {
+        & $deploy -SourceDir $srcB -Destination $dest -RepoRoot $repo | Out-Null
+    } 'extra\.slnf' 'an untracked *.slnf must refuse and be listed'
+    Remove-Item -LiteralPath (Join-Path $repo 'extra.slnf')
+
+    # Modified tracked file outside src\ -> dirty.
+    [IO.File]::WriteAllText((Join-Path $repo 'docs\cap.md'), 'cap v2')
+    Assert-Throws {
+        & $deploy -SourceDir $srcB -Destination $dest -RepoRoot $repo | Out-Null
+    } 'Uncommitted changes' 'a modified tracked file outside src\ must refuse'
+
+    # -AllowDirty deploys and records the dirty paths (only the dirty ones).
+    & $deploy -SourceDir $srcB -Destination $dest -RepoRoot $repo -AllowDirty | Out-Null
+    $dep = Get-Content -LiteralPath (Join-Path $dest 'DEPLOYED.json') -Raw | ConvertFrom-Json
+    Assert-True ($dep.dirty -eq $true) 'dirty must be recorded as true'
+    Assert-True (@($dep.dirtyPaths) -contains 'docs/cap.md') 'dirtyPaths must list the modified tracked file'
+    Assert-True (@($dep.dirtyPaths) -notcontains 'docs/wp3-note.md') 'untracked files outside the payload must not be listed'
+}
+
+Test-Case 'a Forge.Server.exe with an unreadable path is refused' {
+    $fx = Join-Path $testRoot 'procs-unreadable.json'
+    @(
+        [pscustomobject]@{ pid = 424301; path = 'D:\other\place\Forge.Server.exe' },
+        [pscustomobject]@{ pid = 424302; path = $null }
+    ) | ConvertTo-Json | Set-Content -LiteralPath $fx -Encoding UTF8
+    $dest = Join-Path $testRoot 'unread\server'
+    Assert-Throws {
+        & $deploy -SourceDir $srcA -Destination $dest -RepoRoot $nonRepo -ProcessFixture $fx | Out-Null
+    } 'cannot verify that it does not run from the destination' 'a server whose path cannot be read must refuse'
+    Assert-Throws {
+        & $deploy -SourceDir $srcA -Destination $dest -RepoRoot $nonRepo -ProcessFixture $fx | Out-Null
+    } '424302' 'the refusal must list the unreadable pid'
+    Assert-True (-not (Test-Path -LiteralPath $dest)) 'nothing may be deployed'
+}
+
+Test-Case 'a locked file fails the destination rename; destination and .prev survive (P6d)' {
+    $dest = Join-Path $testRoot 'locked\server'
+    & $deploy -SourceDir $srcA -Destination $dest -RepoRoot $nonRepo | Out-Null
+    & $deploy -SourceDir $srcB -Destination $dest -RepoRoot $nonRepo | Out-Null
+    $prevDir = "$dest.prev"
+    $destBefore = Get-TreeHashes $dest
+    $prevBefore = Get-TreeHashes $prevDir
+
+    $fs = [IO.File]::Open((Join-Path $dest 'Forge.Server.dll'), [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    $eap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = (& powershell -NoProfile -ExecutionPolicy Bypass -File $deploy `
+               -SourceDir $srcC -Destination $dest -RepoRoot $nonRepo 2>&1) | Out-String
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $eap
+        $fs.Dispose()
+    }
+    Assert-True ($code -ne 0) "the deploy must fail while a destination file is open`n$out"
+    Assert-Match ($out -replace '\s+', ' ') 'move the existing destination .* aside' 'the error must name the failed step'
+    Assert-TreeEqual $destBefore (Get-TreeHashes $dest) 'the destination must be byte-identical'
+    Assert-TreeEqual $prevBefore (Get-TreeHashes $prevDir) 'the .prev backup must NOT be lost'
+    Assert-Equal @(Get-DeploySiblings $dest '.prev-pending-*').Count 0 'no pending folder may remain'
+    Assert-Equal @(Get-DeploySiblings $dest '.staging-*').Count 0 'no staging folder may remain'
+}
+
+Test-Case '-FailSwapAt staging restores the previous destination' {
+    $dest = Join-Path $testRoot 'failstaging\server'
+    & $deploy -SourceDir $srcA -Destination $dest -RepoRoot $nonRepo | Out-Null
+    & $deploy -SourceDir $srcB -Destination $dest -RepoRoot $nonRepo | Out-Null
+    $prevDir = "$dest.prev"
+    $destBefore = Get-TreeHashes $dest
+    $prevBefore = Get-TreeHashes $prevDir
+
+    Assert-Throws {
+        & $deploy -SourceDir $srcC -Destination $dest -RepoRoot $nonRepo -FailSwapAt staging | Out-Null
+    } 'previous copy was restored' 'a failed staging rename must restore the destination'
+
+    Assert-TreeEqual $destBefore (Get-TreeHashes $dest) 'the destination must hold the pre-deploy content'
+    Assert-TreeEqual $prevBefore (Get-TreeHashes $prevDir) '.prev must be byte-identical'
+    Assert-Equal @(Get-DeploySiblings $dest '.prev-pending-*').Count 0 'no pending folder may remain'
+    Assert-Equal @(Get-DeploySiblings $dest '.staging-*').Count 0 'no staging folder may remain'
+}
+
+Test-Case '-FailSwapAt prev leaves destination and .prev untouched' {
+    $dest = Join-Path $testRoot 'failprev\server'
+    & $deploy -SourceDir $srcA -Destination $dest -RepoRoot $nonRepo | Out-Null
+    & $deploy -SourceDir $srcB -Destination $dest -RepoRoot $nonRepo | Out-Null
+    $prevDir = "$dest.prev"
+    $destBefore = Get-TreeHashes $dest
+    $prevBefore = Get-TreeHashes $prevDir
+
+    Assert-Throws {
+        & $deploy -SourceDir $srcC -Destination $dest -RepoRoot $nonRepo -FailSwapAt prev | Out-Null
+    } 'move the existing destination .* aside' 'a failed destination rename must abort naming the step'
+
+    Assert-TreeEqual $destBefore (Get-TreeHashes $dest) 'the destination must be byte-identical'
+    Assert-TreeEqual $prevBefore (Get-TreeHashes $prevDir) '.prev must be byte-identical'
+    Assert-Equal @(Get-DeploySiblings $dest '.prev-pending-*').Count 0 'no pending folder may remain'
+    Assert-Equal @(Get-DeploySiblings $dest '.staging-*').Count 0 'no staging folder may remain'
+}
+
+Test-Case '-FailSwapAt final still deploys but keeps the pending folder' {
+    $dest = Join-Path $testRoot 'failfinal\server'
+    & $deploy -SourceDir $srcA -Destination $dest -RepoRoot $nonRepo | Out-Null
+    & $deploy -SourceDir $srcB -Destination $dest -RepoRoot $nonRepo | Out-Null
+    $prevDir = "$dest.prev"
+    $destBefore = Get-TreeHashes $dest
+    $prevBefore = Get-TreeHashes $prevDir
+
+    $out = (& $deploy -SourceDir $srcC -Destination $dest -RepoRoot $nonRepo -FailSwapAt final 3>&1) | Out-String
+    Assert-Match $out '=== Forge server deployed ===' 'the deploy must still succeed when only the .prev rotation fails'
+    Assert-Match $out 'prev-pending' 'the warning must name the kept pending folder'
+
+    $v3 = Get-TreeHashes $srcC
+    $destHash = Get-TreeHashes $dest
+    foreach ($k in $v3.Keys) {
+        Assert-Equal $destHash[$k] $v3[$k] "destination must hold the v3 file '$k'"
+    }
+    Assert-TreeEqual $prevBefore (Get-TreeHashes $prevDir) 'the old .prev must be byte-identical'
+    $pending = @(Get-DeploySiblings $dest '.prev-pending-*')
+    Assert-Equal $pending.Count 1 'exactly one pending folder must be kept'
+    Assert-TreeEqual $destBefore (Get-TreeHashes $pending[0].FullName) 'the pending folder must hold the pre-deploy destination content'
+    Assert-Equal @(Get-DeploySiblings $dest '.staging-*').Count 0 'no staging folder may remain'
+}
+
+Test-Case 'each run gets a unique build/staging stamp' {
+    $d1 = Join-Path $testRoot 'stamp1\server'
+    $d2 = Join-Path $testRoot 'stamp2\server'
+    $o1 = (& $deploy -SourceDir $srcA -Destination $d1 -RepoRoot $nonRepo -DryRun) | Out-String
+    $o2 = (& $deploy -SourceDir $srcA -Destination $d2 -RepoRoot $nonRepo -DryRun) | Out-String
+    Assert-Match $o1 'staging-\d{8}T\d{6}\d{3}Z-[0-9a-f]{8}' 'the stamp must be UTC with milliseconds plus a random suffix'
+    Assert-Match $o2 'staging-\d{8}T\d{6}\d{3}Z-[0-9a-f]{8}' 'the stamp must be UTC with milliseconds plus a random suffix'
+    $s1 = [regex]::Match($o1, 'Staging\s+:\s+(\S+)').Groups[1].Value
+    $s2 = [regex]::Match($o2, 'Staging\s+:\s+(\S+)').Groups[1].Value
+    Assert-True ($s1 -and $s2 -and ($s1 -ne $s2)) "two runs must never share a staging folder ('$s1' vs '$s2')"
+}
+
+Test-Case '.gitignore anchors deploy/ at the repo root' {
+    $gi = Get-Content -LiteralPath (Join-Path $repoRoot '.gitignore') -Raw
+    Assert-Match $gi '(?m)^/deploy/\r?$' '.gitignore must contain a root-anchored /deploy/ entry'
 }
 
 } finally {

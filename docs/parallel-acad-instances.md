@@ -195,12 +195,21 @@ folder is gitignored). Run it like:
 powershell -NoProfile -File scripts\deploy-server.ps1 [-Configuration Release] [-DryRun]
 ```
 
-It refuses while `src` has uncommitted changes (pass `-AllowDirty` to override)
-and while a `Forge.Server.exe` is running from the destination — close or
-disable the MCP clients that use the folder first; the script never stops a
-process. The copy lands in a staging sibling, is hash-verified, then swapped
-in; the previous deploy is kept once as `server.prev`, and `DEPLOYED.json`
-records the commit, branch, configuration, and every file hash.
+It refuses when the checkout is dirty — any modified or staged tracked file,
+an untracked file under `src\`, or an untracked root build input
+(`Directory.Build.props`, `Directory.Packages.props`, `global.json`,
+`NuGet.config`, `*.slnf`); untracked files elsewhere do not block (pass
+`-AllowDirty` to override, and the dirty paths are recorded in `DEPLOYED.json`).
+It also refuses when the destination is unsafe (the checkout root, an ancestor
+of it, inside `src\` or `.git\`, or a drive root), when a non-empty folder sits
+there that was not made by this script (no `DEPLOYED.json` — move it aside by
+hand), and while a `Forge.Server.exe` is running from the destination or a
+`Forge.Server.exe` path cannot be read — close or disable the MCP clients that
+use the folder first; the script never stops a process. The copy lands in a
+staging sibling, is hash-verified, then swapped in; the previous deploy is
+moved aside first and kept once as `server.prev` (a mid-swap failure restores
+it), and `DEPLOYED.json` records the commit, branch, dirty flag and paths,
+configuration, and every file hash.
 
 Switching the live entry to `deploy\server` is a Supervisor job done at a live
 window with `claude mcp` — nothing here touches MCP configuration. Until that

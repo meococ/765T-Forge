@@ -10,12 +10,26 @@
   so the live entry can be switched to a folder no build touches.
 
   Refusals (nothing is deployed):
-  - src\ under <RepoRoot> has uncommitted changes (unless -AllowDirty). The
-    deploy must trace to a committed tree; commit first.
+  - the -Destination is not safe: it equals <RepoRoot> or is an ancestor of
+    it, it sits inside <RepoRoot>\src or <RepoRoot>\.git, or it is a drive
+    root. The swap would rename that folder aside - refusing.
+  - the -Destination exists, is not empty and has no DEPLOYED.json: it is not
+    a folder this script deployed, so it is not replaced. Move it aside by
+    hand, then retry.
+  - the checkout is dirty: any tracked file modified or staged, any untracked
+    file under <RepoRoot>\src\, or an untracked root build input
+    (Directory.Build.props, Directory.Packages.props, global.json,
+    NuGet.config, *.slnf). Other untracked files (docs\, examples\, ...) do
+    not block. The deploy must trace to a committed tree; commit first or
+    pass -AllowDirty. The dirty paths are recorded in DEPLOYED.json.
   - a Forge.Server.exe process is running from the destination - close or
     disable the MCP clients that use this folder, then retry. The script never
     stops or kills a process. Forge.Server.exe processes running from other
     folders (e.g. src\Forge.Server\bin\Debug) are not a reason to refuse.
+  - a Forge.Server.exe process exists whose executable path cannot be read
+    (other user, elevated): the script cannot verify it is not running from
+    the destination, so it refuses and lists the pids. Close the process or
+    run this script from a session that can read it.
   When git is unavailable or <RepoRoot> is not a git repository root (a plain
   folder, or a folder nested inside some other repo), the git fields in
   DEPLOYED.json are recorded as null and the deploy proceeds.
@@ -26,11 +40,18 @@
     2. every staged file is verified by SHA256 against the source (any
        mismatch deletes only that staging folder and fails),
     3. DEPLOYED.json is written into staging (commit, branch, dirty flag,
-       configuration, utc, source path, per-file sha256 and bytes),
-    4. an existing destination is renamed to "<Destination>.prev" - exactly one
-       previous copy is kept; an older .prev is removed first,
-    5. staging is renamed to the destination. If this fails after step 4,
-       .prev is renamed back and the failure is reported.
+       dirty paths, configuration, utc, source path, per-file sha256 and
+       bytes),
+    4. an existing destination is renamed to
+       "<Destination>.prev-pending-<utc>-<id>". If this fails the deploy
+       aborts with the real cause - the destination and any existing .prev
+       backup are untouched,
+    5. staging is renamed to the destination. If this fails, the pending
+       folder is renamed back to the destination first,
+    6. only now is an older "<Destination>.prev" deleted and the pending
+       folder renamed to ".prev" - exactly one previous copy is kept. If only
+       this step fails the deploy still succeeded; a warning reports the
+       pending folder that was kept.
   Only the staging folder this run created and "<Destination>.prev" are ever
   deleted; nothing else is touched.
 
@@ -56,7 +77,7 @@
   Print the plan and write nothing.
 
 .PARAMETER AllowDirty
-  Deploy even when git reports uncommitted changes under <RepoRoot>\src.
+  Deploy even when git reports uncommitted changes in <RepoRoot>.
 
 .PARAMETER ProcessFixture
   TEST HOOK: path to a JSON file replacing live process enumeration for the
@@ -67,6 +88,11 @@
   TEST HOOK: name (path relative to the staged folder) of a file to corrupt
   inside the staging folder after the copy but before hash verification, to
   prove a bad copy aborts the deploy without touching the destination.
+
+.PARAMETER FailSwapAt
+  TEST HOOK: 'staging', 'prev' or 'final' - inject a failure into the matching
+  swap step (the staging rename, the destination -> pending rename, or the
+  pending -> .prev rotation) to prove the rollback behaviour.
 #>
 [CmdletBinding()]
 param(
@@ -85,7 +111,10 @@ param(
 
     [string] $ProcessFixture,
 
-    [string] $CorruptStagedFile
+    [string] $CorruptStagedFile,
+
+    [ValidateSet('staging', 'prev', 'final')]
+    [string] $FailSwapAt
 )
 
 $ErrorActionPreference = 'Stop'
@@ -122,9 +151,16 @@ function Get-ForgeServerProcess {
         return @(Get-Process -Name 'Forge.Server' -ErrorAction SilentlyContinue | ForEach-Object {
             $p = $null
             try { $p = $_.Path } catch { $p = $null }
-            if ($p) { [pscustomobject]@{ Pid = $_.Id; Path = $p } }
+            # Entries with an unreadable path are kept so the caller can refuse
+            # on them instead of silently skipping a possible server.
+            [pscustomobject]@{ Pid = $_.Id; Path = [string]$p }
         })
     }
+}
+
+# $path equals $base or sits inside it (case-insensitive, normalized paths).
+function Test-IsOrUnder([string] $Path, [string] $Base) {
+    $Path -ieq $Base -or $Path.StartsWith($Base + '\', [StringComparison]::OrdinalIgnoreCase)
 }
 
 # ---------------------------------------------------------------- paths
@@ -134,22 +170,49 @@ if (-not (Test-Path -LiteralPath $RepoRoot -PathType Container)) {
 }
 $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path.TrimEnd('\')
 if (-not $Destination) { $Destination = Join-Path $RepoRoot 'deploy\server' }
-$Destination = ([IO.Path]::GetFullPath($Destination)).TrimEnd('\')
+try {
+    $destFull = [IO.Path]::GetFullPath($Destination)
+} catch {
+    throw "Destination is not a valid absolute path: '$Destination'"
+}
+if ($destFull -ieq [IO.Path]::GetPathRoot($destFull)) {
+    throw "Destination '$destFull' is a drive root - refusing to deploy onto a whole drive."
+}
+$Destination = $destFull.TrimEnd('\')
+
+# The swap renames whatever -Destination points at, so it must never be the
+# checkout itself, an ancestor of it, or inside the folders a rename would gut.
+if ((Test-IsOrUnder $RepoRoot $Destination) -or
+    (Test-IsOrUnder $Destination "$RepoRoot\src") -or
+    (Test-IsOrUnder $Destination "$RepoRoot\.git")) {
+    throw "Destination '$Destination' overlaps the checkout '$RepoRoot' - it must not be the checkout root, an ancestor of it, or inside src\ or .git\. Pick a folder outside those paths."
+}
+
+# Takeover guard: an existing destination that is not ours (no DEPLOYED.json)
+# is never replaced - the user moves it aside by hand.
+if (Test-Path -LiteralPath $Destination) {
+    $destHasContent = [bool]@(Get-ChildItem -LiteralPath $Destination -Force | Select-Object -First 1)
+    if ($destHasContent -and -not (Test-Path -LiteralPath (Join-Path $Destination 'DEPLOYED.json'))) {
+        throw "Destination '$Destination' exists and is not empty but has no DEPLOYED.json - it does not look like a deploy made by this script. Refusing to replace it; move it aside by hand, then retry."
+    }
+}
 $prevDir = "$Destination.prev"
 $destExe = Join-Path $Destination 'Forge.Server.exe'
 
 $stampUtc   = (Get-Date).ToUniversalTime()
-$stampText  = $stampUtc.ToString('yyyyMMddTHHmmssZ')
-# Unique even for two deploys inside the same second; we only ever delete the
-# exact staging folder this run created.
-$stagingDir = "$Destination.staging-$stampText-" + [guid]::NewGuid().ToString('N').Substring(0, 8)
+# Milliseconds plus a random suffix: unique even for two runs inside the same
+# second, so the per-run build/staging/pending folders can never collide.
+$stampText  = $stampUtc.ToString('yyyyMMddTHHmmssfffZ') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+$stagingDir = "$Destination.staging-$stampText"
+$pendingDir = "$Destination.prev-pending-$stampText"
 
 # ---------------------------------------------------------------- git state
 
-$gitCommit = $null
-$gitBranch = $null
-$gitDirty  = $null
-$gitNote   = 'git not available or RepoRoot is not a repository root'
+$gitCommit  = $null
+$gitBranch  = $null
+$gitDirty   = $null
+$dirtyPaths = $null
+$gitNote    = 'git not available or RepoRoot is not a repository root'
 if (Get-Command git -ErrorAction SilentlyContinue) {
     # git -C resolves the CONTAINING repo, so a RepoRoot nested inside another
     # repo (like a tree export under it) would wrongly record that repo's
@@ -163,24 +226,52 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
                 $gitCommit = ([string]$head.Out).Trim()
                 $br = Invoke-Git @('rev-parse', '--abbrev-ref', 'HEAD')
                 if ($br.Code -eq 0 -and $br.Out) { $gitBranch = ([string]$br.Out).Trim() }
-                $st = Invoke-Git @('status', '--porcelain', '--', 'src')
-                if ($st.Code -eq 0) {
-                    $gitDirty = [bool](@($st.Out | Where-Object { $_ }).Count)
-                    $gitNote = "commit $gitCommit, branch $gitBranch, src dirty=$gitDirty"
+                # Dirty = any tracked change anywhere, or an untracked file
+                # that feeds the deployed payload: under src\, or a root build
+                # input (props/global.json/NuGet.config/*.slnf). Untracked
+                # files elsewhere (docs\, examples\, ...) do not count.
+                $st = Invoke-Git @('status', '--porcelain', '--untracked-files=no')
+                $un = Invoke-Git @('ls-files', '--others', '--exclude-standard')
+                if ($st.Code -eq 0 -and $un.Code -eq 0) {
+                    $dirtyPaths = New-Object 'System.Collections.Generic.List[string]'
+                    foreach ($line in @($st.Out)) {
+                        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+                        $p = $line.Substring(3)
+                        if ($p.StartsWith('"') -and $p.EndsWith('"')) { $p = $p.Substring(1, $p.Length - 2) }
+                        $p = ($p -split ' -> ')[-1]
+                        $dirtyPaths.Add($p)
+                    }
+                    $rootBuildInputs = @('Directory.Build.props', 'Directory.Packages.props', 'global.json', 'NuGet.config')
+                    foreach ($line in @($un.Out)) {
+                        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+                        $p = [string]$line
+                        if ($p.StartsWith('"') -and $p.EndsWith('"')) { $p = $p.Substring(1, $p.Length - 2) }
+                        if ($p.StartsWith('src/', [StringComparison]::OrdinalIgnoreCase) -or
+                            (($p.IndexOf('/') -lt 0) -and ($rootBuildInputs -contains $p -or $p -like '*.slnf'))) {
+                            $dirtyPaths.Add($p)
+                        }
+                    }
+                    $gitDirty = $dirtyPaths.Count -gt 0
+                    $gitNote = "commit $gitCommit, branch $gitBranch, dirty=$gitDirty ($($dirtyPaths.Count) dirty path(s))"
                 } else {
-                    $gitNote = "commit $gitCommit, branch $gitBranch, src status unavailable"
+                    $gitNote = "commit $gitCommit, branch $gitBranch, dirty status unavailable"
                 }
             }
         }
     }
 }
 if ($gitDirty -and -not $AllowDirty) {
-    throw "Uncommitted changes under src\ in '$RepoRoot' - the deployed server must trace to a committed tree. Commit first, or pass -AllowDirty."
+    throw "Uncommitted changes in '$RepoRoot' - the deployed server must trace to a committed tree. Commit first, or pass -AllowDirty. Dirty paths: $($dirtyPaths -join ', ')"
 }
 
 # ---------------------------------------------------------------- running-process check
 
 $serverProcs = @(Get-ForgeServerProcess)
+$unreadable = @($serverProcs | Where-Object { -not $_.Path })
+if ($unreadable.Count) {
+    $list = ($unreadable | ForEach-Object { "pid $($_.Pid)" }) -join '; '
+    throw "Forge.Server.exe is running but its executable path cannot be read: $list - cannot verify that it does not run from the destination; close it or run this from a session that can read it."
+}
 $runningUnderDest = @($serverProcs | Where-Object {
     if (-not $_.Path) { return $false }
     try { $exe = [IO.Path]::GetFullPath($_.Path) } catch { return $false }
@@ -234,11 +325,13 @@ if ($DryRun) {
     Write-Output "[WOULD-VERIFY] SHA256 every staged file against the source"
     Write-Output "[WOULD-WRITE] $stagingDir\DEPLOYED.json"
     if (Test-Path -LiteralPath $Destination) {
-        Write-Output "[WOULD-RENAME] $Destination -> $prevDir   (an older .prev is removed first - exactly one previous copy is kept)"
+        Write-Output "[WOULD-RENAME] $Destination -> $pendingDir"
+        Write-Output "[WOULD-RENAME] $stagingDir -> $Destination"
+        Write-Output "[WOULD-RENAME] $pendingDir -> $prevDir   (an older .prev is removed first - exactly one previous copy is kept)"
     } else {
         Write-Output "              (no existing destination - first deploy, no .prev)"
+        Write-Output "[WOULD-RENAME] $stagingDir -> $Destination"
     }
-    Write-Output "[WOULD-RENAME] $stagingDir -> $Destination"
     Write-Output "MCP entry exe : $destExe"
     return
 }
@@ -310,6 +403,7 @@ try {
         commit        = $gitCommit
         branch        = $gitBranch
         dirty         = $gitDirty
+        dirtyPaths    = $dirtyPaths
         configuration = $Configuration
         utc           = $stampUtc.ToString('o')
         source        = $srcDir
@@ -323,19 +417,39 @@ try {
 # ---------------------------------------------------------------- swap
 
 $hadDest = Test-Path -LiteralPath $Destination
+$swapStep = 'dest'
 try {
-    if (Test-Path -LiteralPath $prevDir) { Remove-Item -LiteralPath $prevDir -Recurse -Force }
-    if ($hadDest) { Rename-Item -LiteralPath $Destination -NewName (Split-Path -Leaf $prevDir) }
+    # (a) move the live destination aside first - if this fails nothing is
+    # lost: the destination and any existing .prev backup are untouched.
+    if ($hadDest) {
+        if ($FailSwapAt -eq 'prev') { throw "simulated swap failure injected by -FailSwapAt prev" }
+        Rename-Item -LiteralPath $Destination -NewName (Split-Path -Leaf $pendingDir)
+    }
+    # (b) move staging into place.
+    $swapStep = 'staging'
+    if ($FailSwapAt -eq 'staging') { throw "simulated swap failure injected by -FailSwapAt staging" }
     Rename-Item -LiteralPath $stagingDir -NewName (Split-Path -Leaf $Destination)
+    # (c) only now retire the pending copy: drop the older .prev, then rename.
+    $swapStep = 'final'
+    if (Test-Path -LiteralPath $pendingDir) {
+        if ($FailSwapAt -eq 'final') { throw "simulated swap failure injected by -FailSwapAt final" }
+        if (Test-Path -LiteralPath $prevDir) { Remove-Item -LiteralPath $prevDir -Recurse -Force }
+        Rename-Item -LiteralPath $pendingDir -NewName (Split-Path -Leaf $prevDir)
+    }
 } catch {
     $swapErr = $_
-    if ($hadDest -and (Test-Path -LiteralPath $prevDir) -and -not (Test-Path -LiteralPath $Destination)) {
-        Rename-Item -LiteralPath $prevDir -NewName (Split-Path -Leaf $Destination)
-        if (Test-Path -LiteralPath $stagingDir) { Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction SilentlyContinue }
-        throw "Could not move staging into place ($($swapErr.Exception.Message)); the previous copy was restored to $Destination."
-    }
     if (Test-Path -LiteralPath $stagingDir) { Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction SilentlyContinue }
-    throw "Could not move staging into place: $($swapErr.Exception.Message)"
+    if ($swapStep -eq 'dest') {
+        throw "Could not move the existing destination '$Destination' aside to '$pendingDir': $($swapErr.Exception.Message) - the destination and any .prev backup were left untouched."
+    }
+    if ($swapStep -eq 'staging') {
+        if ($hadDest -and (Test-Path -LiteralPath $pendingDir) -and -not (Test-Path -LiteralPath $Destination)) {
+            Rename-Item -LiteralPath $pendingDir -NewName (Split-Path -Leaf $Destination)
+            throw "Could not move staging into place ($($swapErr.Exception.Message)); the previous copy was restored to $Destination."
+        }
+        throw "Could not move staging into place: $($swapErr.Exception.Message)"
+    }
+    Write-Warning "Deployed to '$Destination', but the previous copy could not be rotated into '$prevDir': $($swapErr.Exception.Message). It was left at '$pendingDir'."
 }
 
 # ---------------------------------------------------------------- result
@@ -344,7 +458,7 @@ Write-Output ""
 Write-Output "=== Forge server deployed ==="
 Write-Output "Destination   : $Destination"
 Write-Output "Files         : $($manifest.Count + 1) ($($manifest.Count) published + DEPLOYED.json)"
-Write-Output ("Commit        : " + $(if ($gitCommit) { "$gitCommit ($gitBranch)$(if ($gitDirty) { ', src dirty - deployed with -AllowDirty' })" } else { 'not recorded (git unavailable or not a repository)' }))
+Write-Output ("Commit        : " + $(if ($gitCommit) { "$gitCommit ($gitBranch)$(if ($gitDirty) { ', dirty - deployed with -AllowDirty' })" } else { 'not recorded (git unavailable or not a repository)' }))
 Write-Output ("Previous copy : " + $(if ($hadDest) { $prevDir } else { '<none>' }))
 Write-Output "MCP entry exe : $destExe"
 if (-not (Test-Path -LiteralPath $destExe)) {
