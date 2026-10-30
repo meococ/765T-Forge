@@ -496,6 +496,27 @@ public sealed class NamedPipePluginServer : IDisposable
                         return;
                     }
 
+                    if (!dgnRun.ContextRestored)
+                    {
+                        // D14-quiescence: the leg queued its destructive half onto the
+                        // application context; it lands only after the command session
+                        // fully unwound. Answering before ContextRestored is exactly the
+                        // mid-teardown close that wedged quiescence
+                        // (artifacts/d14/fail-evidence-20261030.md) — keep waiting, bounded
+                        // by the same deadline as the leg itself.
+                        if (Environment.TickCount64 - startedAt >= staleAfterMs)
+                        {
+                            var stalledRun = dgnRun;
+                            dgnRun = null;
+                            // Deliberately NOT removed from _pendingDgnRuns: the queued
+                            // callback still owns the close, and the Terminate drain is the
+                            // fallback if it never lands.
+                            Finish(_processor.EndDgnImport(command, stalledRun, restoreTimedOut: true));
+                        }
+
+                        return;
+                    }
+
                     // review-d14-r1 F1: clear the field BEFORE EndDgnImport — its document
                     // close/activate calls can pump a nested Idle tick, which must see
                     // dgnRun already null (-> first is null -> claimed -> return) instead

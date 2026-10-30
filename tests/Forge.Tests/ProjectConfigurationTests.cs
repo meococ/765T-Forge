@@ -106,6 +106,43 @@ public sealed class ProjectConfigurationTests
     }
 
     [Fact]
+    public void DgnRestoreRunsOnlyOnTheQueuedApplicationContextAfterTheLeg()
+    {
+        var root = RepoRoot();
+        var dgn = File.ReadAllText(Path.Combine(root, "src", "Forge.Plugin", "PluginCommandProcessor.Dgn.cs"));
+        var pipe = File.ReadAllText(Path.Combine(root, "src", "Forge.Plugin", "NamedPipePluginServer.cs"));
+
+        // fail-evidence-20261030: the first Idle tick after LegFinished ran
+        // RestoreDgnContext's CloseAndDiscard while the temp document's command session
+        // was still unwinding — the orphaned session wedged quiescence permanently. The
+        // destructive half is now queued onto the application context by the leg itself;
+        // the lane answers only after run.ContextRestored proves it landed.
+        Assert.Contains("Documents.ExecuteInApplicationContext(", dgn);
+        Assert.Contains("run.ContextRestored = true", dgn);
+        // The leg runs the synchronous command — no nested async session survives the
+        // callback to be orphaned by the close.
+        Assert.Contains("run.TempDoc.Editor.Command(", dgn);
+        Assert.DoesNotContain("CommandAsync(", dgn);
+        // The queued restore sets ContextRestored strictly after the restores ran, and a
+        // late Abandoned return must not queue a stale restore.
+        Assert.Contains("if (!run.Abandoned)", dgn);
+        Assert.True(
+            dgn.IndexOf("RestoreDgnContext(run);", StringComparison.Ordinal) <
+            dgn.IndexOf("run.ContextRestored = true", StringComparison.Ordinal),
+            "the restores must run before ContextRestored is set inside the queued callback");
+
+        // The lane waits for the restore before EndDgnImport (bounded by the request
+        // deadline) and keeps the run mirrored for the Terminate drain on the timeout path.
+        var waitIndex = pipe.IndexOf("!dgnRun.ContextRestored", StringComparison.Ordinal);
+        Assert.True(waitIndex >= 0, "the Idle lane must wait on ContextRestored before finishing a DGN run");
+        Assert.True(
+            waitIndex < pipe.IndexOf("EndDgnImport(command, finishedRun)", StringComparison.Ordinal),
+            "the ContextRestored wait must precede the finishing EndDgnImport call");
+        Assert.Contains("restoreTimedOut: true", pipe);
+        Assert.Contains("dgn_context_restore_timeout", dgn);
+    }
+
+    [Fact]
     public void CommandDispatchedToolsRejectControlCharacters()
     {
         var root = RepoRoot();
