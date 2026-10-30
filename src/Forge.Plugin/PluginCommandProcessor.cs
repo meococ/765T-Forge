@@ -77,6 +77,26 @@ public sealed partial class PluginCommandProcessor
             : ForgeResult.Failure(command.Id, PipeAuth.UnauthorizedCode, "Invalid Forge named pipe token.");
     }
 
+    /// <summary>
+    /// review-wp2-r2 Q2 (D13): the dispatcher's authenticated fast refusals
+    /// (no_active_document / no_command_context) bypass Process — without this record they were
+    /// visible in the pipe answer but invisible in the audit trail. Same sink and same shape as
+    /// the refusal records Process writes (tool, command id, dry-run flag, the refusal code as
+    /// the decision, the call's args). The unauthenticated path is untouched: a bad token is
+    /// still refused before routing and still writes no record.
+    /// </summary>
+    internal string AuditRefusal(ForgeCommand command, string code)
+        => _auditSink.WriteBestEffort(new AuditRecord
+        {
+            Source = "plugin",
+            Tool = command.Tool,
+            CommandId = command.Id,
+            DryRun = command.DryRun,
+            Allowed = false,
+            DecisionCode = code,
+            Args = command.Args
+        });
+
     public ForgeResult Process(ForgeCommand command)
     {
         if (VerifyToken(command) is { } unauthorized)

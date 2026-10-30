@@ -259,18 +259,22 @@ public sealed class NamedPipePluginServer : IDisposable
                 return ExecuteWhenIdleAsync(command);
 
             case DocDispatchDecision.FailNoActiveDocument:
+                // review-wp2-r2 Q2: authenticated refusals write the same audit record Process
+                // would — the call was verified, so it must exist in the audit trail.
                 return Task.FromResult(ForgeResult.Failure(
                     command.Id,
                     "no_active_document",
                     "AutoCAD has no open document (Start tab): there is no document to run this tool on.",
-                    "Create or open a drawing first (forge_doc_new, forge_doc_open), then retry; forge_system_health, forge_system_version and forge_doc_list_open still answer."));
+                    "Create or open a drawing first (forge_doc_new, forge_doc_open), then retry; forge_system_health, forge_system_version and forge_doc_list_open still answer.",
+                    _processor.AuditRefusal(command, "no_active_document")));
 
             case DocDispatchDecision.FailNoCommandContext:
                 return Task.FromResult(ForgeResult.Failure(
                     command.Id,
                     "no_command_context",
                     "Documents are open but none is active (the Start tab has focus): there is no command context to execute this tool in.",
-                    "Activate a drawing first (forge_doc_activate) or click its window in AutoCAD, then retry."));
+                    "Activate a drawing first (forge_doc_activate) or click its window in AutoCAD, then retry.",
+                    _processor.AuditRefusal(command, "no_command_context")));
 
             default:
                 return ExecuteInCommandContextAsync(command);
@@ -431,6 +435,7 @@ public sealed class NamedPipePluginServer : IDisposable
         var startedAt = Environment.TickCount64;
         var staleAfterMs = (long)RequestDeadline.TotalMilliseconds;
         ForgeResult? first = null;
+        var claimed = false;
         long pollUntil = 0;
 
         void Finish(ForgeResult result)
@@ -445,6 +450,17 @@ public sealed class NamedPipePluginServer : IDisposable
             {
                 if (first is null)
                 {
+                    // review-wp2-r2 Q1: claim the command BEFORE Process runs. first stays null
+                    // for the whole synchronous Process call, so a nested Application.Idle raise
+                    // during a message-pumping call inside it (Documents.Add / Editor.Command in
+                    // forge_dgn_import) would otherwise re-enter and run the same command twice —
+                    // a second temp document + -DGNIMPORT. Already-started work runs to
+                    // completion, so a nested raise returns regardless of the deadline.
+                    if (claimed)
+                    {
+                        return;
+                    }
+
                     if (Environment.TickCount64 - startedAt >= staleAfterMs)
                     {
                         Finish(ForgeResult.Failure(
@@ -454,6 +470,7 @@ public sealed class NamedPipePluginServer : IDisposable
                         return;
                     }
 
+                    claimed = true;
                     first = _processor.Process(command);
                     if (first.Ok || first.Error?.Code is not { } code || !DocumentContextPolicy.UnconfirmedCodes.Contains(code) ||
                         first.Data is not (PluginCommandProcessor.DocActivateReadBack or PluginCommandProcessor.DocCloseReadBack))

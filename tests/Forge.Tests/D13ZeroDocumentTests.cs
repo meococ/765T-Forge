@@ -277,4 +277,43 @@ public sealed class D13ZeroDocumentSourceGuards
         // The decision must be taken before any marshal — never inside the command context.
         Assert.DoesNotContain("DocumentFreeTools = new", source, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void TheApplicationLaneRunsAQueuedCommandAtMostOnce()
+    {
+        // review-wp2-r2 Q1: a nested Application.Idle raise while Process is still on the stack
+        // (Documents.Add / Editor.Command inside forge_dgn_import can pump messages) must not
+        // re-run the same queued command. Source guard only: the OnIdle re-entrancy is a local
+        // function over Application.Idle — it cannot be exercised without the live host.
+        var body = MethodBody(ServerSource(), "private Task<ForgeResult> ExecuteDocActivateWhenIdleAsync(");
+        var claimed = body.IndexOf("claimed", StringComparison.Ordinal);
+        var claim = body.IndexOf("claimed = true", StringComparison.Ordinal);
+        var process = body.IndexOf("_processor.Process(command)", StringComparison.Ordinal);
+        Assert.True(claimed >= 0 && claim > claimed && process > claim,
+            "the app lane must claim the queued command before _processor.Process runs so a nested Idle raise returns instead of re-running it");
+    }
+
+    [Fact]
+    public void TheAuthenticatedRefusalsWriteAnAuditRecord()
+    {
+        // review-wp2-r2 Q2: no_active_document / no_command_context bypass Process, so they
+        // must write their own audit record through the processor's sink — and the token
+        // check still runs first (unauthenticated stays unrecorded, refused before anything).
+        var body = MethodBody(ServerSource(), "private Task<ForgeResult> ExecuteOnMainThreadAsync(");
+        var verify = body.IndexOf("VerifyToken(command)", StringComparison.Ordinal);
+        var noDoc = body.IndexOf("AuditRefusal(command, \"no_active_document\")", StringComparison.Ordinal);
+        var noCtx = body.IndexOf("AuditRefusal(command, \"no_command_context\")", StringComparison.Ordinal);
+        Assert.True(verify >= 0 && noDoc > verify && noCtx > verify,
+            "both authenticated refusals must write an audit record after the token check");
+    }
+
+    [Fact]
+    public void AuditRefusalUsesTheSameSinkAndShapeAsProcess()
+    {
+        var body = MethodBody(ProcessorSource(), "internal string AuditRefusal(");
+        Assert.Contains("_auditSink.WriteBestEffort(", body, StringComparison.Ordinal);
+        Assert.Contains("Source = \"plugin\"", body, StringComparison.Ordinal);
+        Assert.Contains("Allowed = false", body, StringComparison.Ordinal);
+        Assert.Contains("Args = command.Args", body, StringComparison.Ordinal);
+    }
 }
