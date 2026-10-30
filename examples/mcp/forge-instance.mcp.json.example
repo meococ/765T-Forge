@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "765t-forge-<n>": {
+      "command": "D:\\765T-Forge\\src\\Forge.Server\\bin\\Release\\net8.0\\Forge.Server.exe",
+      "args": [],
+      "env": {
+        "FORGE_AUTOCAD_TOKEN": "<same as the existing 765t-forge entry>",
+        "FORGE_PIPE_NAME": "765T.Forge.AutoCAD.<n>",
+        "FORGE_BACKUP_DIR": "%LOCALAPPDATA%\\765T-Forge\\instances\\<n>\\backups",
+        "FORGE_AUDIT_DIR": "%LOCALAPPDATA%\\765T-Forge\\instances\\<n>\\audit",
+        "FORGE_ENABLE_UNSAFE_OPS": "false"
+      }
+    }
+  }
+}
