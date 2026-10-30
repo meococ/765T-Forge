@@ -173,7 +173,7 @@ public sealed record LineworkTransformArgs
     /// <summary>"cadToRevit" (default) or "revitToCad" (inverse map back to drawing units).</summary>
     public string? Direction { get; init; }
 
-    /// <summary>Calibration name stored in the file (e.g. "aeon-bf-underlay").</summary>
+    /// <summary>Calibration name stored in the file (e.g. "bf-underlay").</summary>
     public string? Name { get; init; }
 
     /// <summary>Free-form calibration notes (anchor provenance, sheet, level).</summary>
