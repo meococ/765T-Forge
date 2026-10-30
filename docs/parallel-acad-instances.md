@@ -182,3 +182,28 @@ Run by the Lead in a granted window, with the name `smoke` instead of `smoke1`:
 - Step 7: the stop script stopped only pid 29888 (1 s). The pointer was already
   `<<Unnamed Profile>>`. The user's `LogFilePath` / `SaveFilePath` were unchanged.
 - Step 8 (idempotent reuse) was not run; the test profile key was removed after the smoke.
+
+## Deploying the server
+
+The live MCP entry must not run out of `src\Forge.Server\bin` — any build into
+that folder changes or breaks the server every open MCP client is using.
+`scripts\deploy-server.ps1` exists to fix that: it publishes Forge.Server and
+copies the result into a dedicated folder, `<repo>\deploy\server\` (the `deploy/`
+folder is gitignored). Run it like:
+
+```
+powershell -NoProfile -File scripts\deploy-server.ps1 [-Configuration Release] [-DryRun]
+```
+
+It refuses while `src` has uncommitted changes (pass `-AllowDirty` to override)
+and while a `Forge.Server.exe` is running from the destination — close or
+disable the MCP clients that use the folder first; the script never stops a
+process. The copy lands in a staging sibling, is hash-verified, then swapped
+in; the previous deploy is kept once as `server.prev`, and `DEPLOYED.json`
+records the commit, branch, configuration, and every file hash.
+
+Switching the live entry to `deploy\server` is a Supervisor job done at a live
+window with `claude mcp` — nothing here touches MCP configuration. Until that
+switch, the launcher snippet above keeps pointing at the live `bin\Debug`
+path; afterwards, the launcher default moves to `deploy\server\Forge.Server.exe`
+(a one-line follow-up in `launch-acad-instance.ps1`).
