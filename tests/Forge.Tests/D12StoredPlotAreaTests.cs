@@ -1,0 +1,146 @@
+using Forge.Shared;
+
+namespace Forge.Tests;
+
+/// <summary>
+/// smoke r2 D12: with no caller plotArea the layout's stored plot type wins (AEON sheets
+/// store Window + a stored window) — the default must not silently become layout/extents —
+/// and a PDF that comes out EMPTY is a failure, never a warning.
+/// AcPlotType ints: Display=1, Extents=2, Limits=3, View=4, Window=5, Layout=6.
+/// </summary>
+public sealed class D12StoredPlotAreaTests
+{
+    private static readonly double[] SheetWindow = [10.0, 20.0, 400.0, 260.0];
+
+    [Fact]
+    public void AnExplicitCallerAreaAlwaysWins()
+    {
+        var r = PlotLayoutMath.ResolveArea(PlotAreaKind.Layout, false, 5, SheetWindow, null, false);
+        Assert.Equal(PlotAreaKind.Layout, r.Area);
+        Assert.Equal("requested", r.Source);
+        Assert.Null(r.Window);
+    }
+
+    [Fact]
+    public void ModelKeepsTheExtentsDefaultRegardlessOfStoredType()
+    {
+        var r = PlotLayoutMath.ResolveArea(null, true, 5, SheetWindow, null, false);
+        Assert.Equal(PlotAreaKind.Extents, r.Area);
+        Assert.Equal("default_model_extents", r.Source);
+    }
+
+    [Fact]
+    public void StoredWindowPlotsTheStoredWindow()
+    {
+        var r = PlotLayoutMath.ResolveArea(null, false, 5, SheetWindow, null, false);
+        Assert.Equal(PlotAreaKind.Window, r.Area);
+        Assert.Equal("stored", r.Source);
+        Assert.Equal(SheetWindow, r.Window);
+    }
+
+    [Fact]
+    public void AStoredWindowStillAppliesWhenThePaperWasMapped()
+    {
+        // D9+D12 together: stored media was mapped to a same-size device medium — the stored
+        // window is still the layout's own intent and must not be replaced by extents.
+        var r = PlotLayoutMath.ResolveArea(null, false, 5, SheetWindow, null, true);
+        Assert.Equal(PlotAreaKind.Window, r.Area);
+        Assert.Equal("stored", r.Source);
+    }
+
+    [Fact]
+    public void ADegenerateStoredWindowFallsBackToDefaults()
+    {
+        var degenerate = new[] { 10.0, 20.0, 10.0, 260.0 }; // zero width
+        Assert.Equal(PlotAreaKind.Layout, PlotLayoutMath.ResolveArea(null, false, 5, degenerate, null, false).Area);
+        Assert.Equal(PlotAreaKind.Extents, PlotLayoutMath.ResolveArea(null, false, 5, degenerate, null, true).Area);
+        Assert.Equal(PlotAreaKind.Layout, PlotLayoutMath.ResolveArea(null, false, 5, null, null, false).Area);
+    }
+
+    [Theory]
+    [InlineData(6, PlotAreaKind.Layout)]
+    [InlineData(2, PlotAreaKind.Extents)]
+    [InlineData(1, PlotAreaKind.Display)]
+    [InlineData(3, PlotAreaKind.Limits)]
+    public void StoredAreaKindsMapThrough(int storedType, PlotAreaKind expected)
+        => Assert.Equal(expected, PlotLayoutMath.ResolveArea(null, false, storedType, null, null, false).Area);
+
+    [Fact]
+    public void StoredNamedViewNeedsTheStoredViewName()
+    {
+        Assert.Equal(PlotAreaKind.View, PlotLayoutMath.ResolveArea(null, false, 4, null, "SHEET-01", false).Area);
+        // A stored View without a name cannot be applied: defaults instead of guessing.
+        Assert.Equal(PlotAreaKind.Layout, PlotLayoutMath.ResolveArea(null, false, 4, null, null, false).Area);
+        Assert.Equal(PlotAreaKind.Layout, PlotLayoutMath.ResolveArea(null, false, 4, null, " ", false).Area);
+    }
+
+    [Fact]
+    public void NoStoredTypeKeepsTheExistingDefaults()
+    {
+        Assert.Equal(PlotAreaKind.Extents, PlotLayoutMath.ResolveArea(null, false, null, null, null, true).Area);
+        Assert.Equal(PlotAreaKind.Layout, PlotLayoutMath.ResolveArea(null, false, null, null, null, false).Area);
+        Assert.Equal(PlotAreaKind.Layout, PlotLayoutMath.ResolveArea(null, false, 0, null, null, false).Area);
+    }
+}
+
+/// <summary>D12: an empty PDF is a failure for every area, no longer a gated warning.</summary>
+public sealed class D12EmptyPdfGateTests
+{
+    [Fact]
+    public void AnEmptyPdfAlwaysFails()
+    {
+        foreach (var area in Enum.GetValues<PlotAreaKind>())
+        {
+            foreach (var planHadContent in new[] { true, false })
+            {
+                var d = PlotPdfGate.DecideCoverage(area, fit: true, planEstimateTiny: null, planHadContent, "empty", false, null, null, null);
+                Assert.True(d.Failed, $"empty pdf must fail for area={area} planHadContent={planHadContent}");
+                Assert.Equal(PlotPdfGate.ContentEmptyCode, d.FailureCode);
+                Assert.Null(d.Warning);
+            }
+        }
+    }
+
+    [Fact]
+    public void AnEmptyPdfOnAnUnfilledWindowStillFails()
+    {
+        // A window the caller expected to be small still must not produce an empty sheet.
+        var d = PlotPdfGate.DecideCoverage(PlotAreaKind.Window, fit: true, planEstimateTiny: true, planHadContent: false, "empty", false, null, null, null);
+        Assert.True(d.Failed);
+        Assert.Equal(PlotPdfGate.ContentEmptyCode, d.FailureCode);
+    }
+
+    [Fact]
+    public void AContentPdfStillWarnsOnlyWhenTinyOutsideTheGates()
+    {
+        var d = PlotPdfGate.DecideCoverage(PlotAreaKind.Layout, fit: true, planEstimateTiny: null, planHadContent: true, "ok", true, 0.2, 0.3, null);
+        Assert.False(d.Failed);
+        Assert.NotNull(d.Warning);
+    }
+
+    [Fact]
+    public void AnUnreadablePdfStillWarnsAndDoesNotFail()
+    {
+        var d = PlotPdfGate.DecideCoverage(PlotAreaKind.Window, fit: true, planEstimateTiny: null, planHadContent: true, "unavailable", false, null, null, "no page content");
+        Assert.False(d.Failed);
+        Assert.Equal(PlotPdfGate.SourceUnavailable, d.CoverageSource);
+        Assert.NotNull(d.Warning);
+    }
+}
+
+/// <summary>D12 plugin wiring guards.</summary>
+public sealed class D12StoredPlotAreaSourceGuards
+{
+    private static string PlotSource()
+        => File.ReadAllText(Path.Combine(PluginDispatchSyncTests.RepoPath("src", "Forge.Plugin"), "PluginCommandProcessor.Plot.cs"));
+
+    [Fact]
+    public void TheStoredPlotTypeFeedsAreaResolutionAndTheStoredWindow()
+    {
+        var source = PlotSource();
+        Assert.Contains("PlotLayoutMath.ResolveArea(", source, StringComparison.Ordinal);
+        Assert.Contains("layout.PlotWindowArea", source, StringComparison.Ordinal);
+        Assert.Contains("(int)layout.PlotType", source, StringComparison.Ordinal);
+        Assert.Contains("AcPlotType.View", source, StringComparison.Ordinal);
+    }
+}

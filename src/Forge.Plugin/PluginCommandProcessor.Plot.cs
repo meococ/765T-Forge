@@ -389,27 +389,34 @@ public sealed partial class PluginCommandProcessor
                 (storedSheetMm is { } sm ? $" ({sm.WidthMm:0.###} x {sm.HeightMm:0.###} mm)." : "."));
         }
 
-        PlotAreaKind area;
-        string areaSource;
-        if (requestedArea is { } explicitArea)
+        // fix-smoke-20261029-r2 D12: with no caller plotArea the layout's OWN stored plot type
+        // wins (AEON sheets store Window + a stored window; the old default silently plotted
+        // "layout" and produced an empty PDF). Stored type/window/view read is best-effort —
+        // an unreadable stored setup falls back to the previous defaults.
+        int? storedPlotType = null;
+        double[]? storedWindowBox = null;
+        string? storedViewName = null;
+        if (!isModel)
         {
-            area = explicitArea;
-            areaSource = "requested";
+            try
+            {
+                storedPlotType = (int)layout.PlotType;
+                var wa = layout.PlotWindowArea;
+                storedWindowBox = [wa.MinPoint.X, wa.MinPoint.Y, wa.MaxPoint.X, wa.MaxPoint.Y];
+                storedViewName = layout.PlotViewName;
+            }
+            catch
+            {
+                // Unreadable stored plot settings: the area resolution below uses defaults.
+            }
         }
-        else if (isModel)
+
+        var resolution = PlotLayoutMath.ResolveArea(requestedArea, isModel, storedPlotType, storedWindowBox, storedViewName, mediaChanged);
+        var area = resolution.Area;
+        var areaSource = resolution.Source;
+        if (area == PlotAreaKind.Window && window is null)
         {
-            area = PlotAreaKind.Extents;
-            areaSource = "default_model_extents";
-        }
-        else if (mediaChanged)
-        {
-            area = PlotAreaKind.Extents;
-            areaSource = "default_extents_because_paper_differs_from_layout";
-        }
-        else
-        {
-            area = PlotAreaKind.Layout;
-            areaSource = "default_layout";
+            window = resolution.Window;
         }
 
         if (area == PlotAreaKind.Layout && isModel)
@@ -484,13 +491,18 @@ public sealed partial class PluginCommandProcessor
                 case PlotAreaKind.Limits:
                     psv.SetPlotType(ps, AcPlotType.Limits);
                     break;
+                case PlotAreaKind.View:
+                    // D12: a stored named view — ps.PlotViewName already holds the layout's
+                    // stored view name via CopyFrom.
+                    psv.SetPlotType(ps, AcPlotType.View);
+                    break;
                 default:
                     psv.SetPlotType(ps, AcPlotType.Layout);
                     break;
             }
 
             var paper = ps.PlotPaperSize;
-            if (area == PlotAreaKind.Layout && orientationWord is null)
+            if (area is PlotAreaKind.Layout or PlotAreaKind.View && orientationWord is null)
             {
                 rotationDeg = RotationDegrees(ps.PlotRotation);
             }
@@ -519,8 +531,9 @@ public sealed partial class PluginCommandProcessor
                 psv.SetPlotRotation(ps, rotationDeg == 90 ? PlotRotation.Degrees090 : PlotRotation.Degrees000);
             }
 
-            if (area == PlotAreaKind.Layout)
+            if (area is PlotAreaKind.Layout or PlotAreaKind.View)
             {
+                // Layout and stored named views plot at the layout's own (stored) scale.
                 if (scaleRequested && !scaleSpec.Fit)
                 {
                     psv.SetUseStandardScale(ps, false);
@@ -528,7 +541,7 @@ public sealed partial class PluginCommandProcessor
                 }
                 else if (scaleRequested)
                 {
-                    warnings.Add("scale=fit does not apply to plotArea=layout; the layout plots at its own scale. Use plotArea=extents for fit-to-sheet.");
+                    warnings.Add($"scale=fit does not apply to plotArea={area.ToString().ToLowerInvariant()}; it plots at its own scale. Use plotArea=extents for fit-to-sheet.");
                 }
             }
             else
@@ -627,7 +640,7 @@ public sealed partial class PluginCommandProcessor
                 coverage = PlotLayoutMath.ComputeCoverage(areaBox, content);
             }
         }
-        else if (area == PlotAreaKind.Layout && content is { Length: 4 })
+        else if (area is PlotAreaKind.Layout or PlotAreaKind.View && content is { Length: 4 })
         {
             var rotated = readBack.RotationDeg % 180 != 0;
             var layoutFactor = readBack.UsesFit || readBack.CustomScale is not { } cs || cs[0] <= 0 || cs[1] <= 0 ? 1.0 : cs[0] / cs[1];
@@ -660,6 +673,8 @@ public sealed partial class PluginCommandProcessor
             paperUnits = validated.PlotPaperUnits.ToString(),
             plotArea = area.ToString().ToLowerInvariant(),
             plotAreaSource = areaSource,
+            storedPlotType,
+            storedViewName,
             window,
             plotAreaBox = areaBox,
             contentBox = content,
@@ -703,7 +718,7 @@ public sealed partial class PluginCommandProcessor
             }
             else
             {
-                RunLegacyPlotCommand(layoutName, isModel, viewer.PlotDevice, readBack, area, window, centered, args.PlotStyle, outputPath);
+                RunLegacyPlotCommand(layoutName, isModel, viewer.PlotDevice, readBack, area, window, storedViewName, centered, args.PlotStyle, outputPath);
             }
         }
         catch (System.Exception ex)
@@ -987,6 +1002,7 @@ public sealed partial class PluginCommandProcessor
         PlotReadBack readBack,
         PlotAreaKind area,
         double[]? window,
+        string? viewName,
         bool centered,
         string? plotStyle,
         string outputPath)
@@ -1014,6 +1030,11 @@ public sealed partial class PluginCommandProcessor
                     tokens.Add("Window");
                     tokens.Add(string.Create(CultureInfo.InvariantCulture, $"{window![0]},{window[1]}"));
                     tokens.Add(string.Create(CultureInfo.InvariantCulture, $"{window[2]},{window[3]}"));
+                    break;
+                case PlotAreaKind.View:
+                    // -PLOT asks for the view name right after the area choice.
+                    tokens.Add("View");
+                    tokens.Add(viewName!);
                     break;
                 default:
                     tokens.Add(area.ToString());

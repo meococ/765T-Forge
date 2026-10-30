@@ -11,7 +11,10 @@ public enum PlotAreaKind
     Extents,
     Display,
     Limits,
-    Window
+    Window,
+
+    /// <summary>A named view — only reachable via a layout's stored plot type (D12), never a caller word.</summary>
+    View
 }
 
 /// <summary>Parsed plot scale: fit-to-sheet, or paper units : drawing units.</summary>
@@ -33,6 +36,9 @@ public sealed record PlotFitResult(double PaperUnitsPerDrawingUnit, double FillX
 
 /// <summary>Content-vs-area coverage: how much of the plotted area the drawing's own geometry actually occupies.</summary>
 public sealed record PlotCoverage(double ContentFillX, double ContentFillY, double AreaFraction, bool LooksTiny, string? Warning);
+
+/// <summary>D12: how the plotted area was chosen and the window to apply when it is a stored Window.</summary>
+public sealed record PlotAreaResolution(PlotAreaKind Area, string Source, double[]? Window);
 
 /// <summary>fix-smoke-20261029 D4: what forge_plot_to_pdf must do so AutoCAD's plot validator accepts the layout.</summary>
 public enum PlotLayoutAction
@@ -165,6 +171,55 @@ public static class PlotLayoutMath
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// fix-smoke-20261029-r2 D12: chooses the plot area. An explicit caller area always wins;
+    /// Model keeps the extents default; a PAPER layout with no caller area falls back to its
+    /// own stored plot type (AcPlotType int: Display=1, Extents=2, Limits=3, View=4, Window=5,
+    /// Layout=6 — stored Window carries the layout's stored window box, stored View needs its
+    /// stored view name), and only when the stored type is unusable do the media/default rules
+    /// apply. The stored-window case is what the r2 smoke missed: AEON sheets store Window and
+    /// the old code silently plotted "layout" into an empty PDF.
+    /// </summary>
+    public static PlotAreaResolution ResolveArea(
+        PlotAreaKind? requested,
+        bool isModel,
+        int? storedPlotType,
+        double[]? storedWindow,
+        string? storedViewName,
+        bool mediaChanged)
+    {
+        if (requested is { } r)
+        {
+            return new PlotAreaResolution(r, "requested", null);
+        }
+
+        if (isModel)
+        {
+            return new PlotAreaResolution(PlotAreaKind.Extents, "default_model_extents", null);
+        }
+
+        var storedKind = storedPlotType switch
+        {
+            1 => PlotAreaKind.Display,
+            2 => PlotAreaKind.Extents,
+            3 => PlotAreaKind.Limits,
+            4 when !string.IsNullOrWhiteSpace(storedViewName) => PlotAreaKind.View,
+            5 when storedWindow is { Length: 4 } w && w[2] - w[0] > 0 && w[3] - w[1] > 0 => PlotAreaKind.Window,
+            6 => PlotAreaKind.Layout,
+            _ => (PlotAreaKind?)null
+        };
+
+        if (storedKind is { } kind)
+        {
+            return new PlotAreaResolution(kind, "stored", kind == PlotAreaKind.Window ? storedWindow : null);
+        }
+
+        return new PlotAreaResolution(
+            mediaChanged ? PlotAreaKind.Extents : PlotAreaKind.Layout,
+            mediaChanged ? "default_extents_because_paper_differs_from_layout" : "default_layout",
+            null);
     }
 
     /// <summary>

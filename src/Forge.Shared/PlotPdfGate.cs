@@ -71,17 +71,18 @@ public static class PlotPdfGate
     }
 
     /// <summary>
-    /// Coverage gate (FIX-PLAN §D5 step 4).
+    /// Coverage gate (FIX-PLAN §D5 step 4, D12).
     /// <list type="bullet">
-    /// <item>extents + fit: a tiny or empty PDF is a failure (an empty PDF of a drawing with no content is only a warning).</item>
-    /// <item>window: a small result may be what the caller asked for; it fails only when the plan expected a filled sheet.</item>
+    /// <item>empty PDF: always a failure (D12 — a sheet with no ink is not a plot, whatever was planned).</item>
+    /// <item>extents + fit: a tiny PDF is a failure.</item>
+    /// <item>window: a small result may be what the caller asked for; tiny fails only when the plan expected a filled sheet.</item>
     /// <item>other areas and explicit scales: warnings only.</item>
     /// <item>PDF unreadable: looksTiny is null and a warning says coverage is not verified.</item>
     /// </list>
     /// </summary>
     /// <param name="pdfStatus">PdfContentBox status: "ok", "empty" or "unavailable".</param>
     /// <param name="planEstimateTiny">The plan-time estimate (null when there was none).</param>
-    /// <param name="planHadContent">False when the drawing had nothing to plot at plan time.</param>
+    /// <param name="planHadContent">False when the drawing had nothing to plot at plan time (kept for signature stability; since D12 an empty PDF fails regardless).</param>
     public static PlotCoverageDecision DecideCoverage(
         PlotAreaKind area,
         bool fit,
@@ -112,11 +113,10 @@ public static class PlotPdfGate
 
             case "empty":
             {
+                // smoke-r2 D12: nothing on the sheet is never a success, whatever the plan
+                // expected — the tool produced no output and must not report ok=true.
                 var text = "The PDF has no visible marks: nothing was plotted.";
-                var fails = (gated && planHadContent) || windowExpectedFilled;
-                return fails
-                    ? new PlotCoverageDecision(SourcePdfEmpty, true, 0, 0, ContentEmptyCode, text, null)
-                    : new PlotCoverageDecision(SourcePdfEmpty, true, 0, 0, null, null, text);
+                return new PlotCoverageDecision(SourcePdfEmpty, true, 0, 0, ContentEmptyCode, text, null);
             }
 
             default:
