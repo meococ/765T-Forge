@@ -71,6 +71,60 @@ public sealed class D11ImportMergeTests
         Assert.Null(result.Error);
         Assert.Same(verification, result.Verification);
     }
+
+    // review-wp2-r1 finding 10 (D11): a partial import is success-with-warning — the
+    // warning names BOTH counts; it must never stay silent.
+    [Fact]
+    public void PartialImportWarnsWhenCreatedIsBelowSourceCount()
+    {
+        var warning = DrawingImport.PartialImportWarning(DrawingImportMode.Merge, 7, 42, 0);
+        Assert.NotNull(warning);
+        Assert.Contains("7", warning);
+        Assert.Contains("42", warning);
+    }
+
+    [Fact]
+    public void PartialImportWarnsOnSkippedOrUntransformedClones()
+    {
+        var warning = DrawingImport.PartialImportWarning(DrawingImportMode.Merge, 42, 42, 3);
+        Assert.NotNull(warning);
+        Assert.Contains("42", warning);
+        Assert.Contains("3", warning);
+        Assert.Contains("skipped", warning, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void FullImportStaysSilent()
+    {
+        Assert.Null(DrawingImport.PartialImportWarning(DrawingImportMode.Merge, 42, 42, 0));
+        Assert.Null(DrawingImport.PartialImportWarning(DrawingImportMode.Merge, 50, 42, 0));
+        Assert.Null(DrawingImport.PartialImportWarning(DrawingImportMode.Block, 5, 5, 0));
+    }
+
+    [Fact]
+    public void XrefNeverWarnsOnCreatedVersusSourceCount()
+    {
+        // An xref copies nothing into the drawing by design — 0 of N is not a partial import.
+        Assert.Null(DrawingImport.PartialImportWarning(DrawingImportMode.Xref, 0, 42, 0));
+    }
+
+    [Fact]
+    public void PartialImportIsStillSuccessWithWarning()
+    {
+        // The contract: verified=true (something landed) means ok=true; the partial warning
+        // rides in the data's warnings list — never a typed failure.
+        var verification = new ForgeVerification { Attempted = true, Passed = true, Message = "7 read back" };
+        var warnings = new List<string>();
+        if (DrawingImport.PartialImportWarning(DrawingImportMode.Merge, 7, 42, 0) is { } w)
+        {
+            warnings.Add(w);
+        }
+
+        var result = DrawingImport.ImportResult("cmd-3", true, new { created = 7, warnings }, verification, "unused");
+        Assert.True(result.Ok);
+        Assert.Null(result.Error);
+        Assert.Single(warnings);
+    }
 }
 
 /// <summary>D11 plugin wiring guards: the merge inserts into model space regardless of CTAB.</summary>
@@ -109,5 +163,17 @@ public sealed class D11ImportMergeSourceGuards
         Assert.Contains("DrawingImport.ImportResult(", source, StringComparison.Ordinal);
         // The old silent success is gone.
         Assert.DoesNotContain("Passed = outcome.Created > 0 || outcome.InsertHandle is not null", source);
+    }
+
+    [Fact]
+    public void DocImportWarnsOnPartialImport()
+    {
+        var source = ImportSource();
+        Assert.Contains("DrawingImport.PartialImportWarning(", source, StringComparison.Ordinal);
+        Assert.Contains("outcome.SkippedOrUntransformed", source, StringComparison.Ordinal);
+        // The merge loop must count skipped primary clones (uncloned / not in model space).
+        var body = MethodBody(source, "private static ImportOutcome ImportMerge(");
+        Assert.Contains("skipped++", body, StringComparison.Ordinal);
+        Assert.Contains("!pair.IsCloned", body, StringComparison.Ordinal);
     }
 }

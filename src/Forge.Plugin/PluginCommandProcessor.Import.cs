@@ -371,6 +371,7 @@ public sealed partial class PluginCommandProcessor
                 existingReferences = outcome.ExistingReferences,
                 xrefPath = outcome.XrefPath,
                 created = outcome.Created,
+                skippedOrUntransformed = outcome.SkippedOrUntransformed > 0 ? outcome.SkippedOrUntransformed : (int?)null,
 
                 // An xref copies nothing into this drawing: its counts are the source inventory.
                 countsByType = mode == DrawingImportMode.Xref ? sourceTypes : outcome.CountsByType,
@@ -404,6 +405,14 @@ public sealed partial class PluginCommandProcessor
                 ReadBack = new { created = outcome.Created, extents = outcome.Extents, insertHandle = outcome.InsertHandle }
             };
 
+            // review-wp2-r1 finding 10 (D11): a partial import is success-with-warning — when
+            // fewer entities land than the source model space held, or clones were skipped or
+            // untransformed, the warning names BOTH counts.
+            if (DrawingImport.PartialImportWarning(mode, outcome.Created, sourceCount, outcome.SkippedOrUntransformed) is { } partialWarning)
+            {
+                warnings.Add(partialWarning);
+            }
+
             return DrawingImport.ImportResult(
                 command.Id,
                 verified,
@@ -435,7 +444,8 @@ public sealed partial class PluginCommandProcessor
         int? ExistingReferences,
         string? XrefPath,
         string[]? Handles,
-        bool HandlesTruncated);
+        bool HandlesTruncated,
+        int SkippedOrUntransformed);
 
     private static ImportOutcome ImportMerge(Database db, Database side, double[] position, double scale, double rotationDeg, double[] basePoint, DocImportArgs args, List<string> warnings)
     {
@@ -470,6 +480,7 @@ public sealed partial class PluginCommandProcessor
         var handles = args.ReturnHandles ? new List<string>() : null;
         var truncated = false;
         var created = 0;
+        var skipped = 0;
         var transformFailures = 0;
         using var tr = db.TransactionManager.StartTransaction();
         var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
@@ -484,13 +495,20 @@ public sealed partial class PluginCommandProcessor
         // pulled in as part of a nested definition keep their definition coordinates.
         foreach (IdPair pair in mapping)
         {
-            if (!pair.IsPrimary || !pair.IsCloned)
+            if (!pair.IsPrimary)
             {
+                continue;
+            }
+
+            if (!pair.IsCloned)
+            {
+                skipped++;
                 continue;
             }
 
             if (tr.GetObject(pair.Value, OpenMode.ForWrite) is not Entity clone || clone.BlockId != modelSpaceId)
             {
+                skipped++;
                 continue;
             }
 
@@ -550,7 +568,7 @@ public sealed partial class PluginCommandProcessor
             warnings.Add("The source model space was empty (paper-space content is not imported by merge).");
         }
 
-        return new ImportOutcome(created, types, layers, extents, null, null, false, null, null, handles?.ToArray(), truncated);
+        return new ImportOutcome(created, types, layers, extents, null, null, false, null, null, handles?.ToArray(), truncated, skipped + transformFailures);
     }
 
     private static ImportOutcome ImportBlock(Database db, Database side, string blockName, ObjectId existingId, double[] position, double scale, double rotationDeg, DocImportArgs args, List<string> warnings)
@@ -659,7 +677,7 @@ public sealed partial class PluginCommandProcessor
             }
 
             tr.Commit();
-            return new ImportOutcome(created, types, layers, extents, definition.Handle.ToString(), insertHandle, replaced, existingRefs, null, null, false);
+            return new ImportOutcome(created, types, layers, extents, definition.Handle.ToString(), insertHandle, replaced, existingRefs, null, null, false, 0);
         }
         catch
         {
@@ -713,7 +731,7 @@ public sealed partial class PluginCommandProcessor
         tr.Commit();
         var types = new SortedDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var layers = new SortedDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        return new ImportOutcome(0, types, layers, extents, definition.Handle.ToString(), insertHandle, false, null, xrefPath, null, false);
+        return new ImportOutcome(0, types, layers, extents, definition.Handle.ToString(), insertHandle, false, null, xrefPath, null, false, 0);
     }
 
     /// <summary>Renames/merges layers in the side database before the native insert copies them.</summary>

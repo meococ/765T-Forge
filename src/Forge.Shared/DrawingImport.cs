@@ -73,6 +73,25 @@ public static class DrawingImport
         };
 
     /// <summary>
+    /// review-wp2-r1 finding 10 (D11): a partial import is success-with-warning, never silent.
+    /// When fewer entities land than the source model space held, or clones were skipped or
+    /// left untransformed, the warning names BOTH counts (created of sourceCount). An xref is
+    /// exempt: it copies nothing into the drawing by design.
+    /// </summary>
+    public static string? PartialImportWarning(DrawingImportMode mode, int created, int sourceCount, int skippedOrUntransformed)
+    {
+        if (mode == DrawingImportMode.Xref || (created >= sourceCount && skippedOrUntransformed <= 0))
+        {
+            return null;
+        }
+
+        var detail = skippedOrUntransformed > 0
+            ? $" ({skippedOrUntransformed} clone(s) skipped or left untransformed — proxied or non-entity content?)"
+            : "";
+        return $"Partial import: {created} of {sourceCount} source model-space entities landed in the target{detail}. Inspect the drawing before relying on the import.";
+    }
+
+    /// <summary>
     /// D11 result composition: success only when verification passed; otherwise
     /// <see cref="ImportVerificationFailedCode"/> carrying the same data and verification,
     /// so callers see the real read-back instead of a silent ok=true.
