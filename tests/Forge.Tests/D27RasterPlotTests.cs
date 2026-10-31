@@ -176,6 +176,22 @@ resolution{
     }
 
     [Fact]
+    public void Plot_RefreshesDeviceList_BeforeListingVerify()
+    {
+        // live-r7: GetPlotDeviceList is built once per session; RefreshCode.All alone
+        // could not see a pc3 dropped mid-session. The dedicated devices refresh plus
+        // the validator's own array rebuild must run BEFORE the listing verify.
+        var source = File.ReadAllText(Path.Combine(PluginDispatchSyncTests.RepoPath("src", "Forge.Plugin"), "PluginCommandProcessor.Plot.cs"));
+        var copyAt = source.IndexOf("File.Copy(viewer.SourcePc3, rasterPc3Path, overwrite: true)", StringComparison.Ordinal);
+        var devRefreshAt = source.IndexOf("RefreshCode.RefreshDevicesList", StringComparison.Ordinal);
+        var psvRefreshAt = source.IndexOf("psv.RefreshLists(ps)", devRefreshAt, StringComparison.Ordinal);
+        var listedAt = source.IndexOf("var listed = psv.GetPlotDeviceList()", StringComparison.Ordinal);
+        Assert.True(devRefreshAt > copyAt, "RefreshDevicesList must run after the clone copy");
+        Assert.True(psvRefreshAt > devRefreshAt, "psv.RefreshLists must run after RefreshDevicesList");
+        Assert.True(listedAt > psvRefreshAt, "the GetPlotDeviceList verify must run after both refreshes");
+    }
+
+    [Fact]
     public void Apply_PortraitMedium_FlipsLandscapeFlag()
     {
         var patched = RasterPc3.Apply(PngPc3Text, 1240, 1754, 150, out var err);

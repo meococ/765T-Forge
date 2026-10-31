@@ -406,9 +406,12 @@ public sealed partial class PluginCommandProcessor
                         try
                         {
                             File.Copy(viewer.SourcePc3, rasterPc3Path, overwrite: true);
-                            // a freshly dropped pc3 is invisible until the device list
-                            // refreshes — same proof PrepareNoViewerDevice runs on its clone.
-                            PlotConfigManager.RefreshList(RefreshCode.All);
+                            // live-r7: GetPlotDeviceList is built once per session and
+                            // RefreshCode.All does NOT rebuild it for a pc3 dropped
+                            // mid-session — the dedicated devices refresh plus the
+                            // validator's own array rebuild are what make it visible.
+                            PlotConfigManager.RefreshList(RefreshCode.RefreshDevicesList);
+                            psv.RefreshLists(ps);
                             var listed = psv.GetPlotDeviceList()
                                 .Cast<string>()
                                 .Any(d => string.Equals(d, Path.GetFileName(rasterPc3Path), StringComparison.OrdinalIgnoreCase));
