@@ -14,8 +14,25 @@ namespace Forge.Shared;
 /// </summary>
 public static class RasterPc3
 {
-    /// <summary>Deterministic medium name injected into the clone pc3 and resolved like any other media.</summary>
-    public static string MediaName(int wPx, int hPx) => $"Forge_{wPx}x{hPx}px";
+    /// <summary>
+    /// The canonical name the raster driver gives a user-defined medium of wPx x hPx —
+    /// live-r9 proved user media live in the PMP under exactly this name form, and the
+    /// pc3's selected size{} references it. (An earlier Forge_WxHpx name never listed:
+    /// renaming the pc3's selection does not create a medium.)
+    /// </summary>
+    public static string MediaName(int wPx, int hPx)
+        => $"UserDefinedRaster ({wPx:0.00} x {hPx:0.00}Pixels)";
+
+    /// <summary>The localized/display form the PMP stores alongside the canonical name.</summary>
+    public static string LocalizedName(int wPx, int hPx)
+        => $"User 1 ({wPx:0.00} x {hPx:0.00} Pixels)";
+
+    /// <summary>The media_description_name the PMP's size{} entry points at (and its description{} entry is named).</summary>
+    public static string DescriptionName(int wPx, int hPx)
+    {
+        var orient = wPx >= hPx ? "Landscape" : "Portrait";
+        return $"UserDefinedRaster {orient} {wPx:0.00}W x {hPx:0.00}H - (0, 0) x ({wPx - 1}, {hPx - 1}) ={(long)wPx * hPx} Pixels";
+    }
 
     /// <summary>Deterministic resolution name for the resolution block.</summary>
     public static string ResolutionName(int dpi) => $"Forge_{dpi}dpi";
@@ -92,12 +109,114 @@ public static class RasterPc3
         return t;
     }
 
+    /// <summary>
+    /// Injects a user-defined raster medium into a PMP text: one numbered entry in
+    /// udm{media{description{}} (the bounds) plus one numbered entry in udm{media{size{}}
+    /// (the selectable name pointing at it) — the two coordinated lists the plot wizard
+    /// maintains. Idempotent: when the canonical name is already present the text is
+    /// returned unchanged with injected=false. Returns null + error when the expected
+    /// list structure is absent (not a raster pmp).
+    /// </summary>
+    public static string? EnsurePmpMedium(string pmpText, int wPx, int hPx, out bool injected, out string? error)
+    {
+        injected = false;
+        error = null;
+        if (wPx <= 0 || hPx <= 0)
+        {
+            error = $"invalid raster target {wPx}x{hPx}px";
+            return null;
+        }
+
+        var canon = MediaName(wPx, hPx);
+        var descName = DescriptionName(wPx, hPx);
+        // name= is anchored at line start: media_description_name=" ends in name=" too,
+        // so an unanchored Contains would see the size entry's back-reference.
+        var sizePresent = pmpText.Contains($"\n    name=\"{canon}", StringComparison.Ordinal);
+        var descPresent = pmpText.Contains($"\n    name=\"{descName}", StringComparison.Ordinal);
+        if (sizePresent && descPresent)
+        {
+            return pmpText;
+        }
+        if (sizePresent != descPresent)
+        {
+            error = $"pmp is half-injected for '{canon}' (size entry: {sizePresent}, description entry: {descPresent}); refusing to write over a corrupt state — restore the .forge-bak";
+            return null;
+        }
+
+        // Everything is scoped to udm{...}: mod{/del{ precede it and hidden{ follows it
+        // in the real PMP; a first-match anchor outside this range would inject a user
+        // medium into the stock or hidden lists. udm{ sits at column 0, so its own close
+        // is the first 0-indent "}" after it.
+        var udmAt = -1;
+        for (var i = pmpText.IndexOf("udm{", StringComparison.Ordinal); i >= 0;
+             i = pmpText.IndexOf("udm{", i + 1, StringComparison.Ordinal))
+        {
+            if (i == 0 || pmpText[i - 1] == '\n') // a value could literally contain "udm{" — require line start
+            {
+                udmAt = i;
+                break;
+            }
+        }
+        var udmEnd = udmAt < 0 ? -1 : pmpText.IndexOf("\n}", udmAt, StringComparison.Ordinal);
+        if (udmAt < 0 || udmEnd < 0)
+        {
+            error = "pmp text has no udm{} user-media section (not a raster pmp?)";
+            return null;
+        }
+
+        var sizeAt = pmpText.IndexOf("\n  size{", udmAt, StringComparison.Ordinal);
+        var descAt = pmpText.IndexOf("\n  description{", udmAt, StringComparison.Ordinal);
+        // Each list's own close is the FIRST 2-indent "}" after it opens — numbered
+        // entries close at 3-indent ("\n   }"), which cannot match "\n  }".
+        var sizeClose = sizeAt < 0 ? -1 : pmpText.IndexOf("\n  }", sizeAt, StringComparison.Ordinal);
+        var descClose = descAt < 0 ? -1 : pmpText.IndexOf("\n  }", descAt, StringComparison.Ordinal);
+        if (sizeAt < 0 || sizeAt >= udmEnd || sizeClose < 0 || sizeClose >= descAt
+            || descAt < 0 || descAt >= udmEnd || descClose < 0 || descClose >= udmEnd)
+        {
+            error = "pmp udm media size/description lists are missing, misordered, or unterminated";
+            return null;
+        }
+
+        var nextSize = NextIndex(pmpText, sizeAt, sizeClose);
+        var nextDesc = NextIndex(pmpText, descAt, descClose);
+        if (nextSize < 0 || nextDesc < 0)
+        {
+            error = "could not locate the next size/description entry index in the pmp";
+            return null;
+        }
+
+        var sizeEntry =
+            $"\n   {nextSize}{{\n    caps_type=2\n    name=\"{canon}\n    localized_name=\"{LocalizedName(wPx, hPx)}\n" +
+            $"    media_description_name=\"{descName}\n    media_group=16\n    landscape_mode={(wPx >= hPx ? "TRUE" : "FALSE")}\n   }}";
+        var descEntry =
+            $"\n   {nextDesc}{{\n    caps_type=2\n    name=\"{descName}\n    media_bounds_urx={(double)wPx}\n    media_bounds_ury={(double)hPx}\n" +
+            $"    printable_bounds_llx=0.0\n    printable_bounds_lly=0.0\n    printable_bounds_urx={(double)(wPx - 1)}\n" +
+            $"    printable_bounds_ury={(double)(hPx - 1)}\n    printable_area={(double)wPx * hPx}\n    dimensional=FALSE\n   }}";
+
+        // One-pass splice at both insertion points (sizeClose < descClose): computing
+        // both on the original text avoids the index drift of sequential inserts.
+        injected = true;
+        return pmpText[..sizeClose] + sizeEntry + pmpText[sizeClose..descClose] + descEntry + pmpText[descClose..];
+    }
+
+    private static int NextIndex(string text, int listAt, int endAt)
+    {
+        var last = -1;
+        var m = Regex.Match(text[listAt..endAt], "\\n   (\\d+)\\{");
+        while (m.Success)
+        {
+            last = int.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+            m = m.NextMatch();
+        }
+        return last + 1;
+    }
+
     /// <summary>Post-write check: the patched text actually carries the requested medium + resolution.</summary>
     public static bool Verify(string pc3Text, int wPx, int hPx, int dpi)
     {
         // no closing quote on the name check: the patch preserves the source's own
-        // terminator, and the real pc3 terminates names at end-of-line. The deterministic
-        // Forge_WxHpx name embeds exact dims, so a prefix match cannot collide.
+        // terminator, and the real pc3 terminates names at end-of-line. The canonical
+        // UserDefinedRaster name embeds exact dims, so a prefix match cannot collide.
         return pc3Text.Contains($"name=\"{MediaName(wPx, hPx)}", StringComparison.Ordinal)
             && pc3Text.Contains($"urx={(double)wPx}", StringComparison.Ordinal)
             && pc3Text.Contains($"effective_resolution_x={(double)dpi}", StringComparison.Ordinal);

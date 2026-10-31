@@ -326,7 +326,8 @@ public sealed partial class PluginCommandProcessor
         string LayoutMedia,
         bool MediaChanged,
         (int W, int H)? RasterPx,
-        string? RasterDevice);
+        string? RasterDevice,
+        string? PmpMedium);
 
     /// <summary>
     /// review-wp2-r1 finding 4 (D9): device media list, stored-paper mapping and paperSize
@@ -359,13 +360,15 @@ public sealed partial class PluginCommandProcessor
             string? mappedFromMedia = null;
             (double WidthMm, double HeightMm)? storedSheetMm = null;
 
-            // TOOL-GAP #27: a raster plot needs a pixel medium that no pc3 ships — rewrite
-            // the stored user-defined size inside the Forge clone BEFORE the device is
-            // registered, so the validator's media list exposes our Forge_WxHpx medium.
+            // TOOL-GAP #27: a raster plot needs a pixel medium that no pc3 ships — the
+            // Forge clone selects a UserDefinedRaster (WxHPixels) medium injected into the
+            // device's pmp BEFORE the validator rebuilds the media list (live-r9: renaming
+            // the pc3's stored size alone never creates a listable medium).
             var isPng = string.Equals(args.OutputFormat?.Trim(), "png", StringComparison.OrdinalIgnoreCase);
             var dpi = args.Dpi ?? 150;
             (int W, int H)? rasterPx = null;
             string? rasterDevice = null;
+            string? pmpMedium = null;
             if (isPng)
             {
                 var sheetMm = isModel
@@ -463,6 +466,45 @@ public sealed partial class PluginCommandProcessor
                                 || !RasterPc3.Verify(verifyText, rasterPx.Value.W, rasterPx.Value.H, dpi))
                             {
                                 rasterIoError = "did not read back with the expected medium/dpi";
+                            }
+                            else
+                            {
+                                // live-r9: the canonical media list comes from the device's
+                                // PMP, not the pc3 — renaming the pc3's selected size{} only
+                                // points the selection. Inject the UserDefinedRaster size +
+                                // description entries into the pmp (idempotent) so the
+                                // validator's media list below actually contains the medium.
+                                var pmpPath = Path.Combine(
+                                    Path.GetDirectoryName(rasterPc3Path)!,
+                                    "PMP Files",
+                                    Path.GetFileNameWithoutExtension(viewer.SourcePc3) + ".pmp");
+                                if (!File.Exists(pmpPath) || !Pc3File.TryRead(File.ReadAllBytes(pmpPath), out var pmpText, out var pmpHeader))
+                                {
+                                    rasterIoError = $"could not decode the raster pmp '{pmpPath}'";
+                                }
+                                else if (RasterPc3.EnsurePmpMedium(pmpText, rasterPx.Value.W, rasterPx.Value.H, out var pmpInjected, out var pmpError) is not { } patchedPmp)
+                                {
+                                    rasterIoError = $"pmp medium injection failed: {pmpError}";
+                                }
+                                else if (pmpInjected)
+                                {
+                                    // the pmp is shared machine state (every pc3 on this
+                                    // driver reads it) — preserve the pristine file once.
+                                    var pmpBak = pmpPath + ".forge-bak";
+                                    if (!File.Exists(pmpBak))
+                                    {
+                                        File.Copy(pmpPath, pmpBak);
+                                    }
+                                    // temp+move: a mid-write kill must not leave a torn pmp
+                                    var pmpTmp = pmpPath + ".forge-tmp";
+                                    File.WriteAllBytes(pmpTmp, Pc3File.Write(patchedPmp, pmpHeader));
+                                    File.Move(pmpTmp, pmpPath, overwrite: true);
+                                    pmpMedium = "created";
+                                }
+                                else
+                                {
+                                    pmpMedium = "present";
+                                }
                             }
                         }
                     }
@@ -614,7 +656,8 @@ public sealed partial class PluginCommandProcessor
                 layoutMedia,
                 !isPng && !string.Equals(canonicalMedia, layoutMedia, StringComparison.Ordinal),
                 rasterPx,
-                rasterDevice);
+                rasterDevice,
+                pmpMedium);
             ps = null;
             return null;
         }
@@ -671,6 +714,7 @@ public sealed partial class PluginCommandProcessor
         var storedSheetMm = media.StoredSheetMm;
         var mediaChanged = media.MediaChanged;
         var rasterPx = media.RasterPx;
+        var pmpMedium = media.PmpMedium;
         var isPng = string.Equals(args.OutputFormat?.Trim(), "png", StringComparison.OrdinalIgnoreCase);
         var rasterDpi = args.Dpi ?? 150;
         var plotDevice = media.RasterDevice ?? viewer.PlotDevice;
@@ -1011,6 +1055,7 @@ public sealed partial class PluginCommandProcessor
             outputFormat = isPng ? "png" : "pdf",
             dpi = isPng ? rasterDpi : (int?)null,
             rasterPixels = rasterPx is { } rp ? new[] { rp.W, rp.H } : null,
+            pmpMedium,
             mediaSource,
             mediaMapped = mappedFromMedia is null ? null : new { from = mappedFromMedia, to = canonicalMedia },
             layoutMedia,

@@ -88,8 +88,9 @@ custom{
     {
         var patched = RasterPc3.Apply(PngPc3Text, 2480, 1754, 150, out var err);
         Assert.Null(err);
-        // the real file's names are unterminated — the patch preserves that form
-        Assert.Contains("name=\"Forge_2480x1754px", patched, StringComparison.Ordinal);
+        // the real file's names are unterminated — the patch preserves that form, and the
+        // selected size now points at the driver's own user-medium name convention
+        Assert.Contains("name=\"UserDefinedRaster (2480.00 x 1754.00Pixels)", patched, StringComparison.Ordinal);
         // 0-indexed printable bounds
         Assert.Contains("actual_printable_bounds_urx=2479", patched, StringComparison.Ordinal);
         Assert.Contains("printable_bounds_ury=1753", patched, StringComparison.Ordinal);
@@ -107,6 +108,133 @@ custom{
         Assert.DoesNotContain("Sun_Hi-Res", patched, StringComparison.Ordinal);
         Assert.True(RasterPc3.Verify(patched, 2480, 1754, 150));
         Assert.False(RasterPc3.Verify(PngPc3Text, 2480, 1754, 150), "unpatched text must not verify");
+    }
+
+    // The REAL PublishToWeb PNG.pmp layout (zlib body decoded from PMP Files\):
+    // meta{ mod{ del{ udm{media{size{ N{...} } description{ N{...} }}} hidden{ — the
+    // udm size list holds the selectable user names, description the bounds, linked by
+    // media_description_name. mod{ may itself carry populated size{/description{ lists
+    // (stock media); hidden{ trails the file. Injection must stay inside udm{...}.
+    private const string PmpText = """
+meta{
+ user_defined_model_basename="
+}
+mod{
+ media{
+  size{
+   0{
+    caps_type=2
+    name="Sun_Hi-Res_(4000.00_x_3000.00Pixels)
+    localized_name="Sun_Hi-Res (4000.00 x 3000.00 Pixels)
+    media_description_name="Sun_Hi-Res Landscape 4000.00W x 3000.00H - (0, 0) x (3999, 2999) =12000000 Pixels
+    media_group=16
+    landscape_mode=TRUE
+   }
+  }
+  description{
+   0{
+    caps_type=2
+    name="Sun_Hi-Res Landscape 4000.00W x 3000.00H - (0, 0) x (3999, 2999) =12000000 Pixels
+    media_bounds_urx=4000.0
+    media_bounds_ury=3000.0
+    dimensional=FALSE
+   }
+  }
+ }
+}
+del{
+}
+udm{
+ calibration{
+  _x=1.0
+ }
+ media{
+  abilities="500505500500505555000005550000000550000500000500555
+  size_max_x=320000.00000
+  size{
+   0{
+    caps_type=2
+    name="UserDefinedRaster (1362.00 x 962.00Pixels)
+    localized_name="User 1 (1362.00 x 962.00 Pixels)
+    media_description_name="UserDefinedRaster Landscape 1362.00W x 962.00H - (0, 0) x (1361, 961) =1310244 Pixels
+    media_group=16
+    landscape_mode=TRUE
+   }
+  }
+  description{
+   0{
+    caps_type=2
+    name="UserDefinedRaster Landscape 1362.00W x 962.00H - (0, 0) x (1361, 961) =1310244 Pixels
+    media_bounds_urx=1362.0
+    media_bounds_ury=962.0
+    printable_bounds_llx=0.0
+    printable_bounds_lly=0.0
+    printable_bounds_urx=1361.0
+    printable_bounds_ury=961.0
+    printable_area=1310244.0000
+    dimensional=FALSE
+   }
+  }
+ }
+}
+hidden{
+ media{
+  abilities="500505500500505555000005550000000550000500000500555
+  caps_state="000000000000000000000000000000000000000000000000000
+ }
+}
+""";
+
+    [Fact]
+    public void EnsurePmpMedium_InjectsSizeAndDescription()
+    {
+        var patched = RasterPc3.EnsurePmpMedium(PmpText, 5400, 3600, out var injected, out var err);
+        Assert.Null(err);
+        Assert.True(injected);
+        Assert.NotNull(patched);
+        // the selectable name uses the driver's own convention and a fresh index
+        Assert.Contains("1{\n    caps_type=2\n    name=\"UserDefinedRaster (5400.00 x 3600.00Pixels)", patched, StringComparison.Ordinal);
+        Assert.Contains("localized_name=\"User 1 (5400.00 x 3600.00 Pixels)", patched, StringComparison.Ordinal);
+        // the description entry carries the real bounds (media = dims, printable = 0-indexed)
+        Assert.Contains("name=\"UserDefinedRaster Landscape 5400.00W x 3600.00H - (0, 0) x (5399, 3599) =19440000 Pixels", patched, StringComparison.Ordinal);
+        Assert.Contains("media_bounds_urx=5400", patched, StringComparison.Ordinal);
+        Assert.Contains("printable_bounds_urx=5399", patched, StringComparison.Ordinal);
+        Assert.Contains("landscape_mode=TRUE", patched, StringComparison.Ordinal);
+        // injection lands inside udm{...} — never into mod{ (stock) or after hidden{
+        var udmAt = patched.IndexOf("udm{", StringComparison.Ordinal);
+        var udmEnd = patched.IndexOf("\n}", udmAt, StringComparison.Ordinal);
+        Assert.InRange(patched.IndexOf("UserDefinedRaster (5400.00 x 3600.00Pixels)", StringComparison.Ordinal), udmAt, udmEnd);
+        Assert.InRange(patched.IndexOf("UserDefinedRaster Landscape 5400.00W", StringComparison.Ordinal), udmAt, udmEnd);
+        // existing entries and surrounding sections survive untouched
+        Assert.Contains("UserDefinedRaster (1362.00 x 962.00Pixels)", patched, StringComparison.Ordinal);
+        Assert.Contains("Sun_Hi-Res_(4000.00_x_3000.00Pixels)", patched, StringComparison.Ordinal);
+        Assert.Contains("hidden{", patched, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EnsurePmpMedium_RefusesHalfInjectedState()
+    {
+        // size entry present, description missing (e.g. a killed/bad earlier write):
+        // the idempotent skip must not cement this — it is a typed error, not a patch.
+        var half = PmpText.Replace(
+            "media_description_name=\"UserDefinedRaster Landscape 1362.00W",
+            "media_description_name=\"UserDefinedRaster Landscape 5400.00W x 3600.00H - (0, 0) x (5399, 3599) =19440000 Pixels\n   }\n   1{\n    caps_type=2\n    name=\"UserDefinedRaster (5400.00 x 3600.00Pixels)\n    media_description_name=\"UserDefinedRaster Landscape 5400.00W");
+        Assert.Null(RasterPc3.EnsurePmpMedium(half, 5400, 3600, out var injected, out var err));
+        Assert.False(injected);
+        Assert.Contains("half-injected", err, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EnsurePmpMedium_IsIdempotent_AndRejectsNonPmp()
+    {
+        var once = RasterPc3.EnsurePmpMedium(PmpText, 5400, 3600, out var injected1, out _);
+        Assert.True(injected1);
+        var twice = RasterPc3.EnsurePmpMedium(once!, 5400, 3600, out var injected2, out _);
+        Assert.False(injected2);
+        Assert.Equal(once, twice); // already present -> returned unchanged
+
+        Assert.Null(RasterPc3.EnsurePmpMedium("media{\n}\n", 100, 100, out _, out var err));
+        Assert.NotNull(err);
     }
 
     [Fact]
@@ -130,7 +258,9 @@ custom{
     {
         Assert.Equal(1754, RasterPc3.MmToPixels(297.0, 150)); // A4 long side at 150dpi
         Assert.Equal(4966, RasterPc3.MmToPixels(841.0, 150)); // A1: 4966.5 -> floored to even
-        Assert.Equal("Forge_4966x3508px", RasterPc3.MediaName(4966, 3508));
+        Assert.Equal("UserDefinedRaster (4966.00 x 3508.00Pixels)", RasterPc3.MediaName(4966, 3508));
+        Assert.Equal("UserDefinedRaster Landscape 5400.00W x 3600.00H - (0, 0) x (5399, 3599) =19440000 Pixels",
+            RasterPc3.DescriptionName(5400, 3600));
     }
 
     private static byte[] FakePng(int wPx, int hPx)
