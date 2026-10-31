@@ -1891,6 +1891,8 @@ public sealed partial class PluginCommandProcessor
         public double[][]? Window { get; init; }
         public bool? Centered { get; init; }
         public string? Engine { get; init; }
+        public string? OutputFormat { get; init; }
+        public int? Dpi { get; init; }
         public bool OverwriteAcknowledged { get; init; }
     }
     private sealed record PublishArgs
