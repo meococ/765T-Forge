@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace Forge.Shared;
@@ -21,18 +22,22 @@ public static class RasterPc3
     /// renaming the pc3's selection does not create a medium.)
     /// </summary>
     public static string MediaName(int wPx, int hPx)
-        => $"UserDefinedRaster ({wPx:0.00} x {hPx:0.00}Pixels)";
+        => $"UserDefinedRaster ({F2(wPx)} x {F2(hPx)}Pixels)";
 
     /// <summary>The localized/display form the PMP stores alongside the canonical name.</summary>
     public static string LocalizedName(int wPx, int hPx)
-        => $"User 1 ({wPx:0.00} x {hPx:0.00} Pixels)";
+        => $"User 1 ({F2(wPx)} x {F2(hPx)} Pixels)";
 
     /// <summary>The media_description_name the PMP's size{} entry points at (and its description{} entry is named).</summary>
     public static string DescriptionName(int wPx, int hPx)
     {
         var orient = wPx >= hPx ? "Landscape" : "Portrait";
-        return $"UserDefinedRaster {orient} {wPx:0.00}W x {hPx:0.00}H - (0, 0) x ({wPx - 1}, {hPx - 1}) ={(long)wPx * hPx} Pixels";
+        return $"UserDefinedRaster {orient} {F2(wPx)}W x {F2(hPx)}H - (0, 0) x ({wPx - 1}, {hPx - 1}) ={(long)wPx * hPx} Pixels";
     }
+
+    // The driver enumerates these names with dot decimals; CurrentCulture on a
+    // comma-decimal locale would write names that diverge from the real format.
+    private static string F2(int v) => v.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>Deterministic resolution name for the resolution block.</summary>
     public static string ResolutionName(int dpi) => $"Forge_{dpi}dpi";
@@ -86,25 +91,27 @@ public static class RasterPc3
         t = t.Replace(oldName, mediaName);
 
         // Printable bounds are 0-indexed pixels (stored 1599 for a 1600-px medium).
-        t = Regex.Replace(t, "actual_printable_bounds_urx=[\\d.]+", $"actual_printable_bounds_urx={wPx - 1}");
-        t = Regex.Replace(t, "actual_printable_bounds_ury=[\\d.]+", $"actual_printable_bounds_ury={hPx - 1}");
-        t = Regex.Replace(t, "printable_bounds_urx=[\\d.]+", $"printable_bounds_urx={wPx - 1}");
-        t = Regex.Replace(t, "printable_bounds_ury=[\\d.]+", $"printable_bounds_ury={hPx - 1}");
+        // live-r9: every bound float in a real pc3 carries a ".0" decimal; interpolating
+        // (double) writes "5399" and the raster driver falls back to the default medium.
+        t = Regex.Replace(t, "actual_printable_bounds_urx=[\\d.]+", $"actual_printable_bounds_urx={wPx - 1}.0");
+        t = Regex.Replace(t, "actual_printable_bounds_ury=[\\d.]+", $"actual_printable_bounds_ury={hPx - 1}.0");
+        t = Regex.Replace(t, "printable_bounds_urx=[\\d.]+", $"printable_bounds_urx={wPx - 1}.0");
+        t = Regex.Replace(t, "printable_bounds_ury=[\\d.]+", $"printable_bounds_ury={hPx - 1}.0");
         t = Regex.Replace(t, "printable_area=[\\d.]+", $"printable_area={((double)wPx * hPx).ToString("F4", System.Globalization.CultureInfo.InvariantCulture)}");
         t = Regex.Replace(t, "\\bdm_orientation=\\d+", wPx >= hPx ? "dm_orientation=1" : "dm_orientation=0");
         t = Regex.Replace(
             t,
             "\\bmedia_bounds\\{\\s*urx=[\\d.]+\\s*ury=[\\d.]+\\s*\\}",
-            $"media_bounds{{\n    urx={(double)wPx}\n    ury={(double)hPx}\n   }}");
+            $"media_bounds{{\n    urx={(double)wPx}.0\n    ury={(double)hPx}.0\n   }}");
         t = Regex.Replace(t, "\\blandscape_mode=(TRUE|FALSE)", wPx >= hPx ? "landscape_mode=TRUE" : "landscape_mode=FALSE");
 
         // Resolution block: stored selected resolution only (name + addr/effective x/y).
         // Same unterminated-name fix: [^"]* would swallow the addr_/effective_ fields.
         t = Regex.Replace(t, "\\bresolution\\{\\s*name=\"[^\"\\r\\n]*", $"resolution{{\n name=\"{resName}");
-        t = Regex.Replace(t, "addr_resolution_x=[\\d.]+", $"addr_resolution_x={(double)dpi}");
-        t = Regex.Replace(t, "addr_resolution_y=[\\d.]+", $"addr_resolution_y={(double)dpi}");
-        t = Regex.Replace(t, "effective_resolution_x=[\\d.]+", $"effective_resolution_x={(double)dpi}");
-        t = Regex.Replace(t, "effective_resolution_y=[\\d.]+", $"effective_resolution_y={(double)dpi}");
+        t = Regex.Replace(t, "addr_resolution_x=[\\d.]+", $"addr_resolution_x={dpi}.0");
+        t = Regex.Replace(t, "addr_resolution_y=[\\d.]+", $"addr_resolution_y={dpi}.0");
+        t = Regex.Replace(t, "effective_resolution_x=[\\d.]+", $"effective_resolution_x={dpi}.0");
+        t = Regex.Replace(t, "effective_resolution_y=[\\d.]+", $"effective_resolution_y={dpi}.0");
 
         return t;
     }
@@ -135,7 +142,11 @@ public static class RasterPc3
         var descPresent = pmpText.Contains($"\n    name=\"{descName}", StringComparison.Ordinal);
         if (sizePresent && descPresent)
         {
-            return pmpText;
+            // A pmp patched by pre-fix code (or hand-edited) can carry the same names
+            // with malformed float fields — the names match but the driver still falls
+            // back to the default medium. Verify the description entry's bounds and
+            // repair them in place; injected=true means "the text changed".
+            return RepairDescEntry(pmpText, descName, wPx, hPx, out injected, out error);
         }
         if (sizePresent != descPresent)
         {
@@ -188,15 +199,73 @@ public static class RasterPc3
         var sizeEntry =
             $"\n   {nextSize}{{\n    caps_type=2\n    name=\"{canon}\n    localized_name=\"{LocalizedName(wPx, hPx)}\n" +
             $"    media_description_name=\"{descName}\n    media_group=16\n    landscape_mode={(wPx >= hPx ? "TRUE" : "FALSE")}\n   }}";
+        // live-r9: real description{} entries write ".0" bounds and printable_area as the
+        // PRINTABLE product ((w-1)*(h-1), .0000) — a wrong/malformed entry makes the driver
+        // resolve the medium back to the default bounds (rendered 1600x1280 for a 5400x3600
+        // request live), even though the name lists and the -PLOT prompt accepts it.
         var descEntry =
-            $"\n   {nextDesc}{{\n    caps_type=2\n    name=\"{descName}\n    media_bounds_urx={(double)wPx}\n    media_bounds_ury={(double)hPx}\n" +
-            $"    printable_bounds_llx=0.0\n    printable_bounds_lly=0.0\n    printable_bounds_urx={(double)(wPx - 1)}\n" +
-            $"    printable_bounds_ury={(double)(hPx - 1)}\n    printable_area={(double)wPx * hPx}\n    dimensional=FALSE\n   }}";
+            $"\n   {nextDesc}{{\n    caps_type=2\n    name=\"{descName}\n" +
+            string.Concat(DescFields(wPx, hPx).Select(f => $"    {f.Key}={f.Value}\n")) +
+            "    dimensional=FALSE\n   }";
 
         // One-pass splice at both insertion points (sizeClose < descClose): computing
         // both on the original text avoids the index drift of sequential inserts.
         injected = true;
         return pmpText[..sizeClose] + sizeEntry + pmpText[sizeClose..descClose] + descEntry + pmpText[descClose..];
+    }
+
+    /// <summary>The bounds fields of a description{} entry for wPx x hPx, in real-file order.</summary>
+    private static (string Key, string Value)[] DescFields(int wPx, int hPx)
+    {
+        var area = (((double)wPx - 1) * ((double)hPx - 1))
+            .ToString("F4", System.Globalization.CultureInfo.InvariantCulture);
+        return new[]
+        {
+            ("media_bounds_urx", $"{(double)wPx}.0"),
+            ("media_bounds_ury", $"{(double)hPx}.0"),
+            ("printable_bounds_llx", "0.0"),
+            ("printable_bounds_lly", "0.0"),
+            ("printable_bounds_urx", $"{(double)(wPx - 1)}.0"),
+            ("printable_bounds_ury", $"{(double)(hPx - 1)}.0"),
+            ("printable_area", area),
+        };
+    }
+
+    /// <summary>
+    /// Rewrites the bounds of an existing description{} entry (matched by its name line)
+    /// to the correct raster format. Returns the text unchanged (injected=false) when the
+    /// entry is already correct; null + error when the entry is unterminated or lacks a
+    /// field Repair would otherwise have to invent a position for.
+    /// </summary>
+    private static string? RepairDescEntry(string pmpText, string descName, int wPx, int hPx, out bool injected, out string? error)
+    {
+        injected = false;
+        error = null;
+        var nameAt = pmpText.IndexOf($"\n    name=\"{descName}", StringComparison.Ordinal);
+        var entryEnd = nameAt < 0 ? -1 : pmpText.IndexOf("\n   }", nameAt, StringComparison.Ordinal);
+        if (nameAt < 0 || entryEnd < 0)
+        {
+            error = $"pmp description entry '{descName}' is unterminated";
+            return null;
+        }
+
+        var patched = pmpText[nameAt..entryEnd];
+        foreach (var (key, value) in DescFields(wPx, hPx))
+        {
+            if (!Regex.IsMatch(patched, $"\\n    {key}=[\\d.]+"))
+            {
+                error = $"pmp description entry '{descName}' lacks {key}= — restore the .forge-bak";
+                return null;
+            }
+            patched = Regex.Replace(patched, $"\\n    {key}=[\\d.]+", $"\n    {key}={value}");
+        }
+
+        if (patched == pmpText[nameAt..entryEnd])
+        {
+            return pmpText;
+        }
+        injected = true;
+        return pmpText[..nameAt] + patched + pmpText[entryEnd..];
     }
 
     private static int NextIndex(string text, int listAt, int endAt)

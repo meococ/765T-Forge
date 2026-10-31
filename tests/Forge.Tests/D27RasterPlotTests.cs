@@ -91,11 +91,12 @@ custom{
         // the real file's names are unterminated — the patch preserves that form, and the
         // selected size now points at the driver's own user-medium name convention
         Assert.Contains("name=\"UserDefinedRaster (2480.00 x 1754.00Pixels)", patched, StringComparison.Ordinal);
-        // 0-indexed printable bounds
-        Assert.Contains("actual_printable_bounds_urx=2479", patched, StringComparison.Ordinal);
-        Assert.Contains("printable_bounds_ury=1753", patched, StringComparison.Ordinal);
-        Assert.Contains("urx=2480", patched, StringComparison.Ordinal);
-        Assert.Contains("ury=1754", patched, StringComparison.Ordinal);
+        // 0-indexed printable bounds — live-r9: real pc3 floats carry ".0" decimals;
+        // bare ints made the driver ignore the bounds and render the default medium
+        Assert.Contains("actual_printable_bounds_urx=2479.0", patched, StringComparison.Ordinal);
+        Assert.Contains("printable_bounds_ury=1753.0", patched, StringComparison.Ordinal);
+        Assert.Contains("urx=2480.0", patched, StringComparison.Ordinal);
+        Assert.Contains("ury=1754.0", patched, StringComparison.Ordinal);
         Assert.Contains("addr_resolution_x=150", patched, StringComparison.Ordinal);
         Assert.Contains("effective_resolution_y=150", patched, StringComparison.Ordinal);
         // live-r8 mangled-write regression: these blocks were eaten by the greedy
@@ -171,7 +172,7 @@ udm{
     printable_bounds_lly=0.0
     printable_bounds_urx=1361.0
     printable_bounds_ury=961.0
-    printable_area=1310244.0000
+    printable_area=1307921.0000
     dimensional=FALSE
    }
   }
@@ -197,8 +198,12 @@ hidden{
         Assert.Contains("localized_name=\"User 1 (5400.00 x 3600.00 Pixels)", patched, StringComparison.Ordinal);
         // the description entry carries the real bounds (media = dims, printable = 0-indexed)
         Assert.Contains("name=\"UserDefinedRaster Landscape 5400.00W x 3600.00H - (0, 0) x (5399, 3599) =19440000 Pixels", patched, StringComparison.Ordinal);
-        Assert.Contains("media_bounds_urx=5400", patched, StringComparison.Ordinal);
-        Assert.Contains("printable_bounds_urx=5399", patched, StringComparison.Ordinal);
+        // live-r9: real entries carry ".0" bound decimals and printable_area is the
+        // PRINTABLE product (w-1)*(h-1) — a bare integer made the driver fall back to
+        // the default medium on a 5400x3600 request (rendered 1600x1280 live).
+        Assert.Contains("media_bounds_urx=5400.0", patched, StringComparison.Ordinal);
+        Assert.Contains("printable_bounds_urx=5399.0", patched, StringComparison.Ordinal);
+        Assert.Contains("printable_area=19431001.0000", patched, StringComparison.Ordinal);
         Assert.Contains("landscape_mode=TRUE", patched, StringComparison.Ordinal);
         // injection lands inside udm{...} — never into mod{ (stock) or after hidden{
         var udmAt = patched.IndexOf("udm{", StringComparison.Ordinal);
@@ -235,6 +240,36 @@ hidden{
 
         Assert.Null(RasterPc3.EnsurePmpMedium("media{\n}\n", 100, 100, out _, out var err));
         Assert.NotNull(err);
+    }
+
+    [Fact]
+    public void EnsurePmpMedium_RepairsStaleMalformedEntry()
+    {
+        // a pmp written by pre-fix code (or hand-edited) has the same names with
+        // malformed bounds — name-only presence checks must not skip it forever.
+        var good = RasterPc3.EnsurePmpMedium(PmpText, 5400, 3600, out _, out _);
+        var stale = good!
+            .Replace("media_bounds_urx=5400.0", "media_bounds_urx=5400", StringComparison.Ordinal)
+            .Replace("printable_bounds_urx=5399.0", "printable_bounds_urx=5399", StringComparison.Ordinal)
+            .Replace("printable_area=19431001.0000", "printable_area=19440000", StringComparison.Ordinal);
+        Assert.NotEqual(good, stale);
+
+        var repaired = RasterPc3.EnsurePmpMedium(stale, 5400, 3600, out var injected, out var err);
+        Assert.Null(err);
+        Assert.True(injected); // text changed -> caller rewrites the pmp
+        Assert.Equal(good, repaired);
+        // and the repaired file is now a clean skip
+        var again = RasterPc3.EnsurePmpMedium(repaired!, 5400, 3600, out var injected2, out _);
+        Assert.False(injected2);
+        Assert.Equal(repaired, again);
+    }
+
+    [Fact]
+    public void Apply_IsIdempotent()
+    {
+        var once = RasterPc3.Apply(PngPc3Text, 2480, 1754, 150, out var err);
+        Assert.Null(err);
+        Assert.Equal(once, RasterPc3.Apply(once, 2480, 1754, 150, out _));
     }
 
     [Fact]

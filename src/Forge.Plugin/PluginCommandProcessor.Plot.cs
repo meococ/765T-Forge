@@ -327,7 +327,8 @@ public sealed partial class PluginCommandProcessor
         bool MediaChanged,
         (int W, int H)? RasterPx,
         string? RasterDevice,
-        string? PmpMedium);
+        string? PmpMedium,
+        string? AppliedMedia);
 
     /// <summary>
     /// review-wp2-r1 finding 4 (D9): device media list, stored-paper mapping and paperSize
@@ -369,6 +370,7 @@ public sealed partial class PluginCommandProcessor
             (int W, int H)? rasterPx = null;
             string? rasterDevice = null;
             string? pmpMedium = null;
+            string? appliedMedia = null;
             if (isPng)
             {
                 var sheetMm = isModel
@@ -643,12 +645,13 @@ public sealed partial class PluginCommandProcessor
                     ? PlotPaperUnit.Pixels
                     : requestedUnits
                         ?? (mediaSource == "layout" ? layoutPaperUnits : GuessPaperUnits(canonicalMedia, layoutPaperUnits));
-                // units BEFORE the medium: a unit switch re-resolves the media
-                // selection to the device default — live-r9 rendered the pc3's stored
-                // Sun_Hi-Res 1600x1280 because mm -> Pixels reset the medium we had
-                // just selected (the mm -> mm PDF path never tripped this).
+                // units BEFORE the medium, always: SetPlotPaperUnits re-resolves the
+                // media selection when units actually change — live-r9's mm -> Pixels
+                // switch reset the bound medium to Sun_Hi-Res 1600x1280 in BOTH
+                // directions (appliedMedia read-back proved it). The medium goes on LAST.
                 psv.SetPlotPaperUnits(ps, units);
                 psv.SetCanonicalMediaName(ps, canonicalMedia);
+                appliedMedia = ps.CanonicalMediaName;
             }
 
             plan = new MediaPlan(
@@ -661,7 +664,8 @@ public sealed partial class PluginCommandProcessor
                 !isPng && !string.Equals(canonicalMedia, layoutMedia, StringComparison.Ordinal),
                 rasterPx,
                 rasterDevice,
-                pmpMedium);
+                pmpMedium,
+                appliedMedia);
             ps = null;
             return null;
         }
@@ -719,6 +723,7 @@ public sealed partial class PluginCommandProcessor
         var mediaChanged = media.MediaChanged;
         var rasterPx = media.RasterPx;
         var pmpMedium = media.PmpMedium;
+        var appliedMedia = media.AppliedMedia;
         var isPng = string.Equals(args.OutputFormat?.Trim(), "png", StringComparison.OrdinalIgnoreCase);
         var rasterDpi = args.Dpi ?? 150;
         var plotDevice = media.RasterDevice ?? viewer.PlotDevice;
@@ -1060,6 +1065,7 @@ public sealed partial class PluginCommandProcessor
             dpi = isPng ? rasterDpi : (int?)null,
             rasterPixels = rasterPx is { } rp ? new[] { rp.W, rp.H } : null,
             pmpMedium,
+            appliedMedia,
             mediaSource,
             mediaMapped = mappedFromMedia is null ? null : new { from = mappedFromMedia, to = canonicalMedia },
             layoutMedia,
@@ -1157,6 +1163,10 @@ public sealed partial class PluginCommandProcessor
                 plan.dpi,
                 plan.rasterPixels,
                 plan.canonicalMedia,
+                plan.appliedMedia,
+                plan.pmpMedium,
+                plan.paperSize,
+                plan.paperMm,
                 plan.mediaSource,
                 plan.mediaMapped,
                 plotArea = plan.plotArea,
