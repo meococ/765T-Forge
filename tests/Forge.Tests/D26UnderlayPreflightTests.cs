@@ -100,6 +100,19 @@ public sealed class D26UnderlayPreflightTests
     }
 
     [Fact]
+    public void MissingFile_ClassifiesMissing_EvenWhenIsLoadedFalse()
+    {
+        // Window r5 live regression: AutoCAD reports IsLoaded=false for a definition whose
+        // file is missing at doc open. Resolution must run first — a missing file fails
+        // the gate whatever the load flag says. The old order classified the missing
+        // HABS underlay "unloaded" and V-101 plotted a border-only PDF with ok:true.
+        Assert.Equal("missing", UnderlayResolution.Classify(resolvedPath: null, isLoaded: false));
+        Assert.Equal("missing", UnderlayResolution.Classify(resolvedPath: null, isLoaded: true));
+        Assert.Equal("unloaded", UnderlayResolution.Classify(@"D:\pdfs\a.pdf", isLoaded: false));
+        Assert.Equal("resolved", UnderlayResolution.Classify(@"D:\pdfs\a.pdf", isLoaded: true));
+    }
+
+    [Fact]
     public void DxfSniff_IgnoresNonObjectSections()
     {
         const string dxf =
@@ -136,6 +149,31 @@ public sealed class D26UnderlayPreflightSourceGuards
         // itself. UnderlayEntry.DefinitionId must stay JsonIgnore'd.
         var source = PluginSource("PluginCommandProcessor.Plot.cs");
         Assert.Contains("JsonIgnore] ObjectId DefinitionId", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Enumerate_ResolvesPathBeforeReadingIsLoaded()
+    {
+        // r5 live fail: IsLoaded=false on a missing file must not short-circuit
+        // resolution — the enumerate body resolves, then reads IsLoaded, then Classify
+        // decides (all three gates consume the same status).
+        var source = PluginSource("PluginCommandProcessor.Plot.cs");
+        var resolveAt = source.IndexOf("var resolved = ResolveUnderlayFile(db, storedPath", StringComparison.Ordinal);
+        var loadAt = source.IndexOf("var isLoaded = ReflectedBool(def, \"IsLoaded\"", StringComparison.Ordinal);
+        var classifyAt = source.IndexOf("UnderlayResolution.Classify(resolved, isLoaded)", StringComparison.Ordinal);
+        Assert.True(resolveAt >= 0, "resolution missing from the enumerate body");
+        Assert.True(loadAt > resolveAt, "IsLoaded is read before the path resolves");
+        Assert.True(classifyAt > loadAt, "status not decided by UnderlayResolution.Classify");
+    }
+
+    [Fact]
+    public void ResolveUnderlayFile_OnlyReturnsExistingFiles()
+    {
+        // The whole Classify contract rests on resolved != null <=> the file exists.
+        // If a refactor dropped File.Exists or returned the candidate unconditionally,
+        // a missing file would classify "resolved" with every test still green.
+        var source = PluginSource("PluginCommandProcessor.Plot.cs");
+        Assert.Contains("File.Exists(candidate)", source, StringComparison.Ordinal);
     }
 
     [Fact]

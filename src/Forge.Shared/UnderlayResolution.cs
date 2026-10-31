@@ -50,14 +50,30 @@ public static class UnderlayResolution
         }
     }
 
-    /// <summary>Loaded underlay definitions whose file does not exist at the candidate path.</summary>
+    /// <summary>
+    /// Status of one underlay definition, given whether its file resolved and AutoCAD's
+    /// IsLoaded flag. Resolution is checked FIRST: AutoCAD reports IsLoaded=false for a
+    /// definition whose file is missing at doc open, so a missing file must classify
+    /// "missing" (a plot-blocking failure) whatever the load flag says — live window r5
+    /// caught a missing underlay sailing through as "unloaded" and plotting a border-only
+    /// PDF. "unloaded" applies only when the file resolves AND IsLoaded=false (a deliberate
+    /// user unload — nothing paints, nothing is missing).
+    /// </summary>
+    public static string Classify(string? resolvedPath, bool isLoaded) =>
+        resolvedPath is null ? "missing" : isLoaded ? "resolved" : "unloaded";
+
+    /// <summary>
+    /// Definitions whose file does not exist at the candidate path. The list is filtered by
+    /// file existence only — do NOT pre-filter by IsLoaded: AutoCAD reports IsLoaded=false
+    /// for a missing file's definition, so pre-filtering on the flag re-opens the r5 hole.
+    /// </summary>
     public static IReadOnlyList<UnderlayFileRef> MissingUnderlays(
-        IEnumerable<UnderlayFileRef> loadedUnderlays,
+        IEnumerable<UnderlayFileRef> underlayRefs,
         string? drawingFolder,
         Func<string, bool> fileExists)
     {
         var missing = new List<UnderlayFileRef>();
-        foreach (var underlay in loadedUnderlays)
+        foreach (var underlay in underlayRefs)
         {
             var candidate = ResolveCandidatePath(underlay.Path, drawingFolder);
             if (candidate is null || !fileExists(candidate))

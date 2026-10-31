@@ -1530,7 +1530,9 @@ public sealed partial class PluginCommandProcessor
     /// relative in sheet-set_R1.dxf (the exact shape DxfUnderlaySniff parses offline). Managed
     /// member names vary by release, so the stored path / load flag are read by reflection:
     /// UnderlayDefinition and RasterImageDef expose SourceFileName/FileName/ActiveFileName +
-    /// IsLoaded. IsLoaded=false means AutoCAD does not plot it — recorded "unloaded", not a failure.
+    /// IsLoaded. Resolution runs BEFORE the load flag: AutoCAD marks a missing file's
+    /// definition IsLoaded=false at doc open, so UnderlayResolution.Classify decides —
+    /// unresolvable path = "missing" (fails the gate), resolved + IsLoaded=false = "unloaded".
     /// </summary>
     private static List<UnderlayEntry> EnumerateUnderlayDefinitions(Transaction tr, Database db)
     {
@@ -1565,17 +1567,17 @@ public sealed partial class PluginCommandProcessor
                 var storedPath = ReflectedString(def, "SourceFileName", "FileName");
                 var activePath = ReflectedString(def, "ActiveFileName"); // AutoCAD's resolved path after re-pathing
                 var itemName = ReflectedString(def, "ItemName");
-                if (!(ReflectedBool(def, "IsLoaded", "Loaded") ?? true))
-                {
-                    result.Add(new UnderlayEntry(kind, name, storedPath ?? "", null, "unloaded", itemName, def.ObjectId));
-                    continue;
-                }
-
                 var resolved = ResolveUnderlayFile(db, storedPath, drawingFolder)
                     ?? ResolveUnderlayFile(db, activePath, drawingFolder);
-                result.Add(resolved is not null
-                    ? new UnderlayEntry(kind, name, storedPath ?? "", resolved, "resolved", itemName, def.ObjectId)
-                    : new UnderlayEntry(kind, name, storedPath ?? "", UnderlayResolution.ResolveCandidatePath(storedPath, drawingFolder), "missing", itemName, def.ObjectId));
+                var isLoaded = ReflectedBool(def, "IsLoaded", "Loaded") ?? true;
+                result.Add(new UnderlayEntry(
+                    kind,
+                    name,
+                    storedPath ?? "",
+                    resolved ?? UnderlayResolution.ResolveCandidatePath(storedPath, drawingFolder),
+                    UnderlayResolution.Classify(resolved, isLoaded),
+                    itemName,
+                    def.ObjectId));
             }
         }
 
