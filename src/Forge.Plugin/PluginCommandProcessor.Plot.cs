@@ -871,7 +871,12 @@ public sealed partial class PluginCommandProcessor
                     psv.SetPlotType(ps, AcPlotType.View);
                     break;
                 default:
-                    psv.SetPlotType(ps, AcPlotType.Layout);
+                    // live-r9: on the raster path a "layout export" IS the sheet. The
+                    // stored page-setup scale/origin are paper-unit-relative and do not
+                    // survive the units switch (1:25.4 + a compensating mm origin rendered
+                    // the sheet as an off-sheet thumbnail at pixels). Extents+fit below
+                    // renders the whole sheet at the requested dpi.
+                    psv.SetPlotType(ps, isPng ? AcPlotType.Extents : AcPlotType.Layout);
                     break;
             }
 
@@ -916,6 +921,13 @@ public sealed partial class PluginCommandProcessor
                 else if (scaleRequested)
                 {
                     warnings.Add($"scale=fit does not apply to plotArea={area.ToString().ToLowerInvariant()}; it plots at its own scale. Use plotArea=extents for fit-to-sheet.");
+                }
+                else if (isPng && area == PlotAreaKind.Layout)
+                {
+                    // the sheet fitted to the pixel medium (see the plot-type switch)
+                    psv.SetUseStandardScale(ps, true);
+                    psv.SetStdScaleType(ps, StdScaleType.ScaleToFit);
+                    psv.SetPlotCentered(ps, true);
                 }
                 else if (isPng && !(ps.UseStandardScale && ps.StdScaleType == StdScaleType.ScaleToFit))
                 {

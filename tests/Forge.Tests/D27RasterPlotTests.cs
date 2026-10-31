@@ -435,7 +435,12 @@ hidden{
         // must re-express stored and requested custom scales via the dpi factor.
         var source = File.ReadAllText(Path.Combine(PluginDispatchSyncTests.RepoPath("src", "Forge.Plugin"), "PluginCommandProcessor.Plot.cs"));
         Assert.Contains("drawingUnits * 25.4 / dpi", source, StringComparison.Ordinal);
-        // the stored-scale layout/view branch converts, not just explicit scale=
+        // raster layout export renders the SHEET (extents+fit): the stored page
+        // setup's scale/origin are paper-unit-relative and cannot survive the
+        // units switch — a layout render placed the thumbnail off-sheet live.
+        Assert.Contains("isPng ? AcPlotType.Extents : AcPlotType.Layout", source, StringComparison.Ordinal);
+        Assert.Contains("isPng && area == PlotAreaKind.Layout", source, StringComparison.Ordinal);
+        // the stored-scale view branch converts, not just explicit scale=
         Assert.Contains("ps.CustomPrintScale", source, StringComparison.Ordinal);
         Assert.Contains("RasterScale(true, rasterDpi, stored.Numerator, stored.Denominator)", source, StringComparison.Ordinal);
         // the stored ORIGIN is paper-unit-relative too — without the conversion the
