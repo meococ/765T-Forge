@@ -29,6 +29,7 @@ namespace Forge.Plugin;
 public sealed partial class PluginCommandProcessor
 {
     private const string DefaultPdfDevice = "DWG To PDF.pc3";
+    private const string DefaultPngDevice = "PublishToWeb PNG.pc3";
     private const string DefaultModelPaper = "ISO A1 (841.00 x 594.00 MM)";
     private const int MaxExtentsScanEntities = 200_000;
 
@@ -65,10 +66,36 @@ public sealed partial class PluginCommandProcessor
         }
 
         var outputPath = Path.GetFullPath(args.OutputPath!);
+
+        // TOOL-GAP #27: outputFormat=png routes the same guarded plot pipeline onto
+        // PublishToWeb PNG.pc3 (or the caller's raster device). The pixel medium is
+        // injected into the Forge clone pc3 at dpi — see TryResolveMedia's raster branch.
+        var isPng = string.Equals(args.OutputFormat?.Trim(), "png", StringComparison.OrdinalIgnoreCase);
+        if (!isPng && !string.IsNullOrWhiteSpace(args.OutputFormat) && !string.Equals(args.OutputFormat.Trim(), "pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            return ForgeResult.Failure(command.Id, "invalid_output_format", $"Unknown outputFormat '{args.OutputFormat}'.", "Use \"pdf\" (default) or \"png\".");
+        }
+
+        var dpi = args.Dpi ?? 150;
+        if (isPng && (dpi < 50 || dpi > 2400))
+        {
+            return ForgeResult.Failure(command.Id, "invalid_dpi", $"dpi {dpi} is out of range.", "Use a dpi between 50 and 2400 (default 150).");
+        }
+
+        if (isPng && !outputPath.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+        {
+            outputPath = Path.ChangeExtension(outputPath, ".png");
+        }
+
         var engine = string.IsNullOrWhiteSpace(args.Engine) ? "api" : args.Engine!.Trim().ToLowerInvariant();
         if (engine is not ("api" or "command"))
         {
             return ForgeResult.Failure(command.Id, "invalid_engine", $"Unknown plot engine '{args.Engine}'.", "Use engine=\"api\" (default) or engine=\"command\" (legacy -PLOT).");
+        }
+
+        if (isPng && engine == "command")
+        {
+            return ForgeResult.Failure(command.Id, "invalid_engine", "engine=\"command\" is not supported for outputFormat=\"png\".", "The legacy -PLOT token path answers paper units in mm/inches; raster devices plot in pixels. Use the default api engine.");
         }
 
         PlotAreaKind? requestedArea = null;
@@ -134,7 +161,7 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(
                 command.Id,
                 "plot_overwrite_not_acknowledged",
-                $"Refusing to overwrite existing PDF: {outputPath}",
+                $"Refusing to overwrite existing {(isPng ? "PNG" : "PDF")}: {outputPath}",
                 "Pass overwriteAcknowledged=true after confirming the previous issue PDF is archived.");
         }
 
@@ -147,7 +174,7 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, "layout_not_found", $"Layout not found: {layoutName}", "Call forge_doc_list_layouts to see available layouts.");
         }
 
-        var requestedDevice = NormalizeDeviceName(string.IsNullOrWhiteSpace(args.Device) ? DefaultPdfDevice : args.Device!.Trim());
+        var requestedDevice = NormalizeDeviceName(string.IsNullOrWhiteSpace(args.Device) ? (isPng ? DefaultPngDevice : DefaultPdfDevice) : args.Device!.Trim());
         var viewer = PrepareNoViewerDevice(requestedDevice, write: !command.DryRun);
         if (viewer.Failed)
         {
@@ -297,7 +324,11 @@ public sealed partial class PluginCommandProcessor
         string? MappedFromMedia,
         (double WidthMm, double HeightMm)? StoredSheetMm,
         string LayoutMedia,
-        bool MediaChanged);
+        bool MediaChanged,
+        (int W, int H)? RasterPx,
+        string? RasterDevice,
+        string? PmpMedium,
+        string? AppliedMedia);
 
     /// <summary>
     /// review-wp2-r1 finding 4 (D9): device media list, stored-paper mapping and paperSize
@@ -330,7 +361,173 @@ public sealed partial class PluginCommandProcessor
             string? mappedFromMedia = null;
             (double WidthMm, double HeightMm)? storedSheetMm = null;
 
-            psv.SetPlotConfigurationName(ps, viewer.PlotDevice, null);
+            // TOOL-GAP #27: a raster plot needs a pixel medium that no pc3 ships — the
+            // Forge clone selects a UserDefinedRaster (WxHPixels) medium injected into the
+            // device's pmp BEFORE the validator rebuilds the media list (live-r9: renaming
+            // the pc3's stored size alone never creates a listable medium).
+            var isPng = string.Equals(args.OutputFormat?.Trim(), "png", StringComparison.OrdinalIgnoreCase);
+            var dpi = args.Dpi ?? 150;
+            (int W, int H)? rasterPx = null;
+            string? rasterDevice = null;
+            string? pmpMedium = null;
+            string? appliedMedia = null;
+            if (isPng)
+            {
+                var sheetMm = isModel
+                    ? (841.0, 594.0)
+                    : (PaperMatch.ParseSizeMm(layoutMedia) ?? StoredSheetMm(layout) ?? (841.0, 594.0));
+                storedSheetMm = sheetMm;
+                rasterPx = (RasterPc3.MmToPixels(sheetMm.Item1, dpi), RasterPc3.MmToPixels(sheetMm.Item2, dpi));
+                if ((long)rasterPx.Value.W * rasterPx.Value.H > 1_000_000_000)
+                {
+                    return ForgeResult.Failure(
+                        command.Id,
+                        "invalid_dpi",
+                        $"Raster target {rasterPx.Value.W}x{rasterPx.Value.H}px exceeds a billion pixels.",
+                        "Lower dpi or use outputFormat=\"pdf\" for large sheets.");
+                }
+
+                if (!command.DryRun)
+                {
+                    var rasterPc3Path = viewer.ClonePc3;
+                    if (rasterPc3Path is null)
+                    {
+                        // A device that never opens a viewer produces no no-viewer clone —
+                        // the raster patch still needs a writable Forge pc3, so clone the
+                        // source ourselves under the same naming convention.
+                        if (string.IsNullOrWhiteSpace(viewer.SourcePc3) || !File.Exists(viewer.SourcePc3))
+                        {
+                            return ForgeResult.Failure(
+                                command.Id,
+                                "plot_raster_pc3_unreadable",
+                                $"Raster plotting needs a writable pc3 clone but '{requestedDevice}' has no readable source pc3.",
+                                "Pass a file-based raster device such as PublishToWeb PNG.pc3.",
+                                data: new { viewerSuppression = viewer });
+                        }
+
+                        rasterPc3Path = Path.Combine(
+                            Path.GetDirectoryName(viewer.SourcePc3)!,
+                            $"765T-Forge {Path.GetFileNameWithoutExtension(viewer.SourcePc3)} (no viewer).pc3");
+                        try
+                        {
+                            File.Copy(viewer.SourcePc3, rasterPc3Path, overwrite: true);
+                            // live-r7: GetPlotDeviceList is built once per session and
+                            // RefreshCode.All does NOT rebuild it for a pc3 dropped
+                            // mid-session — the dedicated devices refresh plus the
+                            // validator's own array rebuild are what make it visible.
+                            PlotConfigManager.RefreshList(RefreshCode.RefreshDevicesList);
+                            psv.RefreshLists(ps);
+                            var listed = psv.GetPlotDeviceList()
+                                .Cast<string>()
+                                .Any(d => string.Equals(d, Path.GetFileName(rasterPc3Path), StringComparison.OrdinalIgnoreCase));
+                            if (!listed)
+                            {
+                                return ForgeResult.Failure(
+                                    command.Id,
+                                    "plot_raster_pc3_unreadable",
+                                    $"The raster clone '{rasterPc3Path}' was written but AutoCAD does not list it as a plot device.",
+                                    "Check the Plotters folder and AutoCAD's printer support paths, then retry.",
+                                    data: new { viewerSuppression = viewer });
+                            }
+                        }
+                        catch (System.Exception ex)
+                        {
+                            return ForgeResult.Failure(
+                                command.Id,
+                                "plot_raster_pc3_unreadable",
+                                $"Could not prepare the raster pc3 clone: {ex.Message}",
+                                "Check the Plotters folder is writable and retry.",
+                                data: new { viewerSuppression = viewer });
+                        }
+                    }
+
+                    // Device names keep the .pc3 suffix (GetPlotDeviceList entries do).
+                    rasterDevice = Path.GetFileName(rasterPc3Path);
+                    string? rasterIoError = null;
+                    try
+                    {
+                        if (!Pc3File.TryRead(File.ReadAllBytes(rasterPc3Path), out var pc3Text, out var pc3Header))
+                        {
+                            rasterIoError = $"could not decode '{rasterPc3Path}'";
+                        }
+                        else
+                        {
+                            var patched = RasterPc3.Apply(pc3Text, rasterPx.Value.W, rasterPx.Value.H, dpi, out var rasterError);
+                            if (rasterError is not null)
+                            {
+                                return ForgeResult.Failure(
+                                    command.Id,
+                                    "plot_raster_pc3",
+                                    $"Raster medium injection failed on '{rasterPc3Path}': {rasterError}",
+                                    "Pass a device whose pc3 stores a user-defined raster medium (PublishToWeb PNG.pc3).",
+                                    data: new { rasterError, viewerSuppression = viewer });
+                            }
+
+                            File.WriteAllBytes(rasterPc3Path, Pc3File.Write(patched, pc3Header));
+                            if (!Pc3File.TryRead(File.ReadAllBytes(rasterPc3Path), out var verifyText, out _)
+                                || !RasterPc3.Verify(verifyText, rasterPx.Value.W, rasterPx.Value.H, dpi))
+                            {
+                                rasterIoError = "did not read back with the expected medium/dpi";
+                            }
+                            else
+                            {
+                                // live-r9: the canonical media list comes from the device's
+                                // PMP, not the pc3 — renaming the pc3's selected size{} only
+                                // points the selection. Inject the UserDefinedRaster size +
+                                // description entries into the pmp (idempotent) so the
+                                // validator's media list below actually contains the medium.
+                                var pmpPath = Path.Combine(
+                                    Path.GetDirectoryName(rasterPc3Path)!,
+                                    "PMP Files",
+                                    Path.GetFileNameWithoutExtension(viewer.SourcePc3) + ".pmp");
+                                if (!File.Exists(pmpPath) || !Pc3File.TryRead(File.ReadAllBytes(pmpPath), out var pmpText, out var pmpHeader))
+                                {
+                                    rasterIoError = $"could not decode the raster pmp '{pmpPath}'";
+                                }
+                                else if (RasterPc3.EnsurePmpMedium(pmpText, rasterPx.Value.W, rasterPx.Value.H, out var pmpInjected, out var pmpError) is not { } patchedPmp)
+                                {
+                                    rasterIoError = $"pmp medium injection failed: {pmpError}";
+                                }
+                                else if (pmpInjected)
+                                {
+                                    // the pmp is shared machine state (every pc3 on this
+                                    // driver reads it) — preserve the pristine file once.
+                                    var pmpBak = pmpPath + ".forge-bak";
+                                    if (!File.Exists(pmpBak))
+                                    {
+                                        File.Copy(pmpPath, pmpBak);
+                                    }
+                                    // temp+move: a mid-write kill must not leave a torn pmp
+                                    var pmpTmp = pmpPath + ".forge-tmp";
+                                    File.WriteAllBytes(pmpTmp, Pc3File.Write(patchedPmp, pmpHeader));
+                                    File.Move(pmpTmp, pmpPath, overwrite: true);
+                                    pmpMedium = "created";
+                                }
+                                else
+                                {
+                                    pmpMedium = "present";
+                                }
+                            }
+                        }
+                    }
+                    catch (System.Exception ex)
+                    {
+                        rasterIoError = ex.Message;
+                    }
+
+                    if (rasterIoError is not null)
+                    {
+                        return ForgeResult.Failure(
+                            command.Id,
+                            "plot_raster_pc3_verify",
+                            $"The raster pc3 '{rasterPc3Path}' could not be prepared: {rasterIoError}",
+                            "Check the Plotters folder is writable and retry.",
+                            data: new { viewerSuppression = viewer });
+                    }
+                }
+            }
+
+            psv.SetPlotConfigurationName(ps, rasterDevice ?? viewer.PlotDevice, null);
             psv.RefreshLists(ps);
             var mediaList = psv.GetCanonicalMediaNameList(ps)
                 .Cast<string>()
@@ -338,7 +535,33 @@ public sealed partial class PluginCommandProcessor
                 .ToList();
             var deviceMedia = mediaList.Select(m => PaperMatch.ToMedia(m.Canonical, m.Locale)).ToArray();
 
-            if (!string.IsNullOrWhiteSpace(args.PaperSize))
+            if (isPng && rasterPx is { } px)
+            {
+                var injected = RasterPc3.MediaName(px.W, px.H);
+                var match = mediaList.FirstOrDefault(m => string.Equals(m.Canonical, injected, StringComparison.OrdinalIgnoreCase));
+                if (match.Canonical is not null)
+                {
+                    canonicalMedia = match.Canonical;
+                    mediaSource = "raster";
+                }
+                else if (command.DryRun)
+                {
+                    // dry-run never writes the clone pc3, so the injected medium cannot
+                    // appear in the list — the plan is reported, validation is deferred.
+                    canonicalMedia = injected;
+                    mediaSource = "raster_planned";
+                }
+                else
+                {
+                    return ForgeResult.Failure(
+                        command.Id,
+                        "plot_raster_media_unresolved",
+                        $"The patched raster medium '{injected}' is not in '{requestedDevice}'s media list.",
+                        "Inspect the device media names listed under candidates; the pc3 patch may not have taken effect.",
+                        data: new { requestedMedia = injected, candidates = mediaList.Select(m => m.Canonical).Take(60).ToArray(), viewerSuppression = viewer });
+                }
+            }
+            else if (!string.IsNullOrWhiteSpace(args.PaperSize))
             {
                 var resolved = PlotLayoutMath.ResolveMedia(args.PaperSize, mediaList);
                 if (resolved is null)
@@ -413,10 +636,23 @@ public sealed partial class PluginCommandProcessor
                 mediaSource = "default_a1";
             }
 
-            psv.SetCanonicalMediaName(ps, canonicalMedia);
-            var units = requestedUnits
-                ?? (mediaSource == "layout" ? layoutPaperUnits : GuessPaperUnits(canonicalMedia, layoutPaperUnits));
-            psv.SetPlotPaperUnits(ps, units);
+            // raster_planned (dry-run PNG): the injected medium cannot exist on the
+            // unpatched device, so SetCanonicalMediaName would throw eInvalidInput —
+            // the copied layout settings stay on ps and the plan reports the px dims.
+            if (mediaSource != "raster_planned")
+            {
+                var units = isPng
+                    ? PlotPaperUnit.Pixels
+                    : requestedUnits
+                        ?? (mediaSource == "layout" ? layoutPaperUnits : GuessPaperUnits(canonicalMedia, layoutPaperUnits));
+                // units BEFORE the medium, always: SetPlotPaperUnits re-resolves the
+                // media selection when units actually change — live-r9's mm -> Pixels
+                // switch reset the bound medium to Sun_Hi-Res 1600x1280 in BOTH
+                // directions (appliedMedia read-back proved it). The medium goes on LAST.
+                psv.SetPlotPaperUnits(ps, units);
+                psv.SetCanonicalMediaName(ps, canonicalMedia);
+                appliedMedia = ps.CanonicalMediaName;
+            }
 
             plan = new MediaPlan(
                 ps,
@@ -425,7 +661,11 @@ public sealed partial class PluginCommandProcessor
                 mappedFromMedia,
                 storedSheetMm,
                 layoutMedia,
-                !string.Equals(canonicalMedia, layoutMedia, StringComparison.Ordinal));
+                !isPng && !string.Equals(canonicalMedia, layoutMedia, StringComparison.Ordinal),
+                rasterPx,
+                rasterDevice,
+                pmpMedium,
+                appliedMedia);
             ps = null;
             return null;
         }
@@ -481,6 +721,25 @@ public sealed partial class PluginCommandProcessor
         var mappedFromMedia = media.MappedFromMedia;
         var storedSheetMm = media.StoredSheetMm;
         var mediaChanged = media.MediaChanged;
+        var rasterPx = media.RasterPx;
+        var pmpMedium = media.PmpMedium;
+        var appliedMedia = media.AppliedMedia;
+        var isPng = string.Equals(args.OutputFormat?.Trim(), "png", StringComparison.OrdinalIgnoreCase);
+        var rasterDpi = args.Dpi ?? 150;
+        var plotDevice = media.RasterDevice ?? viewer.PlotDevice;
+
+        if (isPng)
+        {
+            if (!string.IsNullOrWhiteSpace(args.PaperSize))
+            {
+                warnings.Add("paperSize is ignored for outputFormat=png; the raster medium is derived from the sheet size at dpi.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(args.Units))
+            {
+                warnings.Add("units is ignored for outputFormat=png; raster plots use pixel paper units.");
+            }
+        }
 
         if (mappedFromMedia is not null)
         {
@@ -612,7 +871,12 @@ public sealed partial class PluginCommandProcessor
                     psv.SetPlotType(ps, AcPlotType.View);
                     break;
                 default:
-                    psv.SetPlotType(ps, AcPlotType.Layout);
+                    // live-r9: on the raster path a "layout export" IS the sheet. The
+                    // stored page-setup scale/origin are paper-unit-relative and do not
+                    // survive the units switch (1:25.4 + a compensating mm origin rendered
+                    // the sheet as an off-sheet thumbnail at pixels). Extents+fit below
+                    // renders the whole sheet at the requested dpi.
+                    psv.SetPlotType(ps, isPng ? AcPlotType.Extents : AcPlotType.Layout);
                     break;
             }
 
@@ -652,11 +916,42 @@ public sealed partial class PluginCommandProcessor
                 if (scaleRequested && !scaleSpec.Fit)
                 {
                     psv.SetUseStandardScale(ps, false);
-                    psv.SetCustomPrintScale(ps, new CustomScale(scaleSpec.PaperUnits, scaleSpec.DrawingUnits));
+                    psv.SetCustomPrintScale(ps, RasterScale(isPng, rasterDpi, scaleSpec.PaperUnits, scaleSpec.DrawingUnits));
                 }
                 else if (scaleRequested)
                 {
                     warnings.Add($"scale=fit does not apply to plotArea={area.ToString().ToLowerInvariant()}; it plots at its own scale. Use plotArea=extents for fit-to-sheet.");
+                }
+                else if (isPng && area == PlotAreaKind.Layout)
+                {
+                    // the sheet fitted to the pixel medium (see the plot-type switch)
+                    psv.SetUseStandardScale(ps, true);
+                    psv.SetStdScaleType(ps, StdScaleType.ScaleToFit);
+                    psv.SetPlotCentered(ps, true);
+                }
+                else if (isPng && !(ps.UseStandardScale && ps.StdScaleType == StdScaleType.ScaleToFit))
+                {
+                    // live-r9: the stored scale is PAPER-UNIT-relative — carried into
+                    // pixel units verbatim it read 1px:25.4mm and squeezed the whole
+                    // sheet into ~36px (a 5-ink-pixel PNG at 5400x3600). Re-express it
+                    // so the raster output matches the same layout's PDF render.
+                    try
+                    {
+                        var stored = ps.CustomPrintScale;
+                        psv.SetUseStandardScale(ps, false);
+                        psv.SetCustomPrintScale(ps, RasterScale(true, rasterDpi, stored.Numerator, stored.Denominator));
+                        // same unit-relativity: the stored origin compensated the sheet's
+                        // position in mm — at pixel units the same number under-shifts by
+                        // the scale factor and the thumbnail lands off-sheet (live-r9).
+                        var origin = ps.PlotOrigin;
+                        psv.SetPlotOrigin(ps, new Point2d(origin.X * rasterDpi / 25.4, origin.Y * rasterDpi / 25.4));
+                    }
+                    catch
+                    {
+                        psv.SetUseStandardScale(ps, true);
+                        psv.SetStdScaleType(ps, StdScaleType.ScaleToFit);
+                        warnings.Add("The layout's stored scale could not be read for the pixel-units conversion; raster output falls back to fit-to-sheet.");
+                    }
                 }
 
                 // live-smoke-20261030 fix4-r4 (review F1): an explicit centered is dropped for
@@ -678,7 +973,7 @@ public sealed partial class PluginCommandProcessor
                 else
                 {
                     psv.SetUseStandardScale(ps, false);
-                    psv.SetCustomPrintScale(ps, new CustomScale(scaleSpec.PaperUnits, scaleSpec.DrawingUnits));
+                    psv.SetCustomPrintScale(ps, RasterScale(isPng, rasterDpi, scaleSpec.PaperUnits, scaleSpec.DrawingUnits));
                 }
 
                 if (!centring.KeepStored)
@@ -688,6 +983,13 @@ public sealed partial class PluginCommandProcessor
                     {
                         psv.SetPlotOrigin(ps, Point2d.Origin);
                     }
+                }
+                else if (isPng)
+                {
+                    // the kept stored origin is paper-unit-relative too (see the
+                    // layout/view branch) — re-express it in pixels.
+                    var origin = ps.PlotOrigin;
+                    psv.SetPlotOrigin(ps, new Point2d(origin.X * rasterDpi / 25.4, origin.Y * rasterDpi / 25.4));
                 }
             }
 
@@ -753,7 +1055,13 @@ public sealed partial class PluginCommandProcessor
         }
 
         var readBack = DescribeSettings(psv, validated);
-        var paperUnitsPerMm = validated.PlotPaperUnits == PlotPaperUnit.Inches ? 1 / 25.4 : 1.0;
+        // Raster media report pixels: px * (25.4/dpi) converts to the mm the fit/coverage math expects.
+        var paperUnitsPerMm = validated.PlotPaperUnits switch
+        {
+            PlotPaperUnit.Inches => 1 / 25.4,
+            PlotPaperUnit.Pixels => 25.4 / rasterDpi,
+            _ => 1.0
+        };
         var printW = readBack.PrintableMm[0] * paperUnitsPerMm;
         var printH = readBack.PrintableMm[1] * paperUnitsPerMm;
 
@@ -761,7 +1069,11 @@ public sealed partial class PluginCommandProcessor
         PlotCoverage? coverage = null;
         if (area != PlotAreaKind.Layout && areaBox is { Length: 4 })
         {
-            fit = PlotLayoutMath.ComputeFit(areaBox[2] - areaBox[0], areaBox[3] - areaBox[1], printW, printH, readBack.RotationDeg, scaleSpec);
+            // raster custom scales are in pixel units — convert to mm-equivalent so the fit math stays consistent
+            var fitScale = isPng && !scaleSpec.Fit
+                ? scaleSpec with { PaperUnits = scaleSpec.PaperUnits * 25.4 / rasterDpi }
+                : scaleSpec;
+            fit = PlotLayoutMath.ComputeFit(areaBox[2] - areaBox[0], areaBox[3] - areaBox[1], printW, printH, readBack.RotationDeg, fitScale);
             if (content is { Length: 4 })
             {
                 coverage = PlotLayoutMath.ComputeCoverage(areaBox, content);
@@ -788,10 +1100,15 @@ public sealed partial class PluginCommandProcessor
             isModel,
             engine,
             device = requestedDevice,
-            plotDevice = viewer.PlotDevice,
+            plotDevice,
             viewerSuppression = viewer,
             paperSize = readBack.LocaleMedia,
-            canonicalMedia = readBack.CanonicalMedia,
+            canonicalMedia = mediaSource is "raster" or "raster_planned" ? canonicalMedia : readBack.CanonicalMedia,
+            outputFormat = isPng ? "png" : "pdf",
+            dpi = isPng ? rasterDpi : (int?)null,
+            rasterPixels = rasterPx is { } rp ? new[] { rp.W, rp.H } : null,
+            pmpMedium,
+            appliedMedia,
             mediaSource,
             mediaMapped = mappedFromMedia is null ? null : new { from = mappedFromMedia, to = canonicalMedia },
             layoutMedia,
@@ -868,7 +1185,59 @@ public sealed partial class PluginCommandProcessor
 
         if (!File.Exists(outputPath))
         {
-            return ForgeResult.Failure(command.Id, "plot_no_output", $"Plot ran but no PDF was produced at {outputPath}.", "Check the output directory is writable and the layout has plottable content.", data: plan);
+            return ForgeResult.Failure(command.Id, "plot_no_output", $"Plot ran but no output was produced at {outputPath}.", "Check the output directory is writable and the layout has plottable content.", data: plan);
+        }
+
+        // TOOL-GAP #27: raster plots verify against the PNG signature probe; the PDF
+        // probe/ink/coverage path below stays the pdf branch.
+        if (isPng)
+        {
+            var pngProbe = PngProbeResult.Probe(outputPath, notBeforeUtc: plotStartedUtc, expectedW: rasterPx?.W, expectedH: rasterPx?.H);
+            var pngVerification = new ForgeVerification { Attempted = true, Passed = pngProbe.Passed, Message = pngProbe.Message, ReadBack = pngProbe };
+            var pngPayload = new
+            {
+                plan.outputPath,
+                plan.layout,
+                plan.engine,
+                plan.device,
+                plan.plotDevice,
+                plan.viewerSuppression,
+                plan.outputFormat,
+                plan.dpi,
+                plan.rasterPixels,
+                plan.canonicalMedia,
+                plan.appliedMedia,
+                plan.pmpMedium,
+                plan.paperSize,
+                plan.paperMm,
+                plan.mediaSource,
+                plan.mediaMapped,
+                plotArea = plan.plotArea,
+                plan.plotAreaSource,
+                plan.window,
+                plan.rotationDeg,
+                plan.orientation,
+                plan.scale,
+                plan.centered,
+                plan.plotStyle,
+                plan.validation,
+                plan.underlayCount,
+                plan.underlaysResolved,
+                plan.underlays,
+                plan.warnings,
+                bytes = pngProbe.Bytes,
+                pngProbe
+            };
+
+            return pngProbe.Passed
+                ? ForgeResult.Success(command.Id, pngPayload, verification: pngVerification)
+                : ForgeResult.Failure(
+                    command.Id,
+                    "plot_png_probe",
+                    "Plot wrote a file but the PNG probe failed.",
+                    "Inspect data.pngProbe. Do not treat this output as published.",
+                    data: pngPayload,
+                    verification: pngVerification);
         }
 
         var probe = PdfProbeResult.Probe(outputPath, expectedPages: 1, notBeforeUtc: plotStartedUtc);
@@ -1221,6 +1590,16 @@ public sealed partial class PluginCommandProcessor
         bool Centered,
         string StyleSheet);
 
+    /// <summary>
+    /// A print scale is paper-unit-relative: (a:b) means a paper units per b drawing
+    /// units. On the raster path the paper unit is a PIXEL (1px = 25.4/dpi mm), so a
+    /// scale written for mm/inches must have its drawing side re-expressed or it
+    /// silently changes meaning when the units switch (live-r9: 1px:25.4mm rendered a
+    /// 914mm sheet into ~36px). PDF/mm paths pass through unchanged.
+    /// </summary>
+    private static CustomScale RasterScale(bool isPng, int dpi, double paperUnits, double drawingUnits)
+        => new(paperUnits, isPng ? drawingUnits * 25.4 / dpi : drawingUnits);
+
     private static PlotReadBack DescribeSettings(PlotSettingsValidator psv, PlotSettings settings)
     {
         var paper = settings.PlotPaperSize;
@@ -1487,7 +1866,13 @@ public sealed partial class PluginCommandProcessor
 
         try
         {
-            PlotConfigManager.RefreshList(RefreshCode.All);
+            // live-r8 class fix (same as the raster path): GetPlotDeviceList is built
+            // once per session — a clone written mid-session needs the dedicated
+            // device refresh plus the validator's own array rebuild before the listing
+            // verify, or a fresh machine hits plot_viewer_suppression_failed on first run.
+            PlotConfigManager.RefreshList(RefreshCode.RefreshDevicesList);
+            using var probe = new PlotSettings(false);
+            PlotSettingsValidator.Current.RefreshLists(probe);
             var known = PlotSettingsValidator.Current.GetPlotDeviceList()
                 .Cast<string>()
                 .Any(d => string.Equals(d, cloneName, StringComparison.OrdinalIgnoreCase));

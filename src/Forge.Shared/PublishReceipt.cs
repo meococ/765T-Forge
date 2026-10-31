@@ -23,6 +23,12 @@ public sealed class PublishReceipt
     public long? OutputBytes { get; init; }
     public DateTimeOffset? OutputMtimeUtc { get; init; }
     public PdfProbeResult? PdfProbe { get; init; }
+
+    /// <summary>TOOL-GAP #28: outline items written onto the merged PDF (null when bookmarks were not requested/applied).</summary>
+    public int? BookmarkCount { get; init; }
+
+    /// <summary>TOOL-GAP #28: why bookmarks are absent even though requested (missing interpreter, script error, page mismatch).</summary>
+    public string? BookmarkError { get; init; }
     public bool VerificationPassed { get; init; }
     public string? Message { get; set; }
     public string? ArtifactPath { get; set; }
