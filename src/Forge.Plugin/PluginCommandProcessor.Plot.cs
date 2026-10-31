@@ -911,11 +911,30 @@ public sealed partial class PluginCommandProcessor
                 if (scaleRequested && !scaleSpec.Fit)
                 {
                     psv.SetUseStandardScale(ps, false);
-                    psv.SetCustomPrintScale(ps, new CustomScale(scaleSpec.PaperUnits, scaleSpec.DrawingUnits));
+                    psv.SetCustomPrintScale(ps, RasterScale(isPng, rasterDpi, scaleSpec.PaperUnits, scaleSpec.DrawingUnits));
                 }
                 else if (scaleRequested)
                 {
                     warnings.Add($"scale=fit does not apply to plotArea={area.ToString().ToLowerInvariant()}; it plots at its own scale. Use plotArea=extents for fit-to-sheet.");
+                }
+                else if (isPng && !(ps.UseStandardScale && ps.StdScaleType == StdScaleType.ScaleToFit))
+                {
+                    // live-r9: the stored scale is PAPER-UNIT-relative — carried into
+                    // pixel units verbatim it read 1px:25.4mm and squeezed the whole
+                    // sheet into ~36px (a 5-ink-pixel PNG at 5400x3600). Re-express it
+                    // so the raster output matches the same layout's PDF render.
+                    try
+                    {
+                        var stored = ps.CustomPrintScale;
+                        psv.SetUseStandardScale(ps, false);
+                        psv.SetCustomPrintScale(ps, RasterScale(true, rasterDpi, stored.Numerator, stored.Denominator));
+                    }
+                    catch
+                    {
+                        psv.SetUseStandardScale(ps, true);
+                        psv.SetStdScaleType(ps, StdScaleType.ScaleToFit);
+                        warnings.Add("The layout's stored scale could not be read for the pixel-units conversion; raster output falls back to fit-to-sheet.");
+                    }
                 }
 
                 // live-smoke-20261030 fix4-r4 (review F1): an explicit centered is dropped for
@@ -937,7 +956,7 @@ public sealed partial class PluginCommandProcessor
                 else
                 {
                     psv.SetUseStandardScale(ps, false);
-                    psv.SetCustomPrintScale(ps, new CustomScale(scaleSpec.PaperUnits, scaleSpec.DrawingUnits));
+                    psv.SetCustomPrintScale(ps, RasterScale(isPng, rasterDpi, scaleSpec.PaperUnits, scaleSpec.DrawingUnits));
                 }
 
                 if (!centring.KeepStored)
@@ -1546,6 +1565,16 @@ public sealed partial class PluginCommandProcessor
         double[]? CustomScale,
         bool Centered,
         string StyleSheet);
+
+    /// <summary>
+    /// A print scale is paper-unit-relative: (a:b) means a paper units per b drawing
+    /// units. On the raster path the paper unit is a PIXEL (1px = 25.4/dpi mm), so a
+    /// scale written for mm/inches must have its drawing side re-expressed or it
+    /// silently changes meaning when the units switch (live-r9: 1px:25.4mm rendered a
+    /// 914mm sheet into ~36px). PDF/mm paths pass through unchanged.
+    /// </summary>
+    private static CustomScale RasterScale(bool isPng, int dpi, double paperUnits, double drawingUnits)
+        => new(paperUnits, isPng ? drawingUnits * 25.4 / dpi : drawingUnits);
 
     private static PlotReadBack DescribeSettings(PlotSettingsValidator psv, PlotSettings settings)
     {

@@ -427,6 +427,24 @@ hidden{
     }
 
     [Fact]
+    public void Plot_ReExpressesStoredScale_InPixelUnits()
+    {
+        // live-r9: a custom scale is PAPER-UNIT-relative — the stored 1:25.4 carried
+        // verbatim into pixel units squeezed a 914mm sheet into ~36px (a 5-ink-pixel
+        // PNG) while the same layout's PDF plot rendered real ink. The raster path
+        // must re-express stored and requested custom scales via the dpi factor.
+        var source = File.ReadAllText(Path.Combine(PluginDispatchSyncTests.RepoPath("src", "Forge.Plugin"), "PluginCommandProcessor.Plot.cs"));
+        Assert.Contains("drawingUnits * 25.4 / dpi", source, StringComparison.Ordinal);
+        // the stored-scale layout/view branch converts, not just explicit scale=
+        Assert.Contains("ps.CustomPrintScale", source, StringComparison.Ordinal);
+        Assert.Contains("RasterScale(true, rasterDpi, stored.Numerator, stored.Denominator)", source, StringComparison.Ordinal);
+        // the conversion sits before validation
+        var scaleAt = source.IndexOf("RasterScale(true, rasterDpi, stored.Numerator", StringComparison.Ordinal);
+        var validateAt = source.IndexOf("validator.Validate(info)", StringComparison.Ordinal);
+        Assert.True(scaleAt > 0 && validateAt > scaleAt, "the pixel-units scale conversion must run before plot validation");
+    }
+
+    [Fact]
     public void Apply_PortraitMedium_FlipsLandscapeFlag()
     {
         var patched = RasterPc3.Apply(PngPc3Text, 1240, 1754, 150, out var err);
