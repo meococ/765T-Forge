@@ -1754,7 +1754,13 @@ public sealed partial class PluginCommandProcessor
 
         try
         {
-            PlotConfigManager.RefreshList(RefreshCode.All);
+            // live-r8 class fix (same as the raster path): GetPlotDeviceList is built
+            // once per session — a clone written mid-session needs the dedicated
+            // device refresh plus the validator's own array rebuild before the listing
+            // verify, or a fresh machine hits plot_viewer_suppression_failed on first run.
+            PlotConfigManager.RefreshList(RefreshCode.RefreshDevicesList);
+            using var probe = new PlotSettings(false);
+            PlotSettingsValidator.Current.RefreshLists(probe);
             var known = PlotSettingsValidator.Current.GetPlotDeviceList()
                 .Cast<string>()
                 .Any(d => string.Equals(d, cloneName, StringComparison.OrdinalIgnoreCase));

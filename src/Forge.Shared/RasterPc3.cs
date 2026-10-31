@@ -55,7 +55,10 @@ public static class RasterPc3
         // Rename every stored size name: the pc3 may reference the same name in more
         // than one place (media block + selected-media back-references). Capture the
         // first name, then replace every occurrence of it so they stay consistent.
-        var nameMatch = Regex.Match(t, "\\bsize\\{\\s*name=\"(?<n>[^\"]*)\"");
+        // live-r8: the REAL PublishToWeb PNG.pc3 stores names UNTERMINATED — the value
+        // runs to end-of-line, not to a closing quote. [^"]* here ate everything up to
+        // the next '"' (media_bounds, io{, every resolution field). Capture to EOL.
+        var nameMatch = Regex.Match(t, "\\bsize\\{\\s*name=\"(?<n>[^\"\\r\\n]*)");
         if (!nameMatch.Success || nameMatch.Groups["n"].Value.Length == 0)
         {
             error = "pc3 media block has no user-defined size name to rewrite";
@@ -79,7 +82,8 @@ public static class RasterPc3
         t = Regex.Replace(t, "\\blandscape_mode=(TRUE|FALSE)", wPx >= hPx ? "landscape_mode=TRUE" : "landscape_mode=FALSE");
 
         // Resolution block: stored selected resolution only (name + addr/effective x/y).
-        t = Regex.Replace(t, "\\bresolution\\{\\s*name=\"[^\"]*\"", $"resolution{{\n name=\"{resName}\"");
+        // Same unterminated-name fix: [^"]* would swallow the addr_/effective_ fields.
+        t = Regex.Replace(t, "\\bresolution\\{\\s*name=\"[^\"\\r\\n]*", $"resolution{{\n name=\"{resName}");
         t = Regex.Replace(t, "addr_resolution_x=[\\d.]+", $"addr_resolution_x={(double)dpi}");
         t = Regex.Replace(t, "addr_resolution_y=[\\d.]+", $"addr_resolution_y={(double)dpi}");
         t = Regex.Replace(t, "effective_resolution_x=[\\d.]+", $"effective_resolution_x={(double)dpi}");
@@ -91,7 +95,10 @@ public static class RasterPc3
     /// <summary>Post-write check: the patched text actually carries the requested medium + resolution.</summary>
     public static bool Verify(string pc3Text, int wPx, int hPx, int dpi)
     {
-        return pc3Text.Contains($"name=\"{MediaName(wPx, hPx)}\"", StringComparison.Ordinal)
+        // no closing quote on the name check: the patch preserves the source's own
+        // terminator, and the real pc3 terminates names at end-of-line. The deterministic
+        // Forge_WxHpx name embeds exact dims, so a prefix match cannot collide.
+        return pc3Text.Contains($"name=\"{MediaName(wPx, hPx)}", StringComparison.Ordinal)
             && pc3Text.Contains($"urx={(double)wPx}", StringComparison.Ordinal)
             && pc3Text.Contains($"effective_resolution_x={(double)dpi}", StringComparison.Ordinal);
     }

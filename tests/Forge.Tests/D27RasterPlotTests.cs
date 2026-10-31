@@ -11,7 +11,20 @@ namespace Forge.Tests;
 /// </summary>
 public sealed class D27RasterPlotTests
 {
+    // The REAL PublishToWeb PNG.pc3 layout (zlib body decoded by Pc3File from
+    // C:\...\plotters\PublishToWeb PNG.pc3 on AutoCAD 2025): names are UNTERMINATED —
+    // `name="value` runs to end-of-line with no closing quote. live-r8 proved the
+    // [^"]* capture ate media_bounds + resolution fields on this shape; the fixture
+    // must keep the real form so the regression stays pinned.
     private const string PngPc3Text = """
+meta{
+ canonical_family_name="Raster File Formats
+ canonical_model_name="png
+ localized_model_name="Portable Network Graphics PNG (LZH Compression)
+ file_only=TRUE
+ udm_description="
+ config_autospool=FALSE
+}
 media{
  selection_method=2
  type="
@@ -22,7 +35,7 @@ media{
  actual_printable_bounds_ury=1279.0
  number_of_copies=1
  size{
-  name="Sun_Hi-Res_(1600.00_x_1280.00_Pixels)"
+  name="Sun_Hi-Res_(1600.00_x_1280.00_Pixels)
   group=13
   landscape_mode=TRUE
   longplot_reduction=1.0
@@ -40,12 +53,33 @@ media{
   }
  }
 }
-resolution{
- name="100dpi"
- addr_resolution_x=100.0
- addr_resolution_y=100.0
- effective_resolution_x=100.0
- effective_resolution_y=100.0
+io{
+ type=2
+ pathname="
+ allsysvalid=FALSE
+ plot_to_file=TRUE
+}
+res_color_mem{
+ name="RGBA
+ num_colors=16777216
+ color_depth=32
+ resolution{
+  name="100dpi
+  addr_resolution_x=100.0
+  addr_resolution_y=100.0
+  effective_resolution_x=100.0
+  effective_resolution_y=100.0
+ }
+}
+custom{
+ 0{
+  name="RASTER_CALS_Twist
+  value=FALSE
+ }
+ 4{
+  name="RASTER_IE_Compression_Type
+  value="PNG
+ }
 }
 """;
 
@@ -54,7 +88,8 @@ resolution{
     {
         var patched = RasterPc3.Apply(PngPc3Text, 2480, 1754, 150, out var err);
         Assert.Null(err);
-        Assert.Contains("name=\"Forge_2480x1754px\"", patched, StringComparison.Ordinal);
+        // the real file's names are unterminated — the patch preserves that form
+        Assert.Contains("name=\"Forge_2480x1754px", patched, StringComparison.Ordinal);
         // 0-indexed printable bounds
         Assert.Contains("actual_printable_bounds_urx=2479", patched, StringComparison.Ordinal);
         Assert.Contains("printable_bounds_ury=1753", patched, StringComparison.Ordinal);
@@ -62,6 +97,12 @@ resolution{
         Assert.Contains("ury=1754", patched, StringComparison.Ordinal);
         Assert.Contains("addr_resolution_x=150", patched, StringComparison.Ordinal);
         Assert.Contains("effective_resolution_y=150", patched, StringComparison.Ordinal);
+        // live-r8 mangled-write regression: these blocks were eaten by the greedy
+        // [^"]* name capture — they must survive the patch
+        Assert.Contains("media_bounds{", patched, StringComparison.Ordinal);
+        Assert.Contains("io{", patched, StringComparison.Ordinal);
+        Assert.Contains("custom{", patched, StringComparison.Ordinal);
+        Assert.Contains("media_description{", patched, StringComparison.Ordinal);
         // the stored medium name is gone everywhere
         Assert.DoesNotContain("Sun_Hi-Res", patched, StringComparison.Ordinal);
         Assert.True(RasterPc3.Verify(patched, 2480, 1754, 150));
@@ -189,6 +230,22 @@ resolution{
         Assert.True(devRefreshAt > copyAt, "RefreshDevicesList must run after the clone copy");
         Assert.True(psvRefreshAt > devRefreshAt, "psv.RefreshLists must run after RefreshDevicesList");
         Assert.True(listedAt > psvRefreshAt, "the GetPlotDeviceList verify must run after both refreshes");
+    }
+
+    [Fact]
+    public void PrepareNoViewerDevice_RefreshesDeviceList_BeforeListingVerify()
+    {
+        // live-r8 class fix: the no-viewer clone written mid-session hits the same
+        // once-per-session GetPlotDeviceList staleness — a fresh machine failed
+        // plot_viewer_suppression_failed. RefreshDevicesList + a throwaway-probe
+        // RefreshLists must run before the listing check, inside the definition.
+        var source = File.ReadAllText(Path.Combine(PluginDispatchSyncTests.RepoPath("src", "Forge.Plugin"), "PluginCommandProcessor.Plot.cs"));
+        var defAt = source.IndexOf("private static ViewerSuppression PrepareNoViewerDevice", StringComparison.Ordinal);
+        var devRefreshAt = source.IndexOf("RefreshCode.RefreshDevicesList", defAt, StringComparison.Ordinal);
+        var probeAt = source.IndexOf("RefreshLists(probe)", devRefreshAt, StringComparison.Ordinal);
+        var knownAt = source.IndexOf("GetPlotDeviceList()", probeAt, StringComparison.Ordinal);
+        Assert.True(devRefreshAt > defAt && probeAt > devRefreshAt && knownAt > probeAt,
+            "no-viewer clone must refresh devices + validator arrays before the listing verify");
     }
 
     [Fact]
