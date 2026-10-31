@@ -49,3 +49,5 @@ Autodesk documentation, ADN and Through-the-Interface blog posts and forum threa
 ## Third-party notices
 
 Forge depends on open-source packages declared in `Directory.Packages.props` (including the Model Context Protocol C# SDK). See each package’s own license for terms.
+
+- **pypdf** (BSD-3-Clause, requires >= 3) — invoked at runtime as a child process (not vendored, not linked) to write outline bookmarks onto merged publish PDFs (`forge_plot_publish`). The caller must have `pypdf` installed in a `python`/`py` interpreter on PATH; nothing ships inside the Forge binaries.

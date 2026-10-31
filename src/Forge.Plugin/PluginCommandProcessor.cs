@@ -1400,7 +1400,8 @@ public sealed partial class PluginCommandProcessor
                 args.OverwriteAcknowledged,
                 underlayCount = publishUnderlays.Count,
                 underlaysResolved = true,
-                sheetType = args.SinglePdf ? "MultiPdf" : "SinglePdf"
+                sheetType = args.SinglePdf ? "MultiPdf" : "SinglePdf",
+                bookmarks = args.Bookmarks && args.SinglePdf
             });
         }
 
@@ -1474,6 +1475,7 @@ public sealed partial class PluginCommandProcessor
         DateTimeOffset? mtimeUtc;
         string[] producedFiles;
 
+        BookmarkPassResult? bookmarkPass = null;
         if (args.SinglePdf)
         {
             if (!File.Exists(outputPath))
@@ -1483,6 +1485,14 @@ public sealed partial class PluginCommandProcessor
                     "publish_no_output",
                     $"Publisher finished but output was not found at {outputPath}.",
                     "Check plot log and that layouts contain plottable content.");
+            }
+
+            // TOOL-GAP #28: one outline item per layout via pypdf (BSD-3-Clause, NOTICE.md).
+            // Runs before the probe so the probed/measured file is the delivered one;
+            // a failed pass only downgrades bookmarksApplied — the PDF is still valid.
+            if (args.Bookmarks)
+            {
+                bookmarkPass = RunBookmarkPass(outputPath, args.Layouts);
             }
 
             probe = PdfProbeResult.Probe(outputPath, expectedPages: args.Layouts.Length, notBeforeUtc: publishStartedUtc);
@@ -1548,6 +1558,8 @@ public sealed partial class PluginCommandProcessor
             OutputBytes = totalBytes,
             OutputMtimeUtc = mtimeUtc,
             PdfProbe = probe,
+            BookmarkCount = bookmarkPass?.Applied == true ? bookmarkPass.Count : null,
+            BookmarkError = args.Bookmarks && args.SinglePdf && bookmarkPass?.Applied != true ? bookmarkPass?.Error : null,
             VerificationPassed = probe.Passed,
             Message = probe.Passed ? "Publish + PDF probe passed." : $"Publish wrote output but PDF probe failed: {probe.Message}"
         };
@@ -1568,6 +1580,8 @@ public sealed partial class PluginCommandProcessor
             underlayCount = publishUnderlays.Count,
             underlaysResolved = true,
             underlays = publishUnderlays,
+            bookmarksApplied = bookmarkPass?.Applied,
+            bookmarkDetail = bookmarkPass?.ToPayload(),
             receipt,
             receiptError
         };
@@ -1884,6 +1898,7 @@ public sealed partial class PluginCommandProcessor
         public string? OutputPath { get; init; }
         public string[] Layouts { get; init; } = [];
         public bool SinglePdf { get; init; } = true;
+        public bool Bookmarks { get; init; } = true;
         public bool OverwriteAcknowledged { get; init; }
         public bool RequirePreflight { get; init; } = true;
         public bool Force { get; init; }

@@ -151,12 +151,13 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_plot_to_pdf", new { outputPath, layout, device, paperSize, plotStyle, plotArea, window, orientation, scale, units, centered, engine, overwriteAcknowledged }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_plot_publish", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
-    [Description("Publish layouts to PDF via real DSD + Publisher.PublishDsd; returns PublishReceipt with PDF probe. Preflight gate unless force=true.")]
+    [Description("Publish layouts to PDF via real DSD + Publisher.PublishDsd; returns PublishReceipt with PDF probe. Preflight gate unless force=true. With singlePdf=true the merged PDF gets one outline bookmark per layout title (bookmarks=true, default) via a pypdf post-pass — bookmarksApplied/bookmarkDetail report whether that ran; a missing python only skips bookmarks, it never fails the publish.")]
     public static Task<ForgeResult> PlotPublish(
         ForgeToolRunner runner,
         string outputPath,
         string[] layouts,
         bool singlePdf = true,
+        bool bookmarks = true,
         bool overwriteAcknowledged = false,
         bool requirePreflight = true,
         bool force = false,
@@ -164,7 +165,7 @@ public sealed class ForgeMcpTools
         string? titleblockBlockName = null,
         bool dryRun = false,
         CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_plot_publish", new { outputPath, layouts, singlePdf, overwriteAcknowledged, requirePreflight, force, requiredTitleblockTags = requiredTitleblockTags ?? [], titleblockBlockName }, dryRun, cancellationToken: cancellationToken);
+        => runner.InvokeAsync("forge_plot_publish", new { outputPath, layouts, singlePdf, bookmarks, overwriteAcknowledged, requirePreflight, force, requiredTitleblockTags = requiredTitleblockTags ?? [], titleblockBlockName }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_dgn_import", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
     [Description("Convert a MicroStation DGN V8 drawing to a new DWG: -DGNIMPORT into a fresh temporary document, then SaveAs targetDwgPath. Source DGN and the active drawing are never modified. DGN V7 is refused by header sniff. dryRun returns the plan; a large DGN can exceed the default 120s plugin timeout (raise FORGE_PLUGIN_RESPONSE_TIMEOUT_SECONDS).")]
