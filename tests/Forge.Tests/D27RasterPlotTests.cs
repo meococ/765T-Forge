@@ -379,6 +379,19 @@ hidden{
     }
 
     [Fact]
+    public void Plot_SetsPaperUnits_BeforeCanonicalMedia()
+    {
+        // live-r9: SetPlotPaperUnits re-resolves the media selection when units
+        // actually change (layout mm -> Pixels reset us to the pc3's stored
+        // Sun_Hi-Res 1600x1280 — the PNG rendered at exactly that). The medium
+        // must be selected AFTER the unit switch or it is silently discarded.
+        var source = File.ReadAllText(Path.Combine(PluginDispatchSyncTests.RepoPath("src", "Forge.Plugin"), "PluginCommandProcessor.Plot.cs"));
+        var unitsAt = source.IndexOf("psv.SetPlotPaperUnits(ps, units)", StringComparison.Ordinal);
+        var mediaAt = source.IndexOf("psv.SetCanonicalMediaName(ps, canonicalMedia)", StringComparison.Ordinal);
+        Assert.True(unitsAt > 0 && mediaAt > unitsAt, "SetPlotPaperUnits must run before SetCanonicalMediaName");
+    }
+
+    [Fact]
     public void Apply_PortraitMedium_FlipsLandscapeFlag()
     {
         var patched = RasterPc3.Apply(PngPc3Text, 1240, 1754, 150, out var err);

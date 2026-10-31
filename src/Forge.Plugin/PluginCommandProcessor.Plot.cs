@@ -639,12 +639,16 @@ public sealed partial class PluginCommandProcessor
             // the copied layout settings stay on ps and the plan reports the px dims.
             if (mediaSource != "raster_planned")
             {
-                psv.SetCanonicalMediaName(ps, canonicalMedia);
                 var units = isPng
                     ? PlotPaperUnit.Pixels
                     : requestedUnits
                         ?? (mediaSource == "layout" ? layoutPaperUnits : GuessPaperUnits(canonicalMedia, layoutPaperUnits));
+                // units BEFORE the medium: a unit switch re-resolves the media
+                // selection to the device default — live-r9 rendered the pc3's stored
+                // Sun_Hi-Res 1600x1280 because mm -> Pixels reset the medium we had
+                // just selected (the mm -> mm PDF path never tripped this).
                 psv.SetPlotPaperUnits(ps, units);
+                psv.SetCanonicalMediaName(ps, canonicalMedia);
             }
 
             plan = new MediaPlan(
