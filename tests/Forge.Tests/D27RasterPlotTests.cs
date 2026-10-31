@@ -438,6 +438,9 @@ hidden{
         // the stored-scale layout/view branch converts, not just explicit scale=
         Assert.Contains("ps.CustomPrintScale", source, StringComparison.Ordinal);
         Assert.Contains("RasterScale(true, rasterDpi, stored.Numerator, stored.Denominator)", source, StringComparison.Ordinal);
+        // the stored ORIGIN is paper-unit-relative too — without the conversion the
+        // thumbnail lands off-sheet (observed as a 10x7px sliver at the paper edge)
+        Assert.Contains("origin.X * rasterDpi / 25.4", source, StringComparison.Ordinal);
         // the conversion sits before validation
         var scaleAt = source.IndexOf("RasterScale(true, rasterDpi, stored.Numerator", StringComparison.Ordinal);
         var validateAt = source.IndexOf("validator.Validate(info)", StringComparison.Ordinal);

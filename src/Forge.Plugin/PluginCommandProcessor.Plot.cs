@@ -928,6 +928,11 @@ public sealed partial class PluginCommandProcessor
                         var stored = ps.CustomPrintScale;
                         psv.SetUseStandardScale(ps, false);
                         psv.SetCustomPrintScale(ps, RasterScale(true, rasterDpi, stored.Numerator, stored.Denominator));
+                        // same unit-relativity: the stored origin compensated the sheet's
+                        // position in mm — at pixel units the same number under-shifts by
+                        // the scale factor and the thumbnail lands off-sheet (live-r9).
+                        var origin = ps.PlotOrigin;
+                        psv.SetPlotOrigin(ps, new Point2d(origin.X * rasterDpi / 25.4, origin.Y * rasterDpi / 25.4));
                     }
                     catch
                     {
@@ -966,6 +971,13 @@ public sealed partial class PluginCommandProcessor
                     {
                         psv.SetPlotOrigin(ps, Point2d.Origin);
                     }
+                }
+                else if (isPng)
+                {
+                    // the kept stored origin is paper-unit-relative too (see the
+                    // layout/view branch) — re-express it in pixels.
+                    var origin = ps.PlotOrigin;
+                    psv.SetPlotOrigin(ps, new Point2d(origin.X * rasterDpi / 25.4, origin.Y * rasterDpi / 25.4));
                 }
             }
 
