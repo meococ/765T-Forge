@@ -102,7 +102,8 @@ public sealed partial class PluginCommandProcessor
     /// </summary>
     internal static bool IsInLayoutSpace(Transaction tr, Entity entity) =>
         entity is not (AttributeReference or Vertex)
-        && !(entity is Viewport vp && vp.Number == 1)
+        && !(entity is Viewport vp && ViewportSheetFilter.IsSheetViewport(
+            vp.Number, vp.CenterPoint.X, vp.CenterPoint.Y, vp.ViewCenter.X, vp.ViewCenter.Y, vp.Height, vp.ViewHeight))
         && !entity.OwnerId.IsNull
         && !entity.OwnerId.IsErased
         && tr.GetObject(entity.OwnerId, OpenMode.ForRead) is BlockTableRecord { IsLayout: true };

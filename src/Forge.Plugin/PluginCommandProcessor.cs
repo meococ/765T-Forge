@@ -1374,6 +1374,21 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, "document_not_saved", "Active document must be saved to a DWG path before DSD publish.");
         }
 
+        // TOOL-GAP #26: same missing-underlay preflight as forge_plot_to_pdf — the DSD publish
+        // path shares the plot engine and would equally issue sheets missing their underlays.
+        // Runs before the dry-run return so a dry-run predicts the real failure (read-only scan).
+        List<UnderlayEntry> publishUnderlays;
+        using (var underlayTr = ActiveDb.TransactionManager.StartTransaction())
+        {
+            publishUnderlays = EnumerateUnderlayDefinitions(underlayTr, ActiveDb);
+            underlayTr.Commit();
+        }
+
+        if (UnderlayPreflightFailure(command, publishUnderlays) is { } underlayPublishFailure)
+        {
+            return underlayPublishFailure;
+        }
+
         if (command.DryRun)
         {
             return DryRun(command, new
@@ -1383,6 +1398,8 @@ public sealed partial class PluginCommandProcessor
                 args.Layouts,
                 args.SinglePdf,
                 args.OverwriteAcknowledged,
+                underlayCount = publishUnderlays.Count,
+                underlaysResolved = true,
                 sheetType = args.SinglePdf ? "MultiPdf" : "SinglePdf"
             });
         }
@@ -1548,6 +1565,9 @@ public sealed partial class PluginCommandProcessor
             singlePdf = args.SinglePdf,
             bytes = receipt.OutputBytes,
             dsd = true,
+            underlayCount = publishUnderlays.Count,
+            underlaysResolved = true,
+            underlays = publishUnderlays,
             receipt,
             receiptError
         };

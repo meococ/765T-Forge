@@ -80,8 +80,20 @@ public sealed partial class PluginCommandProcessor
         BlockWalkStats stats,
         Func<Entity, ObjectId, BlockWalkFrame, bool> visit)
     {
+        WalkBlockSpace(tr, space, BlockWalkFrame.Root, options, stats, visit);
+    }
+
+    /// <summary>TOOL-GAP #30a: same walk rooted at a caller-supplied frame (a viewport's model→paper transform).</summary>
+    private static void WalkBlockSpace(
+        Transaction tr,
+        BlockTableRecord space,
+        BlockWalkFrame root,
+        BlockWalkOptions options,
+        BlockWalkStats stats,
+        Func<Entity, ObjectId, BlockWalkFrame, bool> visit)
+    {
         var stop = false;
-        Walk(space, BlockWalkFrame.Root);
+        Walk(space, root);
 
         void Walk(BlockTableRecord btr, BlockWalkFrame frame)
         {

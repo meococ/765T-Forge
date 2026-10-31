@@ -1605,11 +1605,55 @@ internal sealed class PdfContentInterpreter
                 ApplyExtGState(a);
                 break;
 
-            // Never paint: dash, intent, flatness, colour, marked content, compatibility, Type 3 metrics, clip.
+            // Never paint: dash, intent, flatness, marked content, compatibility, Type 3 metrics, clip.
             case "d" or "ri" or "i":
-            case "CS" or "cs" or "SC" or "SCN" or "sc" or "scn" or "G" or "g" or "RG" or "rg" or "K" or "k":
             case "BMC" or "BDC" or "EMC" or "MP" or "DP" or "BX" or "EX":
             case "d0" or "d1" or "W" or "W*":
+                break;
+
+            // Colour setters — TOOL-GAP #30b: only paints proven pure white are excluded (the
+            // DWG-to-PDF driver's full-page '1 1 1 rg … re f' background pushed the ink box x-max
+            // to the 2592-pt page edge while the PNG had no ink past 35.51"). Colour-space
+            // selection resets the colour to unproven (it is not itself a colour).
+            case "g":
+                _g.FillColor = Numbers(a, 1, op);
+                _g.FillSpace = "DeviceGray";
+                break;
+            case "G":
+                _g.StrokeColor = Numbers(a, 1, op);
+                _g.StrokeSpace = "DeviceGray";
+                break;
+            case "rg":
+                _g.FillColor = Numbers(a, 3, op);
+                _g.FillSpace = "DeviceRGB";
+                break;
+            case "RG":
+                _g.StrokeColor = Numbers(a, 3, op);
+                _g.StrokeSpace = "DeviceRGB";
+                break;
+            case "k":
+                _g.FillColor = Numbers(a, 4, op);
+                _g.FillSpace = "DeviceCMYK";
+                break;
+            case "K":
+                _g.StrokeColor = Numbers(a, 4, op);
+                _g.StrokeSpace = "DeviceCMYK";
+                break;
+            case "sc" or "scn":
+                _g.FillColor = ScColor(a);
+                break;
+            case "SC" or "SCN":
+                _g.StrokeColor = ScColor(a);
+                break;
+            case "cs":
+                // Device-space name → channel semantics stay provable; anything else (Indexed,
+                // Separation, ICCBased, unresolvable) → channels are not gray/RGB/CMYK (F7).
+                _g.FillSpace = a.Count == 1 && a[0] is PdfName fillSpace ? fillSpace.Value : null;
+                _g.FillColor = null;
+                break;
+            case "CS":
+                _g.StrokeSpace = a.Count == 1 && a[0] is PdfName strokeSpace ? strokeSpace.Value : null;
+                _g.StrokeColor = null;
                 break;
 
             // Path construction.
@@ -1666,18 +1710,27 @@ internal sealed class PdfContentInterpreter
                 break;
 
             // Painting.
-            case "S" or "B" or "B*":
+            case "S":
                 NoOperands(a, op);
-                PaintPath(stroke: true);
+                PaintPath(stroke: true, fill: false);
                 break;
-            case "s" or "b" or "b*":
+            case "B" or "B*":
+                NoOperands(a, op);
+                PaintPath(stroke: true, fill: true);
+                break;
+            case "s":
                 NoOperands(a, op);
                 ClosePath();
-                PaintPath(stroke: true);
+                PaintPath(stroke: true, fill: false);
+                break;
+            case "b" or "b*":
+                NoOperands(a, op);
+                ClosePath();
+                PaintPath(stroke: true, fill: true);
                 break;
             case "f" or "F" or "f*":
                 NoOperands(a, op);
-                PaintPath(stroke: false);
+                PaintPath(stroke: false, fill: true);
                 break;
             case "n":
                 ClearPath();
@@ -1804,6 +1857,49 @@ internal sealed class PdfContentInterpreter
         return numbers;
     }
 
+    /// <summary>
+    /// sc/scn/SC/SCN set the colour inside the current space: the channel vector is the
+    /// all-numeric operands; a trailing pattern name makes the colour unproven → treated as ink.
+    /// </summary>
+    private static double[]? ScColor(List<object?> a)
+    {
+        var channels = new double[a.Count];
+        for (var i = 0; i < a.Count; i++)
+        {
+            if (a[i] is not double d)
+            {
+                return null;
+            }
+
+            channels[i] = d;
+        }
+
+        return channels;
+    }
+
+    /// <summary>
+    /// Proven-white only: one channel ≥1 (gray), three channels all ≥1 (RGB), or four channels
+    /// all ≤0 (CMYK — zero ink coverage). Anything else (unset, pattern, 2 or 5+ channels) is
+    /// unproven and counts as ink. The channel vector only means gray/RGB/CMYK in a device
+    /// colour space — in Indexed/Separation/ICCBased a single channel is a palette index or
+    /// tint, so space must be DeviceGray/DeviceRGB/DeviceCMYK for the white rules to apply (F7).
+    /// </summary>
+    private static bool IsWhite(double[]? color, string? space)
+    {
+        if (color is null || space is not ("DeviceGray" or "DeviceRGB" or "DeviceCMYK"))
+        {
+            return false;
+        }
+
+        return color.Length switch
+        {
+            1 => color[0] >= 1.0,
+            3 => color[0] >= 1.0 && color[1] >= 1.0 && color[2] >= 1.0,
+            4 => color[0] <= 0.0 && color[1] <= 0.0 && color[2] <= 0.0 && color[3] <= 0.0,
+            _ => false,
+        };
+    }
+
     private static void NoOperands(List<object?> a, string op)
     {
         if (a.Count != 0)
@@ -1855,11 +1951,18 @@ internal sealed class PdfContentInterpreter
         _subpathSegments = 0;
     }
 
-    private void PaintPath(bool stroke)
+    /// <summary>
+    /// TOOL-GAP #30b: a paint counts as ink only when at least one channel actually shows — a
+    /// proven-white fill or stroke paints nothing. An unset/unproven colour still counts as ink
+    /// (over-estimate, same as before this colour tracking existed).
+    /// </summary>
+    private void PaintPath(bool stroke, bool fill)
     {
-        if (_hasPath)
+        var strokePaints = stroke && !IsWhite(_g.StrokeColor, _g.StrokeSpace);
+        var fillPaints = fill && !IsWhite(_g.FillColor, _g.FillSpace);
+        if (_hasPath && (strokePaints || fillPaints))
         {
-            double r = stroke ? StrokeRadius(_pathHasJoin) : 0;
+            double r = strokePaints ? StrokeRadius(_pathHasJoin) : 0;
             _ink.Add(_pathMinX - r, _pathMinY - r, _pathMaxX + r, _pathMaxY + r);
         }
 
@@ -2007,8 +2110,15 @@ internal sealed class PdfContentInterpreter
 
         double y0 = _g.Rise + Math.Min(-0.25 * size, size);
         double y1 = _g.Rise + Math.Max(-0.25 * size, size);
-        bool strokes = _g.RenderMode is not (0 or 3 or 4 or 7);
-        AddBox(PdfMatrix.Multiply(_tm, _g.Ctm), minX, y0, maxX, y1, strokes ? StrokeRadius(hasJoins: true) : 0);
+        // Render modes: 0,2,4,6 fill; 1,2,5,6 stroke; 3/7 paint nothing. Proven-white channels paint nothing either.
+        var fillPaints = _g.RenderMode is not (1 or 3 or 5 or 7) && !IsWhite(_g.FillColor, _g.FillSpace);
+        var strokePaints = _g.RenderMode is not (0 or 3 or 4 or 7) && !IsWhite(_g.StrokeColor, _g.StrokeSpace);
+        if (!fillPaints && !strokePaints)
+        {
+            return;
+        }
+
+        AddBox(PdfMatrix.Multiply(_tm, _g.Ctm), minX, y0, maxX, y1, strokePaints ? StrokeRadius(hasJoins: true) : 0);
     }
 
     private void PaintXObject(string name)
@@ -2222,6 +2332,18 @@ internal sealed class PdfContentInterpreter
         public double Rise { get; set; }
 
         public int RenderMode { get; set; }
+
+        /// <summary>Stroking colour channels (last G/RG/K/SC/SCN); null = default black or unproven (pattern/space).</summary>
+        public double[]? StrokeColor { get; set; }
+
+        /// <summary>Non-stroking colour channels (last g/rg/k/sc/scn); null = default black or unproven.</summary>
+        public double[]? FillColor { get; set; }
+
+        /// <summary>Stroking colour space (last CS); null = non-device/unproven space. PDF default is DeviceGray.</summary>
+        public string? StrokeSpace { get; set; } = "DeviceGray";
+
+        /// <summary>Non-stroking colour space (last cs); null = non-device/unproven space. PDF default is DeviceGray.</summary>
+        public string? FillSpace { get; set; } = "DeviceGray";
 
         public GState Clone() => (GState)MemberwiseClone();
     }
