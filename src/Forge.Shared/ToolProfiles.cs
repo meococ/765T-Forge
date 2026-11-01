@@ -83,6 +83,7 @@ public static class ToolProfiles
             "forge_standards_import",
             "forge_layer_create",
             "forge_layer_set",
+            "forge_layer_delete",
             "forge_layer_list",
             "forge_linetype_load",
             "forge_style_text_create",

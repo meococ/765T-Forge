@@ -225,6 +225,7 @@ public sealed partial class PluginCommandProcessor
             "forge_layer_create" => LayerCreate(command),
             "forge_layout_create" => LayoutCreate(command),
             "forge_layer_set" => LayerSet(command),
+            "forge_layer_delete" => LayerDelete(command),
             "forge_viewport_add" => ViewportAdd(command),
             "forge_doc_new" => DocNew(command),
             "forge_doc_export_dxf" => ExportDxf(command),
