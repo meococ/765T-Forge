@@ -370,41 +370,93 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, "invalid_args", $"center: {ex.Message}");
         }
 
-        var db = ActiveDb;
-        using var tr = db.TransactionManager.StartTransaction();
-        var layoutDict = (DBDictionary)tr.GetObject(db.LayoutDictionaryId, OpenMode.ForRead);
-        if (!layoutDict.Contains(args.Layout))
+        Point3d? viewCenter = null;
+        if (args.ViewCenter is not null)
         {
-            return ForgeResult.Failure(command.Id, "layout_not_found", $"Layout not found: {args.Layout}", "Call forge_doc_list_layouts for the available tabs.");
+            try
+            {
+                viewCenter = ToPoint3d(args.ViewCenter);
+            }
+            catch (ArgumentException ex)
+            {
+                return ForgeResult.Failure(command.Id, "invalid_args", $"viewCenter: {ex.Message}");
+            }
         }
 
-        var layout = (Layout)tr.GetObject(layoutDict.GetAt(args.Layout), OpenMode.ForRead);
-        var paperSpace = (BlockTableRecord)tr.GetObject(layout.BlockTableRecordId, OpenMode.ForWrite);
-        var viewport = new Viewport
+        if (args.Scale is <= 0)
         {
-            CenterPoint = center,
-            Width = args.Width,
-            Height = args.Height,
-            On = true
-        };
-        paperSpace.AppendEntity(viewport);
-        tr.AddNewlyCreatedDBObject(viewport, true);
+            return ForgeResult.Failure(command.Id, "invalid_args", "scale must be > 0 (e.g. 50 for 1:50).");
+        }
 
-        var readBack = new
+        var db = ActiveDb;
+        var previousLayout = LayoutManager.Current.CurrentLayout;
+        var switched = false;
+        try
         {
-            handle = HandleString(viewport),
-            number = viewport.Number,
-            layout = args.Layout,
-            center = new[] { center.X, center.Y, center.Z },
-            width = args.Width,
-            height = args.Height,
-            note = "The viewport shows model space 1:1 at its default view; adjust with viewport tools when needed."
-        };
-        tr.Commit();
-        return ForgeResult.Success(
-            command.Id,
-            new { handle = readBack.handle, number = readBack.number, layout = args.Layout },
-            verification: new ForgeVerification { Attempted = true, Passed = true, ReadBack = readBack });
+            using var tr = db.TransactionManager.StartTransaction();
+            var layoutDict = (DBDictionary)tr.GetObject(db.LayoutDictionaryId, OpenMode.ForRead);
+            if (!layoutDict.Contains(args.Layout))
+            {
+                return ForgeResult.Failure(command.Id, "layout_not_found", $"Layout not found: {args.Layout}", "Call forge_doc_list_layouts for the available tabs.");
+            }
+
+            var layout = (Layout)tr.GetObject(layoutDict.GetAt(args.Layout), OpenMode.ForRead);
+            if (layout.ModelType)
+            {
+                return ForgeResult.Failure(command.Id, "invalid_layout", "Model tab cannot hold a floating viewport.");
+            }
+
+            // AutoCAD only creates floating viewports in the CURRENT layout's paper space:
+            // appending to a non-current layout's BTR throws eNotInDatabase.
+            if (!string.Equals(previousLayout, layout.LayoutName, StringComparison.OrdinalIgnoreCase))
+            {
+                LayoutManager.Current.CurrentLayout = layout.LayoutName;
+                switched = true;
+            }
+
+            var paperSpace = (BlockTableRecord)tr.GetObject(layout.BlockTableRecordId, OpenMode.ForWrite);
+            var viewport = new Viewport();
+            paperSpace.AppendEntity(viewport);
+            tr.AddNewlyCreatedDBObject(viewport, true);
+
+            viewport.CenterPoint = center;
+            viewport.Width = args.Width;
+            viewport.Height = args.Height;
+            // On first: activation re-fits the view to model extents, so view parameters
+            // must be applied after or they get clobbered.
+            viewport.On = true;
+            if (viewCenter is { } vc)
+            {
+                viewport.ViewCenter = new Point2d(vc.X, vc.Y);
+            }
+            if (args.Scale is { } s)
+            {
+                viewport.CustomScale = 1.0 / s;
+            }
+
+            var readBack = new
+            {
+                handle = HandleString(viewport),
+                number = viewport.Number,
+                layout = args.Layout,
+                center = new[] { center.X, center.Y, center.Z },
+                width = args.Width,
+                height = args.Height,
+                customScale = viewport.CustomScale
+            };
+            tr.Commit();
+            return ForgeResult.Success(
+                command.Id,
+                new { handle = readBack.handle, number = readBack.number, layout = args.Layout, customScale = readBack.customScale },
+                verification: new ForgeVerification { Attempted = true, Passed = true, ReadBack = readBack });
+        }
+        finally
+        {
+            if (switched && !string.Equals(LayoutManager.Current.CurrentLayout, previousLayout, StringComparison.OrdinalIgnoreCase))
+            {
+                LayoutManager.Current.CurrentLayout = previousLayout;
+            }
+        }
     }
 
     private sealed record DocNewArgs { public string? TemplatePath { get; init; } }
@@ -437,5 +489,7 @@ public sealed partial class PluginCommandProcessor
         public double[]? Center { get; init; }
         public double Width { get; init; }
         public double Height { get; init; }
+        public double? Scale { get; init; }
+        public double[]? ViewCenter { get; init; }
     }
 }

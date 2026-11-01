@@ -85,7 +85,7 @@ Mutating entity tools check locked layers before upgrading to write (`layer_lock
 | Tool | Params | Notes |
 |---|---|---|
 | `forge_block_create` | name (unique, no `<>/"":;?*|\=`), basePoint, handles[] (geometry **moved** into the definition: cloned, transformed by −basePoint, originals erased in the same transaction), attributeDefs? [{tag (uppercase), prompt?, height, position, invisible?}] | Destructive (source entities are consumed); read-back lists definition handle + attribute tags |
-| `forge_block_insert` | name, position, scale? (uniform, default 1), rotationDeg?, layer?, attributes? {tag: value} | Values are set **after** `SetAttributesFromBlock` (that call resets them — verified against forum reports); read-back echoes the attributes |
+| `forge_block_insert` | name, position, scale? (uniform, default 1), rotationDeg?, layer?, layout?, attributes? {tag: value} | `layout` lands the insert on a paper-space tab (title blocks on sheets); read-back echoes the attributes |
 | `forge_block_list` | — | Read-only: definitions with handle, attribute tags, insert count |
 
 ## C23 & C27 — layers, layouts, linetypes & styles (groups `layer`, `layout`, `style`)
@@ -109,7 +109,7 @@ Mutating entity tools check locked layers before upgrading to write (`layer_lock
 | `forge_doc_new` | templatePath? | New document (blank or DWT/DWG), made active in application context; `ok` only when it reads back as active (`doc_new_unconfirmed` otherwise) |
 | `forge_doc_export_dxf` | outputPath, overwriteAcknowledged? | `DxfOut(path, 16, false)` — 16-digit precision; exports the in-memory state; destination backup + overwrite ack |
 | `forge_draw_polyline_from_csv` | csvPath, hasHeader?, delimiter?, xColumn?, yColumn?, closed?, constantWidth?, layer?, colorIndex? | Survey/centerline point lists from CSV without token cost; reports dropped lines |
-| `forge_viewport_add` | layout, center, width, height | Rectangular model-space viewport on a paper-space layout, read-back carries the viewport number |
+| `forge_viewport_add` | layout, center, width, height, scale? (denominator, e.g. 50 for 1:50), viewCenter? [x,y] model units | Rectangular model-space viewport on a paper-space layout; the target layout is made current during creation (AutoCAD only accepts viewports in the current layout's paper space). Read-back carries the viewport number and applied customScale |
 
 ## C29 — Spatial & Semantic Intelligence (`forge_drawing_summary`, `forge_entity_search_text`, `forge_entity_snap`)
 
