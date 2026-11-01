@@ -31,7 +31,8 @@ public static class ForgeLiveCompletions
 
         // forge://profiles/{name} — static list, no pipe needed.
         if (parameters.Ref is ResourceTemplateReference template &&
-            template.Uri.Contains("profiles/", StringComparison.OrdinalIgnoreCase) &&
+            template.Uri is { } templateUri &&
+            templateUri.Contains("profiles/", StringComparison.OrdinalIgnoreCase) &&
             argName.Equals("name", StringComparison.OrdinalIgnoreCase))
         {
             return Result(FilterPrefix(ToolProfiles.Names, prefix));
