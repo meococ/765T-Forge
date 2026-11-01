@@ -87,17 +87,24 @@ public sealed class PipeProgressTests
             // Emit progress then stall — the client must surface cancellation, not a typed timeout.
             await writer.WriteLineAsync(JsonSerializer.Serialize(
                 ForgeProgressMessage.For(command.Id, 1, 4, "Publishing sheet 1 of 4"), ForgeJson.Options));
-            await Task.Delay(TimeSpan.FromSeconds(30));
+            await Task.Delay(TimeSpan.FromSeconds(5));
         });
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+        // Cancel only after the progress callback provably ran — a fixed timer raced the
+        // connect+read on slow CI runners and flaked with an empty collection.
+        var progressSeen = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var received = new List<ForgeProgressMessage>();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Client(pipeName).SendAsync(
+        var sendTask = Client(pipeName).SendAsync(
             command,
-            p => { received.Add(p); return Task.CompletedTask; },
-            cts.Token));
+            p => { received.Add(p); progressSeen.TrySetResult(true); return Task.CompletedTask; },
+            cts.Token);
 
+        await progressSeen.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => sendTask);
         Assert.Single(received);
     }
 }
