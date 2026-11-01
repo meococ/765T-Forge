@@ -84,6 +84,25 @@ builder.Services
 
             return result;
         });
+        filters.AddCompleteFilter(next => async (context, cancellationToken) =>
+        {
+            // Live completions for prompt/resource-template args — layout/layer/xref names
+            // come from the running AutoCAD; ForgeLiveCompletions returns null for arg
+            // names it does not own so SDK-defined completions still answer.
+            var runner = context.Services?.GetService<ForgeToolRunner>();
+            if (runner is not null && context.Params is not null)
+            {
+                var live = await ForgeLiveCompletions
+                    .TryCompleteAsync(runner, context.Params, cancellationToken)
+                    .ConfigureAwait(false);
+                if (live is not null)
+                {
+                    return live;
+                }
+            }
+
+            return await next(context, cancellationToken).ConfigureAwait(false);
+        });
         filters.AddCallToolFilter(next => async (context, cancellationToken) =>
         {
             var toolsets = context.Services?.GetService<ForgeToolsetState>();

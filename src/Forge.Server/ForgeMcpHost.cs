@@ -40,5 +40,12 @@ public static class ForgeMcpHost
             }
         };
 #pragma warning restore MCPEXP001
+
+        // completion/complete (2025-11-25) — argument auto-completion for prompt and
+        // resource-template args. Without the advertised capability the SDK rejects
+        // the method outright (-32601). The CompleteFilters chain in Program.cs
+        // answers layout/layer/xref/profile names (live from the drawing when it can).
+        options.Capabilities ??= new ServerCapabilities();
+        options.Capabilities.Completions = new CompletionsCapability();
     }
 }

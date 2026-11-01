@@ -37,6 +37,44 @@ public sealed class ForgeMcpResources
         => TryReadRepoFile("docs/safety.md")
            ?? "# Safety\nSee repository docs/safety.md";
 
+    // ---- Live drawing resources (item 6): answer straight from the running AutoCAD
+    // through ForgeToolRunner; a dead pipe still returns a typed failure body, never a throw.
+
+    [McpServerResource(UriTemplate = "forge://drawing/summary", Name = "ActiveDrawingSummary", Title = "Active Drawing Summary", MimeType = "application/json")]
+    [Description("Live summary of the active drawing (layout, entity counts, extents) via forge_drawing_summary.")]
+    public static async Task<string> DrawingSummary(ForgeToolRunner runner, CancellationToken cancellationToken)
+        => await LiveAsync(runner, "forge_drawing_summary", cancellationToken);
+
+    [McpServerResource(UriTemplate = "forge://drawing/layers", Name = "ActiveDrawingLayers", Title = "Active Drawing Layers", MimeType = "application/json")]
+    [Description("Live layer table of the active drawing via forge_layer_list.")]
+    public static async Task<string> DrawingLayers(ForgeToolRunner runner, CancellationToken cancellationToken)
+        => await LiveAsync(runner, "forge_layer_list", cancellationToken);
+
+    [McpServerResource(UriTemplate = "forge://drawing/layouts", Name = "ActiveDrawingLayouts", Title = "Active Drawing Layouts", MimeType = "application/json")]
+    [Description("Live layout list of the active drawing via forge_doc_list_layouts.")]
+    public static async Task<string> DrawingLayouts(ForgeToolRunner runner, CancellationToken cancellationToken)
+        => await LiveAsync(runner, "forge_doc_list_layouts", cancellationToken);
+
+    [McpServerResource(UriTemplate = "forge://drawing/xrefs", Name = "ActiveDrawingXrefs", Title = "Active Drawing Xrefs", MimeType = "application/json")]
+    [Description("Live xref table of the active drawing via forge_xref_list.")]
+    public static async Task<string> DrawingXrefs(ForgeToolRunner runner, CancellationToken cancellationToken)
+        => await LiveAsync(runner, "forge_xref_list", cancellationToken);
+
+    private static async Task<string> LiveAsync(ForgeToolRunner runner, string tool, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await runner.InvokeAsync(tool, new { }, cancellationToken: cancellationToken).ConfigureAwait(false);
+            return JsonSerializer.Serialize(result, ForgeJson.Options);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(
+                ForgeResult.Failure("", "resource_unavailable", $"{tool} could not answer: {ex.Message}"),
+                ForgeJson.Options);
+        }
+    }
+
     private static string? TryReadRepoFile(string relative)
     {
         try
