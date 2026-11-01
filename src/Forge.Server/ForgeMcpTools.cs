@@ -464,9 +464,9 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_block_create", new { name, basePoint, handles, attributeDefs }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_block_insert", Title = "Block Insert", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
-    [Description("Insert a block reference: name, position (WCS), uniform scale, rotationDeg, layer, attributes {tag: value}. Read-back echoes the applied attributes. Returns the insert handle.")]
-    public static Task<ForgeResult> BlockInsert(ForgeToolRunner runner, string name, double[] position, double scale = 1, double rotationDeg = 0, string? layer = null, Dictionary<string, string>? attributes = null, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_block_insert", new { name, position, scale, rotationDeg, layer, attributes }, dryRun, cancellationToken: cancellationToken);
+    [Description("Insert a block reference: name, position (WCS), uniform scale, rotationDeg, layer, attributes {tag: value}. Optional layout lands the insert on a paper-space tab (e.g. a title block on a sheet); omitted inserts to model space. Read-back echoes the applied attributes. Returns the insert handle.")]
+    public static Task<ForgeResult> BlockInsert(ForgeToolRunner runner, string name, double[] position, double scale = 1, double rotationDeg = 0, string? layer = null, string? layout = null, Dictionary<string, string>? attributes = null, bool dryRun = false, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_block_insert", new { name, position, scale, rotationDeg, layer, layout, attributes }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_block_list", Title = "Block List", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("List block definitions (not inserts): name, handle, origin, attribute tags. Use forge_block_list_attributes for the values on a specific insert.")]
@@ -489,9 +489,9 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_layout_create", new { name }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_viewport_add", Title = "Viewport Add", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
-    [Description("Add a model-space viewport to a paper-space layout: layout, paper-space center [x,y], width, height. Read-back carries the viewport handle and number.")]
-    public static Task<ForgeResult> ViewportAdd(ForgeToolRunner runner, string layout, double[] center, double width, double height, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_viewport_add", new { layout, center, width, height }, dryRun, cancellationToken: cancellationToken);
+    [Description("Add a model-space viewport to a paper-space layout: layout, paper-space center [x,y], width, height. Optional scale (denominator, e.g. 50 for 1:50) and viewCenter [x,y] in model units. Read-back carries handle, number and applied customScale.")]
+    public static Task<ForgeResult> ViewportAdd(ForgeToolRunner runner, string layout, double[] center, double width, double height, double? scale = null, double[]? viewCenter = null, bool dryRun = false, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_viewport_add", new { layout, center, width, height, scale, viewCenter }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_doc_new", Title = "Drawing New", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Create a new document (optionally from a DWT/DWG templatePath) and make it the active document. Runs in application context (works from the Start tab). ok=true only when AutoCAD reads back the new drawing as the active document and DWGNAME names it; otherwise it fails with doc_new_unconfirmed and data shows which drawing is active.")]

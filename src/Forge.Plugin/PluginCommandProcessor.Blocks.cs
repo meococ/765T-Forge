@@ -234,7 +234,26 @@ public sealed partial class PluginCommandProcessor
         var btrId = blockTable[args.Name];
         var btr = (BlockTableRecord)tr.GetObject(btrId, OpenMode.ForRead);
         var bref = new BlockReference(position, btrId);
-        AppendToModelSpace(db, tr, bref);
+        var spaceName = "model";
+        if (!string.IsNullOrWhiteSpace(args.Layout))
+        {
+            var layoutDict = (DBDictionary)tr.GetObject(db.LayoutDictionaryId, OpenMode.ForRead);
+            if (!layoutDict.Contains(args.Layout))
+            {
+                return ForgeResult.Failure(command.Id, "layout_not_found", $"Layout not found: {args.Layout}", "Call forge_doc_list_layouts for the available tabs.");
+            }
+
+            var layout = (Layout)tr.GetObject(layoutDict.GetAt(args.Layout), OpenMode.ForRead);
+            var space = (BlockTableRecord)tr.GetObject(layout.BlockTableRecordId, OpenMode.ForWrite);
+            bref.SetDatabaseDefaults();
+            space.AppendEntity(bref);
+            tr.AddNewlyCreatedDBObject(bref, true);
+            spaceName = layout.ModelType ? "model" : $"layout:{layout.LayoutName}";
+        }
+        else
+        {
+            AppendToModelSpace(db, tr, bref);
+        }
 
         // Scale and rotation apply after the reference is resident; attribute values only after
         // SetAttributesFromBlock — that call creates the references and resets their values.
@@ -298,6 +317,7 @@ public sealed partial class PluginCommandProcessor
         {
             handle = HandleString(bref),
             name = args.Name,
+            space = spaceName,
             appliedAttributes = applied,
             unmatchedTags = unmatchedTags.ToArray(),
             readBack = attributeEcho.ToArray()
@@ -1232,6 +1252,7 @@ public sealed partial class PluginCommandProcessor
         public double Scale { get; init; } = 1;
         public double RotationDeg { get; init; }
         public string? Layer { get; init; }
+        public string? Layout { get; init; }
         public Dictionary<string, string>? Attributes { get; init; }
     }
 

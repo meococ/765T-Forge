@@ -27,6 +27,9 @@ artifacts/
 *.pfx
 *.snk
 
+# Per-user Devin config (run-local MCP servers, permissions)
+.devin/*.local.json
+
 # JetBrains
 .idea/
 *.sln.iml
