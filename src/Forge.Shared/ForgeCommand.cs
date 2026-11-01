@@ -12,6 +12,11 @@ public sealed record ForgeCommand
     public bool DryRun { get; init; }
     public bool UnsafeAcknowledged { get; init; }
 
+    // compat-progress-flag: set by the server only when the MCP caller sent a progressToken;
+    // the plugin emits forge_progress lines only when this is true, so servers older than
+    // core v2 (single-reply readers) still get exactly one reply line.
+    public bool Progress { get; init; }
+
     public string? AuthToken { get; init; }
 
     public ForgeCommand WithToken(string token) => this with { AuthToken = token };
