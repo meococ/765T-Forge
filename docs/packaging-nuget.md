@@ -21,7 +21,7 @@ been pushed to NuGet.org, the MCP Registry, a git tag, or a GitHub Release.**
 One-line install once published:
 
 ```powershell
-dnx Forge765T.Server@0.2.0 --yes   # pin a version — never @latest
+dnx Forge765T.Server@0.3.0 --yes   # pin a version — never @latest
 ```
 
 `server.json` declares the package + env vars (`FORGE_AUTOCAD_TOKEN` required/secret,

@@ -8,6 +8,7 @@
 - Source of truth: [CHANGELOG.md](../CHANGELOG.md) and Git tags `v*`
 - **0.1.x** — Phase 0 foundation + Wave 0 publish hygiene (preview)
 - **0.2.0** — Waves 1–2 (real DSD publish, preflight, campaign, capabilities) and Wave 3 packaging as available
+- **0.3.0** — MCP core v2: toolset-filtered default surface (19 tools; `FORGE_TOOLSETS=all` restores it), structured output, tasks, elicitation, live resources/completions, progress, real cancellation + the authoring/reliability waves shipped since 0.2.0
 - Breaking MCP tool renames or envelope changes bump **MINOR** while major is `0`, or **MAJOR** after `1.0.0`
 
 ## 2. Phase (docs / brief)

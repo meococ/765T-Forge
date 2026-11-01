@@ -1310,7 +1310,7 @@
       "Forge765T.Server": {
         "type": "Project",
         "dependencies": {
-          "Forge.Shared": "[0.2.0, )",
+          "Forge.Shared": "[0.3.0, )",
           "Microsoft.Extensions.Hosting": "[8.0.1, )",
           "Microsoft.Extensions.Logging.Console": "[8.0.1, )",
           "ModelContextProtocol": "[1.4.0, )"

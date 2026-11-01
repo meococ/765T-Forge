@@ -15,6 +15,7 @@ Product SemVer is independent of historical “Phase” labels in the build brie
 | — | Evidence chain (PublishReceipt, PDF probes) | 0.3.0 | Differentiation vs geometry MCPs |
 | — | Domain contracts (IssueSet, pack v2 gates) | 0.3.x | Fail-closed project judgment |
 | — | Moat (differential receipts, sheet inventory, batch resume) | 0.4.0 | Hard to copy without AEC ops DNA |
+| — | MCP core v2 (toolsets, structured output, tasks, elicitation, live resources/completions, conformance gate) | 0.3.0 | Shipped — staged, untagged |
 
 **Already in 0.2.0 (do not re-list as 0.3.0 targets):** sync-preferring exec honesty, drawing registry, standards packs, MCP resources/prompts/profiles, viewport typed ops, page-setup sync path, Autoloader skeleton, sample pack.
 
@@ -25,5 +26,5 @@ Clash 3D / Civil 3D / full SSM **write** product / national “metro ontology”
 ## Next public milestones
 
 1. **v0.2.x tag** only after smoke checklist ([smoke-lab.md](smoke-lab.md)) has at least one maintainer pass, with **both** server and plugin zips on the GitHub Release.
-2. **v0.3.0** — PublishReceipt + PDF probes + IssueSetContract lite + pack v2 blocking gates + actionable findings.
+2. **v0.3.0** — MCP core v2 (toolset-bounded context, structured output, tasks, elicitation, live resources/completions, distribution prep). The originally planned 0.3.0 scope (PublishReceipt + PDF probes + IssueSetContract lite + pack v2 gates + actionable findings) already shipped inside 0.3.0's waves.
 3. **v0.4.0** — differential receipts, read-only sheet inventory, hardened batch resume, optional screenshot **after** PDF verify.
