@@ -10,7 +10,24 @@ See [docs/versioning.md](docs/versioning.md).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-01
+
 ### Added
+- **MCP core v2** — protocol-level pass over the whole tool surface:
+  - Toolsets bound `tools/list` context cost: default session exposes 19 tools / ~13.7 KB (was 120 / ~112 KB); `FORGE_TOOLSETS` env or `--toolsets` selects sets, `all` restores the full 123-tool catalog; runtime `forge_toolset_list` / `forge_toolset_enable` (sends `notifications/tools/list_changed`) / `forge_toolset_search`; calls into a disabled set return typed `tool_not_enabled`. Membership derives from registry group metadata so it cannot drift.
+  - Structured output on every tool: `outputSchema` (`{"type":"object"}` envelope) + `UseStructuredContent`; results carry `structuredContent` plus a text mirror for older clients. Zero boolean schemas remain anywhere in the catalog (schema sanitizer rewrites free-form `any` spots to explicit `anyOf`).
+  - Titles on all 123 tools + resources + prompts; 13 thin descriptions now state returns/units/side-effects; `forge_draw_batch` input schema slimmed 5,070 → 257 B (steps bind `JsonElement[]`).
+  - Progress notifications (`notifications/progress`) from real work on `forge_plot_publish` (per-sheet via PlotProgressDialog polling), `forge_pack_and_go` (per-file), `forge_plot_to_pdf` and `forge_dgn_import` (start/done), gated by the `progress` request flag (see Fixed).
+  - Real caller cancellation: `notifications/cancelled` aborts the pipe wait end-to-end; a cancelled request produces no fake typed result.
+  - MCP tasks: `InMemoryMcpTaskStore` + `capabilities.tasks`; task-augmented calls return `taskId`/`working`, `tasks/get` polls, `tasks/result` returns `content` + `structuredContent`.
+  - Elicitation for destructive refusals: `*_overwrite_not_acknowledged` (and the sibling flag family) becomes an `elicitation/create` confirmation when the client advertises it; the call is retried once with the acknowledged flag on accept, the original refusal on decline or no capability.
+  - Live drawing resources (`forge://drawing/summary|layers|layouts|xrefs`) run through the real tool pipeline — dead pipe returns typed failure JSON, never a throw.
+  - `completion/complete` support: `forge://profiles/{name}` completes profile names; layout/layer/xref arguments complete from live AutoCAD data (empty list on pipe failure); advertised via `capabilities.completions`.
+  - Workflow prompts use only real tool names and honest dry-run/preflight/overwrite/progress/tasks guidance.
+  - Distribution prep (not published): `server.json` MCP Registry manifest, `Forge.Server` packs as .NET tool `Forge765T.Server` / `forge-server`, `dnx` install snippets, README `mcp-name` ownership marker.
+  - `McpConformanceTests` wire-level gate in CI (default+all toolset sweep, capability advertisement, typed refusals).
+  - `docs/competitive-benchmark.md` (factual, linked) + `docs/design-remote-transport.md` (Streamable HTTP deferred: loopback/auth/RFC 9728 risk analysis).
+  - ModelContextProtocol SDK 1.4.0.
 - `forge_doc_close` (fix-smoke-20261029 D8): close one open drawing by exact name or path, in application context. Refuses the last drawing, a running command, and unsaved changes unless `save=true` (backup, save to its own .dwg, file readback) or `discardAcknowledged=true`; `ok` only when AutoCAD no longer lists the Document. Authoring profile.
 
 - Speed wave (2026-10-29, 119 total MCP tools, 66 in the `authoring` profile) — fewer round trips, smaller payloads, presentation QA without screenshots:
@@ -44,6 +61,8 @@ See [docs/versioning.md](docs/versioning.md).
   - **C30 AEC Structural & Architectural**: `forge_draw_grid` (orthogonal structural grid axes, labeled bubbles, overall & bay dimensions in one transaction), `forge_draw_wall` (double-line architectural wall from centerline with left/right/center justification, end caps, optional hatch fill)
 
 ### Fixed
+
+- **P0 plugin↔server compatibility**: the plugin installed `PipeProgressReporter` unconditionally, so a server older than core v2 — which reads exactly one reply line — could take a `forge_progress` line as the result on `forge_plot_to_pdf`, `forge_plot_publish`, `forge_pack_and_go` and `forge_dgn_import` while the command kept running in AutoCAD. `ForgeCommand` gains a `progress` envelope field; the server sets it only when a progress sink exists (`_meta.progressToken` or the onProgress seam); the plugin emits progress lines only when the flag is set — a progress-less request gets exactly one reply line as before. Live proof: `deploy\server` (pre-core-v2) `forge_plot_to_pdf` → single correct reply; `deploy\server-smoke` (0.3.0) + `progressToken` → 2 progress events + result; no token → 0 events.
 
 - fix-smoke-20261029 (live smoke r1 defects D1–D7; every `ok`, `verification.passed`, `undone` and `looksTiny` is now read back from the drawing or the PDF):
   - D1 `forge_doc_new` / `forge_doc_open` run in application context (the `Application.Idle` lane of `forge_doc_activate`); inside a document command context AutoCAD deferred the switch, so the new drawing never became active. `ok` only when the active document (by reference) and DWGNAME name the target; otherwise `doc_new_unconfirmed` / `doc_open_unconfirmed`. An already-open drawing is activated instead of opened twice
@@ -84,6 +103,7 @@ See [docs/versioning.md](docs/versioning.md).
 
 ### Changed
 
+- **Default tool surface**: new sessions see the `meta` + `core` toolsets (19 tools) instead of the full 123-tool catalog — the reason this is 0.3.0, not 0.2.x. Envelope (`forge.envelope.v1`) and every tool contract are unchanged; `FORGE_TOOLSETS=all` restores the previous surface, and `tools/list_changed` lets clients discover the rest at runtime.
 - `forge_draw_batch` throughput and annotation keys: per-batch id cache for layers, dim/text/multileader styles, blocks and model space (ids only — every step still opens what it writes in its own transaction); `atomic=true` validates every step first and creates everything in one transaction (`batch_invalid`/`batch_aborted` create nothing); `resultMode=full|errors|summary`; `countsByType`, `elapsedMs`, `entitiesPerSecond` in every result; the verification read-back no longer repeats the per-step results (payload for 1000 steps 166 KB → 87 KB in `full`, 0.7 KB in `summary`); entity types come from the new object id's class instead of reopening each entity. New step keys: `textStyle` (text/mtext/leader), `backgroundMask` + `maskScale` (mtext and leader text), `leaderStyle`, `contentBlock` + `attributes` (block-content MLEADER tag bubble at the landing point; unknown tags are warnings)
 - `forge_entity_get` read-back now includes `textStyle` for TEXT/MTEXT, `backgroundMask` for MTEXT and MLEADER text, and `contentBlock` for block-content MLEADERs, so a batch's masks, styles and tag bubbles can be checked without a screenshot
 - Roadmap SemVer reconciled with capability matrix (registry/packs/resources are 0.2.0 shipped, not 0.3.0 targets)

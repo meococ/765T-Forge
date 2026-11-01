@@ -3,7 +3,7 @@
   "name": "io.github.meococ/765t-forge",
   "title": "765T Forge",
   "description": "AutoCAD 2025/2026 MCP server for metro/AEC drawing production workflows",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "repository": {
     "url": "https://github.com/meococ/765T-Forge",
     "source": "github"
@@ -13,7 +13,7 @@
       "registryType": "nuget",
       "registryBaseUrl": "https://api.nuget.org/v3/index.json",
       "identifier": "Forge765T.Server",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "transport": {
         "type": "stdio"
       },
