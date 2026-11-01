@@ -483,6 +483,11 @@ public sealed class ForgeMcpTools
     public static Task<ForgeResult> LayerSet(ForgeToolRunner runner, string name, bool? isOn = null, bool? isFrozen = null, bool? isLocked = null, bool? isPlottable = null, int? colorIndex = null, bool makeCurrent = false, bool dryRun = false, CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_layer_set", new { name, isOn, isFrozen, isLocked, isPlottable, colorIndex, makeCurrent }, dryRun, cancellationToken: cancellationToken);
 
+    [McpServerTool(Name = "forge_layer_delete", Title = "Layer Delete", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
+    [Description("Delete one drawing layer. Dry-run by default — pass dryRun=false to actually delete. Refuses layer 0/Defpoints, the current layer, xref-dependent layers and layers still in use (reports occupant count and sample handles).")]
+    public static Task<ForgeResult> LayerDelete(ForgeToolRunner runner, string name, bool dryRun = true, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_layer_delete", new { name }, dryRun, cancellationToken: cancellationToken);
+
     [McpServerTool(Name = "forge_layout_create", Title = "Layout Create", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Create a paper-space layout tab by name. Refuses an existing name with layout_not_unique.")]
     public static Task<ForgeResult> LayoutCreate(ForgeToolRunner runner, string name, bool dryRun = false, CancellationToken cancellationToken = default)

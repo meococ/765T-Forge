@@ -446,6 +446,117 @@ public sealed partial class PluginCommandProcessor
         return ForgeResult.Success(command.Id, data, verification: verification);
     }
 
+    private static ForgeResult LayerDelete(ForgeCommand command)
+    {
+        var args = Args<LayerDeleteArgs>(command);
+        if (string.IsNullOrWhiteSpace(args.Name))
+        {
+            return ForgeResult.Failure(command.Id, "missing_layer_name", "name is required.");
+        }
+
+        var db = ActiveDb;
+        using var tr = db.TransactionManager.StartTransaction();
+        var layerTable = (LayerTable)tr.GetObject(db.LayerTableId, OpenMode.ForRead);
+        if (!layerTable.Has(args.Name))
+        {
+            return ForgeResult.Failure(command.Id, "layer_not_found", $"Layer not found: {args.Name}");
+        }
+
+        var ltr = (LayerTableRecord)tr.GetObject(layerTable[args.Name], OpenMode.ForRead);
+        if (args.Name.Equals("0", StringComparison.OrdinalIgnoreCase) ||
+            args.Name.Equals("Defpoints", StringComparison.OrdinalIgnoreCase))
+        {
+            return ForgeResult.Failure(
+                command.Id,
+                "layer_protected",
+                $"Refusing to delete system layer: {args.Name}",
+                "Layers 0 and Defpoints are required by AutoCAD and can never be deleted.");
+        }
+
+        if (ltr.IsDependent || args.Name.Contains('|'))
+        {
+            return ForgeResult.Failure(
+                command.Id,
+                "layer_from_xref",
+                $"Refusing to delete xref-dependent layer: {args.Name}",
+                "Detach or bind the owning xref first; the layer disappears with it.");
+        }
+
+        var currentName = ((LayerTableRecord)tr.GetObject(db.Clayer, OpenMode.ForRead)).Name;
+        if (currentName.Equals(args.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            return ForgeResult.Failure(
+                command.Id,
+                "layer_is_current",
+                $"Refusing to delete the current layer: {args.Name}",
+                "Make another layer current first (forge_layer_set makeCurrent).");
+        }
+
+        // In-use scan: every entity in every space/block definition. Also report a sample so
+        // the caller can move or erase the offenders instead of guessing.
+        var occupants = new List<object>();
+        var occupantCount = 0;
+        var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+        foreach (ObjectId btrId in blockTable)
+        {
+            var space = (BlockTableRecord)tr.GetObject(btrId, OpenMode.ForRead);
+            foreach (ObjectId entId in space)
+            {
+                if (tr.GetObject(entId, OpenMode.ForRead) is Entity ent &&
+                    ent.Layer.Equals(args.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    occupantCount++;
+                    if (occupants.Count < 10)
+                    {
+                        occupants.Add(new { handle = HandleString(ent), type = ent.GetType().Name, space = space.Name });
+                    }
+                }
+            }
+        }
+
+        if (occupantCount > 0)
+        {
+            return ForgeResult.Failure(
+                command.Id,
+                "layer_in_use",
+                $"Layer still in use by {occupantCount} entities: {args.Name}",
+                "Move those entities to another layer (forge_entity_set_props) or erase them first.",
+                data: new { occupantCount, sample = occupants.ToArray() });
+        }
+
+        if (command.DryRun)
+        {
+            return DryRun(command, new { args.Name, wouldDelete = true, occupantCount = 0 });
+        }
+
+        ltr.UpgradeOpen();
+        try
+        {
+            ltr.Erase();
+        }
+        catch (Autodesk.AutoCAD.Runtime.Exception ex)
+        {
+            return ForgeResult.Failure(
+                command.Id,
+                "layer_in_use",
+                $"Erase refused for layer {args.Name}: {ex.Message}",
+                "A style, dimension or dictionary still references it — resolve that reference first.");
+        }
+
+        var data = new { deleted = ltr.Name, removed = new[] { ltr.Name }, occupantCount = 0 };
+        tr.Commit();
+        return ForgeResult.Success(
+            command.Id,
+            data,
+            verification: new ForgeVerification
+            {
+                Attempted = true,
+                Passed = true,
+                Message = "Layer table record erased; occupant scan found 0 entities before delete.",
+                ReadBack = data
+            });
+    }
+
     private static ForgeResult LayoutCreate(ForgeCommand command)
     {
         var args = Args<LayoutCreateArgs>(command);
@@ -1255,6 +1366,8 @@ public sealed partial class PluginCommandProcessor
         public string? Layout { get; init; }
         public Dictionary<string, string>? Attributes { get; init; }
     }
+
+    private sealed record LayerDeleteArgs { public string? Name { get; init; } }
 
     private sealed record LayerCreateArgs
     {
