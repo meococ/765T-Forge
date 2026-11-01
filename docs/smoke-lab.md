@@ -16,15 +16,15 @@ Automated helper: [`scripts/smoke-lab.ps1`](../scripts/smoke-lab.ps1) (Autoloade
 
 ## Steps
 
-| # | Action | Expected | 2026-07-11 |
-|---|---|---|---|
-| 1 | `forge_system_health` | `status=ok`, pipe matches | PASS |
-| 2 | MCP resource `forge://docs/capability-matrix` | Full matrix from Release zip | PASS (embedded in pack) |
-| 3 | `forge_qa_preflight` missing required tag | `passed=false`, `titleblock_tag_missing` + SuggestedTool | PASS |
-| 4 | `forge_plot_publish` existing PDF, no overwrite ack | `publish_overwrite_not_acknowledged` | PASS |
-| 5a | `forge_plot_publish` dryRun | ok | PASS |
-| 5b | Real PDF output | file exists, verify passed | PASS via `forge_plot_to_pdf` (Layout1); DSD `PublishDsd` returned `publish_no_output` on this seat — tracked |
-| 6 | `forge_issue_set_validate` bad layout | `issue_set_layout_missing` | PASS |
+| # | Action | Expected | 2026-07-11 | 2026-11-01 |
+|---|---|---|---|---|
+| 1 | `forge_system_health` | `status=ok`, pipe matches | PASS | PASS 77 ms |
+| 2 | MCP resource `forge://docs/capability-matrix` | Full matrix from Release zip | PASS (embedded in pack) | PASS — `resources/read` over stdio returns full matrix markdown |
+| 3 | `forge_qa_preflight` missing required tag | `passed=false`, `titleblock_tag_missing` + SuggestedTool | PASS | PASS 2,454 ms — `passed:false`, `titleblock_tag_missing` present |
+| 4 | `forge_plot_publish` existing PDF, no overwrite ack | `publish_overwrite_not_acknowledged` | PASS | PASS 45 ms — expected refusal |
+| 5a | `forge_plot_publish` dryRun | ok | PASS | PASS 16 ms |
+| 5b | Real PDF output | file exists, verify passed | PASS via `forge_plot_to_pdf` (Layout1); DSD `PublishDsd` returned `publish_no_output` on this seat — tracked | Same seat caveat: `PublishDsd` → `publish_no_output` on the throwaway DWG (single + multi layout); `forge_plot_to_pdf` on same layout wrote a verified 12,196-byte PDF in 14.2 s |
+| 6 | `forge_issue_set_validate` bad layout | `issue_set_layout_missing` | PASS | PASS 32 ms (`issue_set_layout_missing`); valid contract on same drawing → `passed:true` |
 
 ## Record
 
@@ -52,3 +52,10 @@ Notes:
 - Operator: agent (Cursor) + AutoCAD 2026 local
 - Result: **PASS** (critical: health, preflight, overwrite ack, issue-set validate, plot_to_pdf)
 - Notes: DSD multi-layout publish path needs follow-up on this workstation; single-layout `forge_plot_to_pdf` verified end-to-end with backup + PDF verify.
+
+### Pass 2026-11-01
+
+- Tag: untagged / product SemVer 0.2.0 (master `90a2538` + uncommitted r10 fixes)
+- Operator: agent (Devin) + AutoCAD 2025 local, `artifacts/smoke-v02x/`
+- Result: **PASS** (critical path) — all six checklist items verified
+- Notes: active drawing `smoke-c25.dwg` (Layout1/Layout2). `PublishDsd` caveat unchanged: `publish_no_output` on the throwaway drawing for single and multi layout publish; the r9 window did produce a real 4-page DSD set on a configured project drawing, so this remains seat/drawing-specific. `forge_plot_to_pdf` on the same layout verified end-to-end (12,196-byte PDF).
