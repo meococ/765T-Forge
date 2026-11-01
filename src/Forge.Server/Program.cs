@@ -110,6 +110,10 @@ builder.Services
                 };
             }
 
+            // _meta.progressToken → ambient scope: pipe progress lines + the headless runner
+            // forward to it as notifications/progress for the life of this call.
+            var progress = ForgeProgressScope.FromRequest(context.Server, context.Params);
+            using var _ = progress is not null ? ForgeProgressScope.Push(progress) : null;
             var result = await next(context, cancellationToken).ConfigureAwait(false);
             return ForgeCallToolResults.MarkBusinessFailure(result);
         });

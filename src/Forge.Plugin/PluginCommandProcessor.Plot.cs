@@ -1159,6 +1159,7 @@ public sealed partial class PluginCommandProcessor
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+            Progress?.Report(0, 1, $"Plotting {layoutName} ({engine})…");
             if (engine == "api")
             {
                 RunPlotEngine(doc, info, outputPath);
@@ -1167,6 +1168,8 @@ public sealed partial class PluginCommandProcessor
             {
                 RunLegacyPlotCommand(layoutName, isModel, viewer.PlotDevice, readBack, area, window, storedViewName, centring, args.PlotStyle, outputPath);
             }
+
+            Progress?.Report(1, 1, $"Plotted {layoutName}.");
         }
         catch (System.Exception ex)
         {

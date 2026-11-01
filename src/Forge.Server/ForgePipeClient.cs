@@ -17,7 +17,17 @@ public sealed class ForgePipeClient
         _logger = logger;
     }
 
-    public async Task<ForgeResult> SendAsync(ForgeCommand command, CancellationToken cancellationToken = default)
+    public Task<ForgeResult> SendAsync(ForgeCommand command, CancellationToken cancellationToken = default)
+        => SendAsync(command, onProgress: null, cancellationToken);
+
+    /// <summary>
+    /// onProgress is the deterministic seam for wire tests — production leaves it null and
+    /// progress lines fall back to the ambient ForgeProgressScope (MCP notifications/progress).
+    /// </summary>
+    public async Task<ForgeResult> SendAsync(
+        ForgeCommand command,
+        Func<ForgeProgressMessage, Task>? onProgress,
+        CancellationToken cancellationToken = default)
     {
         var authenticated = command.WithToken(_environment.Token);
         await using var pipe = new NamedPipeClientStream(
@@ -44,7 +54,48 @@ public sealed class ForgePipeClient
             var json = JsonSerializer.Serialize(authenticated, ForgeJson.Options);
             await writer.WriteLineAsync(json.AsMemory(), responseTimeout.Token).ConfigureAwait(false);
 
-            var response = await reader.ReadLineAsync(responseTimeout.Token).ConfigureAwait(false);
+            // The plugin may emit forge_progress lines before its final ForgeResult line
+            // (long ops like publish/pack). Skip-and-forward those; the first non-progress
+            // JSON line is the reply.
+            string? response = null;
+            while (true)
+            {
+                var line = await reader.ReadLineAsync(responseTimeout.Token).ConfigureAwait(false);
+                if (line is null)
+                {
+                    break;
+                }
+
+                var trimmed = line.TrimStart();
+                if (!trimmed.StartsWith("{", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var progressLine = ForgeProgressMessage.TryParse(trimmed);
+                if (progressLine is not null)
+                {
+                    if (string.Equals(progressLine.CommandId, command.Id, StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (onProgress is not null)
+                        {
+                            await onProgress(progressLine).ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            await ForgeProgressScope.ReportAsync(
+                                progressLine.Progress, progressLine.Total, progressLine.Message,
+                                responseTimeout.Token).ConfigureAwait(false);
+                        }
+                    }
+
+                    continue;
+                }
+
+                response = line;
+                break;
+            }
+
             if (string.IsNullOrWhiteSpace(response))
             {
                 return ForgeResult.Failure(command.Id, "pipe_empty_response", "AutoCAD plugin returned an empty response.");
@@ -64,6 +115,12 @@ public sealed class ForgePipeClient
                 pipe.IsConnected
                     ? "Do not blindly retry non-idempotent writes. Check AutoCAD, then call a read-back/QA tool to see whether the operation committed."
                     : "Start AutoCAD and NETLOAD Forge.Plugin.dll built for the host year (scripts/build-plugin.ps1 -Year), then call forge_system_health again.");
+        }
+        catch (OperationCanceledException)
+        {
+            // Real caller cancellation (notifications/cancelled, tasks/cancel, disconnect):
+            // surface it — the catch(Exception) below must not relabel it plugin_unavailable.
+            throw;
         }
         catch (Exception ex)
         {

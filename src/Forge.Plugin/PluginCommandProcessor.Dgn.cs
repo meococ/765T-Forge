@@ -244,6 +244,8 @@ public sealed partial class PluginCommandProcessor
                     run.TempDoc.Editor.Command(
                         DgnImportPolicy.CommandArguments(run.DgnPath, run.ModelName, run.Units));
 
+                    Progress?.Report(0.6, 1, "DGN converted; saving target DWG…");
+
                     // Inside the temp document's own command context its database needs no
                     // lock — the earlier app-context SaveAs would have thrown eLockViolation
                     // even if the command had run.
@@ -309,6 +311,8 @@ public sealed partial class PluginCommandProcessor
                 return Task.CompletedTask;
             }, null);
 
+            Progress?.Report(0, 1, $"Importing {Path.GetFileName(dgnPath)} into a temporary document…");
+
             // Sentinel consumed by the Idle lane via Data's exact type — see
             // ExecuteDocActivateWhenIdleAsync. It must not reach a client, but the code is a
             // readable failure if a routing regression ever lets it.
@@ -349,6 +353,7 @@ public sealed partial class PluginCommandProcessor
     /// </summary>
     internal ForgeResult EndDgnImport(ForgeCommand command, DgnImportRun run, bool contextTimedOut = false, bool restoreTimedOut = false)
     {
+        Progress?.Report(1, 1, "DGN import finished.");
         try
         {
             if (restoreTimedOut)

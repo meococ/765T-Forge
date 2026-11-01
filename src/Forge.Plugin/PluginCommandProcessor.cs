@@ -56,6 +56,14 @@ public sealed partial class PluginCommandProcessor
     private static string? _hostVersionRaw;
     private static bool _hostMeasured;
 
+    /// <summary>
+    /// Progress sink for the in-flight request, installed by NamedPipePluginServer per call.
+    /// Static because the plot pipeline is static end-to-end (tests pin those signatures) and
+    /// Process serializes on AutoCAD's main thread — one command runs at a time; the reporter
+    /// carries the command id, and the server drops lines that don't match the call it made.
+    /// </summary>
+    internal static PipeProgressReporter? Progress { get; set; }
+
     public PluginCommandProcessor(
         ForgeEnvironment environment,
         SafetyPolicy safetyPolicy,
@@ -1444,6 +1452,7 @@ public sealed partial class PluginCommandProcessor
             Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
             WriteDsdFile(dsdPath, dwgPath!, outputPath, args.Layouts, args.SinglePdf);
             using var progress = new PlotProgressDialog(false, args.Layouts.Length, true);
+            using var pump = PublishProgressPump.Start(progress, Progress);
             Application.Publisher.PublishDsd(dsdPath, progress);
         }
         catch (System.Exception ex)
@@ -1978,6 +1987,52 @@ public sealed partial class PluginCommandProcessor
         }
 
         public void Dispose() => _scope.Dispose();
+    }
+
+    /// <summary>
+    /// Polls a PlotProgressDialog from a timer while PublishDsd blocks the main thread —
+    /// PlotProgressDialog is sealed and its On* hooks are non-virtual (dumped off AcMgd
+    /// 25.0), but PlotProgressPos/SheetProgressPos/StatusMsgString are plain managed
+    /// properties and safe to read off-thread. Emits one forge_progress line per change.
+    /// </summary>
+    private sealed class PublishProgressPump : IDisposable
+    {
+        private readonly Timer _timer;
+        private int _lastPlotPos = -1;
+        private string? _lastStatus;
+
+        private PublishProgressPump(PlotProgressDialog dialog, PipeProgressReporter? reporter)
+        {
+            _timer = new Timer(_ =>
+            {
+                try
+                {
+                    var pos = dialog.PlotProgressPos;
+                    var upper = dialog.UpperPlotProgressRange;
+                    var lower = dialog.LowerPlotProgressRange;
+                    var status = dialog.StatusMsgString;
+                    if (pos != _lastPlotPos || status != _lastStatus)
+                    {
+                        _lastPlotPos = pos;
+                        _lastStatus = status;
+                        var span = upper - lower;
+                        reporter?.Report(
+                            pos - lower,
+                            span > 0 ? span : null,
+                            string.IsNullOrWhiteSpace(status) ? "Publishing…" : status);
+                    }
+                }
+                catch
+                {
+                    // Dialog mid-transition — next tick retries; progress is best-effort.
+                }
+            }, null, TimeSpan.FromMilliseconds(250), TimeSpan.FromMilliseconds(250));
+        }
+
+        public static PublishProgressPump Start(PlotProgressDialog dialog, PipeProgressReporter? reporter)
+            => new(dialog, reporter);
+
+        public void Dispose() => _timer.Dispose();
     }
 }
 
