@@ -223,10 +223,24 @@ public sealed class NamedPipePluginServer : IDisposable
             var json = JsonSerializer.Serialize(result, ForgeJson.Options);
             await writer.WriteLineAsync(json.AsMemory(), cancellationToken).ConfigureAwait(false);
         }
-        catch
+        catch (Exception writeEx)
         {
-            // The client may have timed out and dropped its end; the accept loop disposes the
-            // pipe and keeps serving the next connection.
+            // The client may have timed out and dropped its end; when the pipe is still alive
+            // (a result that failed to serialize, e.g. NaN/Infinity under strict JSON) report
+            // the failure as a typed error instead of closing with no reply.
+            TryWriteEditorMessage($"\n[765T-Forge] Reply write failed: {writeEx.Message}");
+            try
+            {
+                var fallback = JsonSerializer.Serialize(
+                    ForgeResult.Failure(result.Id, "reply_failed",
+                        $"The command completed but its reply could not be sent: {writeEx.Message}"),
+                    ForgeJson.Options);
+                await writer.WriteLineAsync(fallback.AsMemory(), cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                // The pipe really is gone — the accept loop disposes it and keeps serving.
+            }
         }
     }
 

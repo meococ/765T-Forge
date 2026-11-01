@@ -2040,7 +2040,9 @@ public sealed partial class PluginCommandProcessor
             handle = HandleString(targetCurve),
             extendedEnd = extendedEnds.Count == 2 ? "both" : extendedEnds[0],
             extendedEnds = extendedEnds.ToArray(),
-            newEndpoint = new[] { primaryEndpoint.X, primaryEndpoint.Y, primaryEndpoint.Z },
+            // named primaryEndPoint: "newEndpoint" collides with "newEndPoint" under
+            // PropertyNameCaseInsensitive serialization (the reply silently dropped live).
+            primaryEndPoint = new[] { primaryEndpoint.X, primaryEndpoint.Y, primaryEndpoint.Z },
             newStartPoint = newStart is { } ns ? new[] { ns.X, ns.Y, ns.Z } : null,
             newEndPoint = newEnd is { } ne ? new[] { ne.X, ne.Y, ne.Z } : null,
             entity = EntitySummary(targetCurve)
