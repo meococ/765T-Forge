@@ -66,6 +66,22 @@ builder.Services
                 result.Tools = result.Tools.Where(t => toolsets.IsEnabled(t.Name)).ToList();
             }
 
+            if (result.Tools is not null)
+            {
+                foreach (var tool in result.Tools)
+                {
+                    if (tool.InputSchema.ValueKind == JsonValueKind.Object)
+                    {
+                        tool.InputSchema = ForgeSchemaSanitizer.Sanitize(tool.InputSchema);
+                    }
+
+                    if (tool.OutputSchema is { ValueKind: JsonValueKind.Object } os)
+                    {
+                        tool.OutputSchema = ForgeSchemaSanitizer.Sanitize(os);
+                    }
+                }
+            }
+
             return result;
         });
         filters.AddCallToolFilter(next => async (context, cancellationToken) =>

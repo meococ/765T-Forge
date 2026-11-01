@@ -140,7 +140,7 @@ public sealed class ToolsetTests
         Assert.Equal("draw", structured.GetProperty("data").GetProperty("toolset").GetString());
     }
 
-    private static string FindServerExe()
+    internal static string FindServerExe()
     {
         var bin = PluginDispatchSyncTests.RepoPath("src", "Forge.Server", "bin");
         foreach (var config in new[] { "Debug", "Release" })
@@ -167,7 +167,7 @@ public sealed class ToolsetTests
     /// Minimal newline-delimited JSON-RPC stdio client — one request/response at a time,
     /// bounded reads, server killed on dispose. stdout carries only JSON-RPC; logs go to stderr.
     /// </summary>
-    private sealed class McpStdio : IAsyncDisposable
+    internal sealed class McpStdio : IAsyncDisposable
     {
         private readonly Process _process;
         private readonly StreamWriter _stdin;
