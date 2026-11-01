@@ -17,6 +17,11 @@ public sealed record ForgeEnvironment
     public int PluginConnectTimeoutSeconds { get; init; } = 10;
     public int PluginResponseTimeoutSeconds { get; init; } = 120;
     public bool UsingDevDefaultToken { get; init; }
+    /// <summary>
+    /// Raw FORGE_TOOLSETS selection (comma list or "all"); null/empty = default core.
+    /// Parsed by ForgeToolsetState server-side; the plugin never reads it.
+    /// </summary>
+    public string? Toolsets { get; init; }
 
     /// <summary>
     /// Default accoreconsole root when AUTOCAD_2026_ROOT is unset: the newest installed plain
@@ -128,7 +133,8 @@ public sealed record ForgeEnvironment
                 : 10,
             PluginResponseTimeoutSeconds = int.TryParse(Environment.GetEnvironmentVariable("FORGE_PLUGIN_RESPONSE_TIMEOUT_SECONDS"), out var timeout)
                 ? Math.Clamp(timeout, 5, 3600)
-                : 120
+                : 120,
+            Toolsets = Environment.GetEnvironmentVariable("FORGE_TOOLSETS")
         };
     }
 

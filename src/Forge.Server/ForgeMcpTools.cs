@@ -1,5 +1,7 @@
 using System.ComponentModel;
+using System.Text.Json;
 using Forge.Shared;
+using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
 namespace Forge.Server;
@@ -33,6 +35,40 @@ public sealed class ForgeMcpTools
     [Description("Discover plot devices, media names, page setups, layouts, layer states, and plot styles available in the active session.")]
     public static Task<ForgeResult> SystemCapabilities(ForgeToolRunner runner, CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_system_capabilities", new { }, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_toolset_list", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("List the toolsets (core, draw, edit, linework, plot, qa, blocks, xref, batch, exec) with sizes and which are enabled in this session, plus the always-on discovery tools. Use before forge_toolset_enable.")]
+    public static Task<ForgeResult> ToolsetList(ForgeToolRunner runner, CancellationToken cancellationToken)
+        => runner.InvokeAsync("forge_toolset_list", new { }, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_toolset_enable", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("Enable toolset(s) for the rest of this session (names[] or name). The server sends notifications/tools/list_changed so the client re-lists tools; a client that ignores the notification must list again manually. Audit-recorded like every call.")]
+    public static async Task<ForgeResult> ToolsetEnable(
+        ForgeToolRunner runner,
+        McpServer server,
+        [Description("Toolset names, e.g. [\"draw\", \"edit\"].")] string[]? names = null,
+        [Description("Single toolset name (alternative to names).")] string? name = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await runner.InvokeAsync("forge_toolset_enable", new { names, name }, cancellationToken: cancellationToken).ConfigureAwait(false);
+        if (result.Ok && result.Data is not null)
+        {
+            var el = ForgeJson.ToElement(result.Data);
+            if (el.ValueKind == JsonValueKind.Object
+                && el.TryGetProperty("toolsListChanged", out var c)
+                && c.ValueKind == JsonValueKind.True)
+            {
+                await server.SendNotificationAsync(NotificationMethods.ToolListChangedNotification, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        return result;
+    }
+
+    [McpServerTool(Name = "forge_toolset_search", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("Find tools by name fragment or keyword (query), across enabled and disabled toolsets. Each hit reports its toolset and whether it is enabled now — the discovery path for the default core-only session.")]
+    public static Task<ForgeResult> ToolsetSearch(ForgeToolRunner runner, [Description("Name fragment or keyword, e.g. \"publish\" or \"layer\".")] string query, CancellationToken cancellationToken)
+        => runner.InvokeAsync("forge_toolset_search", new { query }, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_doc_list_open", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("List open AutoCAD documents.")]

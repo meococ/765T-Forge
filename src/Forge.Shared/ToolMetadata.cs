@@ -161,6 +161,12 @@ public static class ForgeToolRegistry
         ["forge_exec_lisp"] = Destructive("forge_exec_lisp", "exec", unsafeTool: true),
         ["forge_run_script"] = Destructive("forge_run_script", "exec", requiresAutoCad: false),
         ["forge_exec_dotnet"] = Destructive("forge_exec_dotnet", "exec", unsafeTool: true),
+        // Core v2 toolset discovery — always enabled regardless of FORGE_TOOLSETS so a
+        // minimal default session can always find and turn on the rest of the catalog.
+        ["forge_toolset_list"] = Read("forge_toolset_list", "meta", requiresAutoCad: false),
+        // Session-state write (not a drawing write): enabling repeats to the same state.
+        ["forge_toolset_enable"] = new ToolMetadata("forge_toolset_enable", "meta", false, false, true, false, false, RequiresAutoCad: false),
+        ["forge_toolset_search"] = Read("forge_toolset_search", "meta", requiresAutoCad: false),
     };
 
     public static IReadOnlyCollection<ToolMetadata> All => Tools.Values;
