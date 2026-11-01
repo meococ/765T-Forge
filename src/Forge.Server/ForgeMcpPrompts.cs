@@ -6,7 +6,7 @@ namespace Forge.Server;
 [McpServerPromptType]
 public sealed class ForgeMcpPrompts
 {
-    [McpServerPrompt(Name = "issue_set_runbook")]
+    [McpServerPrompt(Name = "issue_set_runbook", Title = "Issue Set Runbook")]
     [Description("Standard metro/AEC issue-set publish runbook for 765T-Forge.")]
     public static string IssueSetRunbook()
         => """
@@ -20,7 +20,7 @@ public sealed class ForgeMcpPrompts
            7. Verify PDF exists; never invent drawing numbers; never ERASE ALL via executors.
            """;
 
-    [McpServerPrompt(Name = "safety_first")]
+    [McpServerPrompt(Name = "safety_first", Title = "Safety First")]
     [Description("Remind the agent of Forge safety contracts before mutating DWGs.")]
     public static string SafetyFirst()
         => """

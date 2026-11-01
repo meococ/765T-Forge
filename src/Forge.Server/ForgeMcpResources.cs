@@ -8,13 +8,13 @@ namespace Forge.Server;
 [McpServerResourceType]
 public sealed class ForgeMcpResources
 {
-    [McpServerResource(UriTemplate = "forge://docs/capability-matrix", Name = "CapabilityMatrix", MimeType = "text/markdown")]
+    [McpServerResource(UriTemplate = "forge://docs/capability-matrix", Name = "CapabilityMatrix", Title = "Capability Matrix", MimeType = "text/markdown")]
     [Description("Honest shipped capability matrix for 765T-Forge tools.")]
     public static string CapabilityMatrix()
         => TryReadRepoFile("docs/capability-matrix.md")
            ?? "# Capability matrix\nSee repository docs/capability-matrix.md";
 
-    [McpServerResource(UriTemplate = "forge://profiles/{name}", Name = "ToolProfile", MimeType = "application/json")]
+    [McpServerResource(UriTemplate = "forge://profiles/{name}", Name = "ToolProfile", Title = "Tool Profile", MimeType = "application/json")]
     [Description("JSON allowlist of tools for profile core|plot|qa|linework|authoring.")]
     public static string ToolProfile(string name)
     {
@@ -26,12 +26,12 @@ public sealed class ForgeMcpResources
         return JsonSerializer.Serialize(new { name, tools }, ForgeJson.Options);
     }
 
-    [McpServerResource(UriTemplate = "forge://profiles", Name = "ToolProfiles", MimeType = "application/json")]
+    [McpServerResource(UriTemplate = "forge://profiles", Name = "ToolProfiles", Title = "Tool Profiles", MimeType = "application/json")]
     [Description("List available tool profiles.")]
     public static string ToolProfileIndex()
         => JsonSerializer.Serialize(new { profiles = ToolProfiles.Names }, ForgeJson.Options);
 
-    [McpServerResource(UriTemplate = "forge://safety", Name = "SafetyOverview", MimeType = "text/markdown")]
+    [McpServerResource(UriTemplate = "forge://safety", Name = "SafetyOverview", Title = "Safety Overview", MimeType = "text/markdown")]
     [Description("Agent-facing safety overview.")]
     public static string Safety()
         => TryReadRepoFile("docs/safety.md")

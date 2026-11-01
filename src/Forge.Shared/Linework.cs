@@ -164,7 +164,11 @@ public sealed record LineworkTopologyArgs : LineworkQueryArgs
 /// <summary>One modeled pipe centerline. Accepts {x1,y1,x2,y2} (all_pipe_segs_live.json) or {s:[x,y],e:[x,y]}.</summary>
 public sealed record PipeSegmentDto
 {
-    /// <summary>Any JSON scalar (number or string) — normalized via ToString().</summary>
+    /// <summary>
+    /// Any JSON scalar (number or string) — normalized via ToString(). Typed object? so
+    /// numeric model ids bind; the tools/list filter rewrites the emitted `true` schema to
+    /// an explicit any-type union so no boolean schema reaches clients.
+    /// </summary>
     public object? Id { get; init; }
     public double? X1 { get; init; }
     public double? Y1 { get; init; }
