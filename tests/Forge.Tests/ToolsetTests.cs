@@ -239,6 +239,10 @@ public sealed class ToolsetTests
                 .Select(t => t.GetProperty("name").GetString()!).ToArray();
         }
 
+        /// <summary>Raw request escape hatch for methods without a typed helper (resources, completions, prompts).</summary>
+        public Task<JsonElement> SendAsync(string method, object? paramsValue)
+            => RequestAsync(method, paramsValue);
+
         public async Task<string> CallToolAsync(string name, string argumentsJson)
         {
             using var args = JsonDocument.Parse(argumentsJson);
