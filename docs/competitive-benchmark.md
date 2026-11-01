@@ -49,7 +49,7 @@ remote-transport note mirrors.
 - **Multi-CAD**: multiCAD-mcp and daobataotie cover ZWCAD/GstarCAD/BricsCAD; Forge is
   AutoCAD-only.
 - **Remote transport**: daobataotie ships Streamable HTTP; Forge documents localhost/auth
-  risk in a design note only (deliberate).
+  risk in [a design note](design-remote-transport.md) only (deliberate).
 - **Headless DXF authoring**: puran-water / U-C4N / beiming183 offer an ezdxf backend
   with no AutoCAD; Forge's headless path is accoreconsole batch, not a full backend.
 
