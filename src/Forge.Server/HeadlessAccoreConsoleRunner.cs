@@ -114,6 +114,12 @@ public sealed class HeadlessAccoreConsoleRunner
             cancellationToken.ThrowIfCancellationRequested();
             job.Status = "running";
             state.Save();
+            var doneSoFar = results.Count;
+            await ForgeProgressScope.ReportAsync(
+                    doneSoFar, state.Jobs.Count,
+                    $"Batch {state.BatchId}: job {doneSoFar + 1}/{state.Jobs.Count} — {Path.GetFileName(job.DwgPath)}",
+                    cancellationToken)
+                .ConfigureAwait(false);
             var one = await RunOneAsync(command.Id, job.DwgPath, job.ScriptPath, job.TimeoutSeconds, dryRun: false, cancellationToken)
                 .ConfigureAwait(false);
             if (one.Ok)
@@ -128,6 +134,12 @@ public sealed class HeadlessAccoreConsoleRunner
                 job.Message = one.Error?.Message;
                 failures++;
             }
+
+            await ForgeProgressScope.ReportAsync(
+                    results.Count + 1, state.Jobs.Count,
+                    $"Batch {state.BatchId}: {Path.GetFileName(job.DwgPath)} {job.Status}",
+                    cancellationToken)
+                .ConfigureAwait(false);
 
             state.Save();
             results.Add(new

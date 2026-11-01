@@ -859,6 +859,7 @@ public sealed partial class PluginCommandProcessor
         }
 
         Directory.CreateDirectory(outputDir);
+        var copied = 0;
         foreach (var file in files)
         {
             var type = file.GetType();
@@ -884,6 +885,8 @@ public sealed partial class PluginCommandProcessor
             }
 
             File.Copy(source, destination, overwrite: args.OverwriteAcknowledged);
+            copied++;
+            Progress?.Report(copied, files.Count, $"Packed {Path.GetFileName(destination)} ({copied}/{files.Count}).");
         }
 
         // Rewrite host copy xref paths to same-folder relative names.

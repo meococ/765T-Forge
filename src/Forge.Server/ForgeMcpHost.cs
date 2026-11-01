@@ -1,8 +1,7 @@
 using Forge.Shared;
+using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
-
-namespace Forge.Server;
 
 /// <summary>
 /// MCP server identity and instructions.
@@ -22,5 +21,24 @@ public static class ForgeMcpHost
             Version = ForgeConstants.ProductVersion
         };
         options.ServerInstructions = Instructions;
+
+        // MCP tasks (2025-11-25 experimental — the whole surface is MCPEXP001-gated):
+        // every tool already advertises execution.taskSupport="optional" — honor that
+        // claim so clients can detach long calls (publish, batch, dgn) into tasks/get +
+        // tasks/result. In-memory is the right store: a task's result only matters while
+        // this session lives, and batch resume has its own durable path (BatchResumeState).
+#pragma warning disable MCPEXP001 // experimental MCP tasks surface — deliberate opt-in
+        options.TaskStore = new InMemoryMcpTaskStore();
+        options.Capabilities ??= new ServerCapabilities();
+        options.Capabilities.Tasks = new McpTasksCapability
+        {
+            List = new ListMcpTasksCapability(),
+            Cancel = new CancelMcpTasksCapability(),
+            Requests = new RequestMcpTasksCapability
+            {
+                Tools = new ToolsMcpTasksCapability { Call = new CallToolMcpTasksCapability() }
+            }
+        };
+#pragma warning restore MCPEXP001
     }
 }
