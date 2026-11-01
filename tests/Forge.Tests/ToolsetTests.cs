@@ -115,8 +115,12 @@ public sealed class ToolsetTests
 
         var reply = await server.CallToolAsync("forge_toolset_enable", """{"names":["draw"]}""");
         using var doc = JsonDocument.Parse(reply);
-        // Success results are returned as JSON text (structured content is failure-only today).
-        var text = doc.RootElement.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString()!;
+        // Success results carry structuredContent plus the same JSON mirrored as text
+        // (core v2 item 2); assert both surfaces stay populated and consistent.
+        var result = doc.RootElement.GetProperty("result");
+        var structured = result.GetProperty("structuredContent");
+        Assert.True(structured.GetProperty("ok").GetBoolean());
+        var text = result.GetProperty("content")[0].GetProperty("text").GetString()!;
         using var body = JsonDocument.Parse(text);
         Assert.True(body.RootElement.GetProperty("ok").GetBoolean());
         Assert.True(body.RootElement.GetProperty("data").GetProperty("toolsListChanged").GetBoolean());
