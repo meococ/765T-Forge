@@ -1304,7 +1304,10 @@
           "xunit.extensibility.core": "[2.5.3]"
         }
       },
-      "forge.server": {
+      "forge.shared": {
+        "type": "Project"
+      },
+      "Forge765T.Server": {
         "type": "Project",
         "dependencies": {
           "Forge.Shared": "[0.2.0, )",
@@ -1312,9 +1315,6 @@
           "Microsoft.Extensions.Logging.Console": "[8.0.1, )",
           "ModelContextProtocol": "[1.4.0, )"
         }
-      },
-      "forge.shared": {
-        "type": "Project"
       },
       "Microsoft.Extensions.Hosting": {
         "type": "CentralTransitive",
