@@ -173,13 +173,23 @@ public sealed class ToolsetTests
         private readonly StreamWriter _stdin;
         private int _nextId;
 
+        /// <summary>
+        /// Answers server→client requests (elicitation/create etc.): returns the JSON-RPC
+        /// result object for the request, or null to answer a protocol error. Tests set it.
+        /// </summary>
+        public Func<int, string, JsonElement, object?>? ServerRequestHandler { get; set; }
+
         private McpStdio(Process process, StreamWriter stdin)
         {
             _process = process;
             _stdin = stdin;
         }
 
-        public static async Task<McpStdio> SpawnAsync(string exe, string? toolsets)
+        public static async Task<McpStdio> SpawnAsync(
+            string exe,
+            string? toolsets,
+            IReadOnlyDictionary<string, string>? env = null,
+            object? capabilities = null)
         {
             var psi = new ProcessStartInfo(exe)
             {
@@ -195,13 +205,21 @@ public sealed class ToolsetTests
                 psi.Environment["FORGE_TOOLSETS"] = toolsets;
             }
 
+            if (env is not null)
+            {
+                foreach (var (key, value) in env)
+                {
+                    psi.Environment[key] = value;
+                }
+            }
+
             var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start Forge.Server.");
             _ = DrainAsync(process.StandardError);
             var client = new McpStdio(process, process.StandardInput);
             await client.RequestAsync("initialize", new
             {
                 protocolVersion = "2025-11-25",
-                capabilities = new { },
+                capabilities = capabilities ?? new { },
                 clientInfo = new { name = "toolset-test", version = "0.0.0" }
             });
             await client.NotifyAsync("notifications/initialized");
@@ -256,9 +274,25 @@ public sealed class ToolsetTests
                 }
 
                 var doc = JsonDocument.Parse(line);
-                if (doc.RootElement.TryGetProperty("id", out var replyId) && replyId.GetInt32() == id)
+                if (doc.RootElement.TryGetProperty("id", out var replyId) && replyId.GetInt32() == id &&
+                    !doc.RootElement.TryGetProperty("method", out _))
                 {
                     return doc.RootElement.Clone();
+                }
+
+                // Server→client request (e.g. elicitation/create) — hand it to the
+                // test's handler and write the JSON-RPC response back.
+                if (doc.RootElement.TryGetProperty("method", out var methodEl) &&
+                    doc.RootElement.TryGetProperty("id", out var requestId) &&
+                    requestId.ValueKind == JsonValueKind.Number)
+                {
+                    var requestParams = doc.RootElement.TryGetProperty("params", out var prm) ? prm.Clone() : default;
+                    var result = ServerRequestHandler?.Invoke(requestId.GetInt32(), methodEl.GetString() ?? "", requestParams);
+                    var response = result is not null
+                        ? JsonSerializer.Serialize(new { jsonrpc = "2.0", id = requestId.GetInt32(), result })
+                        : JsonSerializer.Serialize(new { jsonrpc = "2.0", id = requestId.GetInt32(), error = new { code = -32601, message = "method not found" } });
+                    _stdin.WriteLine(response);
+                    _stdin.Flush();
                 }
             }
         }
