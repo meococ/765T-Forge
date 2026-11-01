@@ -103,6 +103,51 @@ public sealed class D28PublishBookmarkTests
     }
 
     [Fact]
+    public void NativeOutlines_Detected_FromDestCarryingTitles()
+    {
+        // A DSD-merged PDF fragment: UTF-16BE hex titles inside outline items that each
+        // carry a destination, plus a document-info /Title that must NOT count.
+        var pdf = "%PDF-1.7\n" +
+                  "1 0 obj <</Type /Outlines /First 2 0 R /Last 4 0 R /Count 3>> endobj\n" +
+                  "2 0 obj <</Title <FEFF00500031002D0050004C0041004E> /Dest [10 0 R /XYZ 0 0 0] /Next 3 0 R>> endobj\n" +
+                  "3 0 obj <</Title (P2-MEP) /A <</S /GoTo /D [11 0 R /Fit]>> /Next 4 0 R>> endobj\n" +
+                  "4 0 obj <</Title (P3-SECT) /Dest [12 0 R /Fit]>> endobj\n" +
+                  "5 0 obj <</Title (My Drawing Sheet Set) /Author (x)>> endobj\n" +
+                  "trailer <</Info 5 0 R>>";
+        var path = Path.Combine(Path.GetTempPath(), $"forge-ol-{Guid.NewGuid():N}.pdf");
+        try
+        {
+            File.WriteAllText(path, pdf, System.Text.Encoding.Latin1);
+            Assert.Equal(3, PdfBookmarks.CountNativeOutlineItems(path));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void NativeOutlines_Zero_WhenNoOutlineTree()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"forge-ol-{Guid.NewGuid():N}.pdf");
+        try
+        {
+            File.WriteAllText(path, "%PDF-1.7\n1 0 obj <</Title (Just A Document)>> endobj", System.Text.Encoding.Latin1);
+            Assert.Equal(0, PdfBookmarks.CountNativeOutlineItems(path));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Publish_SkipsPypdf_WhenNativeOutlinesExist()
+    {
+        var source = File.ReadAllText(Path.Combine(PluginDispatchSyncTests.RepoPath("src", "Forge.Plugin"), "PluginCommandProcessor.cs"));
+        var gatedAt = source.IndexOf("if (args.Bookmarks)", StringComparison.Ordinal);
+        var nativeAt = source.IndexOf("CountNativeOutlineItems", StringComparison.Ordinal);
+        var passAt = source.IndexOf("RunBookmarkPass(outputPath, args.Layouts)", StringComparison.Ordinal);
+        Assert.True(gatedAt > 0 && nativeAt > gatedAt && passAt > nativeAt,
+            "native-outline detection must gate the pypdf pass inside bookmarks && singlePdf");
+        Assert.Contains("\"dsd-native\"", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Notice_DeclaresPypdf()
     {
         var repoRoot = Path.GetFullPath(Path.Combine(PluginDispatchSyncTests.RepoPath("src", "Forge.Shared"), "..", ".."));

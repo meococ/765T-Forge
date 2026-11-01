@@ -1500,9 +1500,15 @@ public sealed partial class PluginCommandProcessor
             // TOOL-GAP #28: one outline item per layout via pypdf (BSD-3-Clause, NOTICE.md).
             // Runs before the probe so the probed/measured file is the delivered one;
             // a failed pass only downgrades bookmarksApplied — the PDF is still valid.
+            // B3: the DSD merge can already carry native outlines — when it does the pypdf
+            // pass is skipped and no warning is raised. The warning only fires when the
+            // merged PDF really has no bookmarks AND the post-pass could not add them.
             if (args.Bookmarks)
             {
-                bookmarkPass = RunBookmarkPass(outputPath, args.Layouts);
+                var native = PdfBookmarks.CountNativeOutlineItems(outputPath);
+                bookmarkPass = native > 0
+                    ? new BookmarkPassResult(true, native, "dsd-native", null)
+                    : RunBookmarkPass(outputPath, args.Layouts);
             }
 
             probe = PdfProbeResult.Probe(outputPath, expectedPages: args.Layouts.Length, notBeforeUtc: publishStartedUtc);

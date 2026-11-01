@@ -1,4 +1,6 @@
+using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace Forge.Shared;
 
@@ -55,6 +57,41 @@ print(json.dumps({"ok": True, "bookmarks": len(titles), "pages": len(writer.page
     /// <summary>Titles file contents: a JSON array of strings, UTF-8.</summary>
     public static string TitlesJson(IReadOnlyList<string> titles) =>
         JsonSerializer.Serialize(titles);
+
+    /// <summary>
+    /// Counts outline items already present in <paramref name="pdfPath"/>. The DSD merge can
+    /// emit native outlines (UTF-16BE hex /Title entries each carrying a /Dest or /GoTo action)
+    /// — when they exist the pypdf post-pass must not run at all, and a missing python must
+    /// never surface as a "bookmarks failed" warning. A document-info /Title has no /Dest or
+    /// /GoTo near it, so the window check keeps it out of the count. 0 on read failure.
+    /// </summary>
+    public static int CountNativeOutlineItems(string pdfPath)
+    {
+        try
+        {
+            var text = Encoding.Latin1.GetString(File.ReadAllBytes(pdfPath));
+            if (!text.Contains("/Outlines"))
+            {
+                return 0;
+            }
+
+            var count = 0;
+            foreach (Match m in Regex.Matches(text, @"/Title\s*(\(|<)"))
+            {
+                var window = text.Substring(m.Index, Math.Min(600, text.Length - m.Index));
+                if (window.Contains("/Dest") || window.Contains("/GoTo"))
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+        catch (Exception)
+        {
+            return 0;
+        }
+    }
 
     /// <summary>Parses the script's single-line stdout JSON.</summary>
     public static bool TryParseResult(string stdout, out int bookmarks, out int pages, out string? error)
