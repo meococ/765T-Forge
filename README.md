@@ -1,5 +1,7 @@
 # 765T-Forge
 
+<!-- mcp-name: io.github.meococ/765t-forge -->
+
 All-C# MCP server and AutoCAD 2025/2026 plugin (typed year table) for **metro/AEC issue-set drawing production** — inspect → fix → fill → gate → publish → verify.
 
 Not affiliated with Autodesk. Requires a licensed AutoCAD 2025 or 2026 seat. See [NOTICE.md](NOTICE.md).
@@ -22,7 +24,7 @@ The Vietnamese [docs/history/build-brief.md](docs/history/build-brief.md) is an 
 
 ## Shape
 
-- `src/Forge.Server` — MCP stdio server (`ModelContextProtocol` 1.3.0)
+- `src/Forge.Server` — MCP stdio server (`ModelContextProtocol` 1.4.0)
 - `src/Forge.Plugin` — AutoCAD 2025/2026 .NET plugin (named pipe, per-year build via `scripts/build-plugin.ps1 -Year`)
 - `src/Forge.Shared` — envelope, safety, audit, backup, QA report
 - `tests/Forge.Tests` — unit tests (no AutoCAD required)
@@ -43,7 +45,7 @@ The Vietnamese [docs/history/build-brief.md](docs/history/build-brief.md) is an 
 4. `NETLOAD` the installed `Forge.Plugin.dll`, run `MCP_STATUS`
 5. Copy [examples/mcp.cursor.json](examples/mcp.cursor.json) into your MCP config and set the token + exe path
 
-Details: [docs/install-cursor.md](docs/install-cursor.md) · [docs/install-claude-desktop.md](docs/install-claude-desktop.md) · [docs/install-plugin.md](docs/install-plugin.md)
+Details: [docs/install-cursor.md](docs/install-cursor.md) · [docs/install-claude-desktop.md](docs/install-claude-desktop.md) · [docs/install-claude-code.md](docs/install-claude-code.md) · [docs/install-vscode.md](docs/install-vscode.md) · [docs/install-plugin.md](docs/install-plugin.md)
 
 ## Build
 
@@ -74,6 +76,7 @@ If AutoCAD has `NETLOAD`ed the plugin, use `765T-Forge.ServerOnly.slnf` or `-p:O
 | `FORGE_ENABLE_UNSAFE_OPS` | Enables `forge_exec_dotnet` when also acknowledged |
 | `FORGE_PLUGIN_RESPONSE_TIMEOUT_SECONDS` | Default `120`; also drives the plugin watchdog (`plugin_request_timeout`) at timeout−5s |
 | `FORGE_PLUGIN_CONNECT_TIMEOUT_SECONDS` | Default `10` (clamp 1–120) |
+| `FORGE_TOOLSETS` | Comma list or `all`; default loads core + discovery tools (~19 tools). `all` exposes the full catalog for clients that ignore `tools/list_changed` |
 
 ## Safety
 

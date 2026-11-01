@@ -4,6 +4,12 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- Prepared for `dnx` distribution (docs/packaging-nuget.md) — packed, NOT published.
+         PackAsTool only affects `dotnet pack`; normal build/test output is unchanged. -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>forge-server</ToolCommandName>
+    <PackageId>Forge765T.Server</PackageId>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>
@@ -20,5 +26,10 @@
   <ItemGroup>
     <Content Include="..\..\docs\capability-matrix.md" Link="docs\capability-matrix.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\docs\safety.md" Link="docs\safety.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Pack the repo README (carries the mcp-name ownership marker) into the nupkg -->
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 </Project>

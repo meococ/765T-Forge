@@ -1,0 +1,50 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.meococ/765t-forge",
+  "title": "765T Forge",
+  "description": "AutoCAD 2025/2026 MCP server for metro/AEC drawing production workflows",
+  "version": "0.2.0",
+  "repository": {
+    "url": "https://github.com/meococ/765T-Forge",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "nuget",
+      "registryBaseUrl": "https://api.nuget.org/v3/index.json",
+      "identifier": "Forge765T.Server",
+      "version": "0.2.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "FORGE_AUTOCAD_TOKEN",
+          "description": "Shared secret the AutoCAD plugin validates on every pipe call. Set a long random value; the AutoCAD process must inherit the same value.",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "FORGE_PIPE_NAME",
+          "description": "Named pipe the plugin listens on (default 765T.Forge.AutoCAD).",
+          "isRequired": false
+        },
+        {
+          "name": "FORGE_TOOLSETS",
+          "description": "Comma list of toolsets to enable at startup, or 'all' for the full 120+ tool catalog. Default: core + discovery tools.",
+          "isRequired": false
+        },
+        {
+          "name": "FORGE_BACKUP_DIR",
+          "description": "Directory for byte-verified drawing backups before mutating operations.",
+          "isRequired": false
+        },
+        {
+          "name": "FORGE_AUDIT_DIR",
+          "description": "Directory for the append-only audit log of mutating tool calls.",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}
