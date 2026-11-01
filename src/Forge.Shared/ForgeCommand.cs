@@ -64,7 +64,12 @@ public sealed record ForgeResult
     }
 }
 
-public sealed record ForgeError(string Code, string Message, string? Suggestion = null);
+public sealed record ForgeError(
+    string Code,
+    string Message,
+    string? Suggestion = null,
+    bool? Retryable = null,
+    string? Hint = null);
 
 public sealed record ForgeVerification
 {

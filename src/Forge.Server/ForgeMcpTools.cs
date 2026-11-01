@@ -196,7 +196,7 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_plot_to_pdf", new { outputPath, layout, device, paperSize, plotStyle, plotArea, window, orientation, scale, units, centered, engine, outputFormat, dpi, overwriteAcknowledged }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_plot_publish", Title = "Plot Publish", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
-    [Description("Publish layouts to PDF via real DSD + Publisher.PublishDsd; returns PublishReceipt with PDF probe. Preflight gate unless force=true. With singlePdf=true the merged PDF gets one outline bookmark per layout title (bookmarks=true, default) via a pypdf post-pass — bookmarksApplied/bookmarkDetail report whether that ran; a missing python only skips bookmarks, it never fails the publish.")]
+    [Description("Publish layouts to PDF via real DSD + Publisher.PublishDsd; returns PublishReceipt with PDF probe. Preflight gate unless force=true. With singlePdf=true the merged PDF gets one outline bookmark per layout title (bookmarks=true, default) via a pypdf post-pass — skipped automatically when the merged PDF already carries native outlines (engine reported as dsd-native); bookmarksApplied/bookmarkDetail report the outcome; the bookmark warning only appears when the PDF truly has no bookmarks, it never fails the publish.")]
     public static Task<ForgeResult> PlotPublish(
         ForgeToolRunner runner,
         string outputPath,
