@@ -21,6 +21,9 @@ public sealed class PluginDispatchSyncTests
         "forge_sheet_inventory_import",
         "forge_issue_set_diff",
         "forge_linework_transform", // pure server-side coordinate math — never reaches the plugin
+        "forge_toolset_list", // session toolset state lives server-side only
+        "forge_toolset_enable",
+        "forge_toolset_search",
     };
 
     /// <summary>

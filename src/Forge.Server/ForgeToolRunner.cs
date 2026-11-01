@@ -10,19 +10,22 @@ public sealed class ForgeToolRunner
     private readonly ForgePipeClient _pipeClient;
     private readonly HeadlessAccoreConsoleRunner _headlessRunner;
     private readonly ForgeEnvironment _environment;
+    private readonly ForgeToolsetState _toolsets;
 
     public ForgeToolRunner(
         SafetyPolicy safetyPolicy,
         FileAuditSink auditSink,
         ForgePipeClient pipeClient,
         HeadlessAccoreConsoleRunner headlessRunner,
-        ForgeEnvironment environment)
+        ForgeEnvironment environment,
+        ForgeToolsetState toolsets)
     {
         _safetyPolicy = safetyPolicy;
         _auditSink = auditSink;
         _pipeClient = pipeClient;
         _headlessRunner = headlessRunner;
         _environment = environment;
+        _toolsets = toolsets;
     }
 
     public async Task<ForgeResult> InvokeAsync(
@@ -65,6 +68,9 @@ public sealed class ForgeToolRunner
             "forge_batch_run" => await _headlessRunner.RunBatchAsync(command, cancellationToken).ConfigureAwait(false),
             "forge_batch_status" => ResolveBatchStatus(command),
             "forge_system_tool_profile" => ResolveToolProfile(command),
+            "forge_toolset_list" => ResolveToolsetList(command),
+            "forge_toolset_enable" => ResolveToolsetEnable(command),
+            "forge_toolset_search" => ResolveToolsetSearch(command),
             "forge_audit_summarize" => ResolveAuditSummarize(command),
             "forge_sheet_inventory_import" => ResolveSheetInventoryImport(command),
             "forge_issue_set_diff" => ResolveIssueSetDiff(command),
@@ -116,6 +122,118 @@ public sealed class ForgeToolRunner
         }
 
         return ForgeResult.Success(command.Id, new { name, tools });
+    }
+
+    private ForgeResult ResolveToolsetList(ForgeCommand command)
+    {
+        var enabled = _toolsets.Enabled;
+        var sets = ForgeToolsets.Names.Select(name => new
+        {
+            name,
+            enabled = enabled.Contains(name, StringComparer.OrdinalIgnoreCase),
+            toolCount = ForgeToolsets.ToolsInSet(name).Count,
+            tools = ForgeToolsets.ToolsInSet(name)
+        }).ToArray();
+        return ForgeResult.Success(command.Id, new
+        {
+            enabled,
+            toolsets = sets,
+            meta = ForgeToolsets.ToolsInSet(ForgeToolsets.Meta),
+            hint = "forge_toolset_enable turns a set on for this session (the client re-lists tools); FORGE_TOOLSETS selects at launch; \"all\" loads every tool."
+        });
+    }
+
+    private ForgeResult ResolveToolsetEnable(ForgeCommand command)
+    {
+        var names = new List<string>();
+        if (command.Args.ValueKind == JsonValueKind.Object)
+        {
+            if (command.Args.TryGetProperty("names", out var arr) && arr.ValueKind == JsonValueKind.Array)
+            {
+                names.AddRange(arr.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.String).Select(e => e.GetString()!));
+            }
+
+            if (command.Args.TryGetProperty("name", out var single) && single.ValueKind == JsonValueKind.String)
+            {
+                names.Add(single.GetString()!);
+            }
+        }
+
+        if (names.Count == 0)
+        {
+            return ForgeResult.Failure(command.Id, "missing_toolset", "Provide names[] (or name) of the toolset(s) to enable.",
+                "Call forge_toolset_list for the available sets.");
+        }
+
+        var added = new List<string>();
+        var alreadyOn = new List<string>();
+        var unknown = new List<string>();
+        foreach (var name in names.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!ForgeToolsets.SetGroups.ContainsKey(name))
+            {
+                unknown.Add(name);
+                continue;
+            }
+
+            (_toolsets.Enabled.Contains(name, StringComparer.OrdinalIgnoreCase) ? alreadyOn : added).Add(name);
+            _toolsets.Enable(name);
+        }
+
+        var data = new
+        {
+            enabled = _toolsets.Enabled,
+            added,
+            alreadyOn,
+            unknown,
+            toolsNowListed = ForgeToolsets.EnabledTools(_toolsets.Enabled).Count,
+            toolsListChanged = added.Count > 0,
+            warning = unknown.Count > 0 ? $"unknown toolset(s) ignored: {string.Join(", ", unknown)}" : null
+        };
+        return unknown.Count == names.Count
+            ? ForgeResult.Failure(command.Id, "unknown_toolset",
+                $"Unknown toolset(s): {string.Join(", ", unknown)}.",
+                $"Known: {string.Join(", ", ForgeToolsets.Names)}", data: data)
+            : ForgeResult.Success(command.Id, data);
+    }
+
+    private ForgeResult ResolveToolsetSearch(ForgeCommand command)
+    {
+        var query = command.Args.ValueKind == JsonValueKind.Object &&
+                    command.Args.TryGetProperty("query", out var q)
+            ? q.GetString() : null;
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return ForgeResult.Failure(command.Id, "missing_query", "query is required — a tool name fragment or keyword.",
+                "Example: \"publish\", \"linework\", \"table\".");
+        }
+
+        var hits = ForgeToolRegistry.All
+            .Select(t => new
+            {
+                t.Name,
+                Toolset = ForgeToolsets.ToolsetForTool(t.Name),
+                t.Group,
+                t.ReadOnly,
+                t.Destructive,
+                t.Unsafe,
+                Enabled = _toolsets.IsEnabled(t.Name)
+            })
+            .Where(t => t.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
+                        || t.Toolset.Contains(query, StringComparison.OrdinalIgnoreCase)
+                        || t.Group.Contains(query, StringComparison.OrdinalIgnoreCase)
+                        || t.Name.Replace("forge_", "").Replace("_", " ").Contains(query, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(t => t.Enabled)
+            .ThenBy(t => t.Name)
+            .Take(25)
+            .ToArray();
+        return ForgeResult.Success(command.Id, new
+        {
+            query,
+            count = hits.Length,
+            tools = hits,
+            hint = hits.Any(h => !h.Enabled) ? "Some matches sit in disabled toolsets — forge_toolset_enable turns them on." : null
+        });
     }
 
     private ForgeResult ResolveAuditSummarize(ForgeCommand command)
