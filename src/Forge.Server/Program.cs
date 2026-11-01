@@ -114,6 +114,9 @@ builder.Services
             // forward to it as notifications/progress for the life of this call.
             var progress = ForgeProgressScope.FromRequest(context.Server, context.Params);
             using var _ = progress is not null ? ForgeProgressScope.Push(progress) : null;
+            // elicitation.form capability → *_not_acknowledged refusals can ask the user
+            // and retry once with the ack flag (fallback = the explicit tool args).
+            using var __ = ForgeElicitationGate.Push(context.Server);
             var result = await next(context, cancellationToken).ConfigureAwait(false);
             return ForgeCallToolResults.MarkBusinessFailure(result);
         });

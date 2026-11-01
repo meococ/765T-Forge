@@ -80,7 +80,7 @@ public sealed class ForgeToolRunner
             // live-drawing queries still route to the plugin over the pipe.
             _ when LineworkLocal.IsLineworkTool(tool) && LineworkLocal.IsDumpFileSource(command.Args)
                 => LineworkLocal.Execute(command),
-            _ => await _pipeClient.SendAsync(command, cancellationToken).ConfigureAwait(false)
+            _ => await SendToPluginAsync(command, tool, cancellationToken).ConfigureAwait(false)
         };
 
         await _auditSink.WriteAsync(new AuditRecord
@@ -99,6 +99,45 @@ public sealed class ForgeToolRunner
         }, cancellationToken).ConfigureAwait(false);
 
         return result with { AuditId = result.AuditId ?? auditId };
+    }
+
+    /// <summary>
+    /// Pipe dispatch with elicitation: an *_overwrite_not_acknowledged / discard / bulk
+    /// refusal asks the user once when the client supports elicitation.form; "accept"
+    /// retries the same command with the mapped ack flag injected. Anything else
+    /// (no capability, decline, cancel, elicitation error) returns the original refusal —
+    /// the explicit args stay the fallback.
+    /// </summary>
+    private async Task<ForgeResult> SendToPluginAsync(ForgeCommand command, string tool, CancellationToken cancellationToken)
+    {
+        var result = await _pipeClient.SendAsync(command, cancellationToken).ConfigureAwait(false);
+        if (result.Ok || result.Error is null ||
+            !ForgeElicitationGate.AckFlagByCode.TryGetValue(result.Error.Code, out var flagName))
+        {
+            return result;
+        }
+
+        if (!await ForgeElicitationGate
+                .ConfirmAsync(tool, result.Error.Code, result.Error.Message, cancellationToken)
+                .ConfigureAwait(false))
+        {
+            return result;
+        }
+
+        var confirmed = ForgeElicitationGate.WithAck(command, flagName);
+        await _auditSink.WriteAsync(new AuditRecord
+        {
+            Source = "server",
+            Tool = command.Tool,
+            CommandId = command.Id,
+            DryRun = command.DryRun,
+            Allowed = true,
+            DecisionCode = "elicitation_confirmed",
+            Message = $"User confirmed {flagName} via elicitation after {result.Error.Code}.",
+            Args = confirmed.Args
+        }, cancellationToken).ConfigureAwait(false);
+
+        return await _pipeClient.SendAsync(confirmed, cancellationToken).ConfigureAwait(false);
     }
 
     private static ForgeResult ResolveToolProfile(ForgeCommand command)
