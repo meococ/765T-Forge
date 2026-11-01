@@ -79,15 +79,15 @@ public sealed class SchemaConformanceTests
 
     /// <summary>
     /// A tools/call result carries structuredContent (object, matching outputSchema) AND a
-    /// JSON text mirror for text-only clients. Uses forge_system_health (pipe may be down —
-    /// both envelopes still arrive).
+    /// JSON text mirror for text-only clients. Uses forge_toolset_list — server-resolved, no
+    /// named-pipe dependency, so it cannot flake on a live AutoCAD.
     /// </summary>
     [Fact]
     public async Task CallResultCarriesStructuredContentAndTextMirror()
     {
         var exe = ToolsetTests.FindServerExe();
         await using var server = await ToolsetTests.McpStdio.SpawnAsync(exe, toolsets: "all");
-        var reply = await server.CallToolAsync("forge_system_health", "{}");
+        var reply = await server.CallToolAsync("forge_toolset_list", "{}");
         using var doc = JsonDocument.Parse(reply);
         var result = doc.RootElement.GetProperty("result");
 
