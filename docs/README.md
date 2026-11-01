@@ -11,6 +11,7 @@
 | [roadmap.md](roadmap.md) / [versioning.md](versioning.md) | Product waves + SemVer axes |
 | [packaging-nuget.md](packaging-nuget.md) | `dnx` / MCP Registry prep — staged, not published |
 | [competitive-benchmark.md](competitive-benchmark.md) | Forge vs community AutoCAD MCPs (factual, linked) |
+| [design-remote-transport.md](design-remote-transport.md) | Streamable HTTP / localhost / RFC 9728 risk note — deferred |
 | [troubleshooting.md](troubleshooting.md) | Common failures |
 | [adr/](adr/) | Architecture decision records |
 | [history/build-brief.md](history/build-brief.md) | Aspirational VN catalog (not shipped SoT) |
