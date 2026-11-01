@@ -164,6 +164,7 @@ public sealed partial class PluginCommandProcessor
         var warnings = new List<string>();
         using var tr = db.TransactionManager.StartTransaction();
         PlotSettings? template = null;
+        var stage = "begin";
         try
         {
             foreach (var name in layouts)
@@ -178,12 +179,30 @@ public sealed partial class PluginCommandProcessor
                 var isModel = layout.ModelType;
                 using var ps = new PlotSettings(isModel);
                 ps.CopyFrom(layout);
-                psv.SetPlotConfigurationName(ps, viewer.PlotDevice, null);
-                psv.RefreshLists(ps);
-                var media = psv.GetCanonicalMediaNameList(ps)
-                    .Cast<string>()
-                    .Select(canonical => (Canonical: canonical, Locale: SafeLocaleMediaName(psv, ps, canonical)))
-                    .ToList();
+                stage = $"SetPlotConfigurationName[{name}]";
+                // Virgin layouts carry an empty stored media name, which leaves a null-media
+                // SetPlotConfigurationName unable to resolve — bind the device on a clean probe
+                // settings first so the media list enumerates, then bind device+media
+                // atomically on the layout's settings (the pair bind the driver accepts).
+                List<(string Canonical, string? Locale)> media;
+                string? closestMedia = null;
+                using (var probe = new PlotSettings(isModel))
+                {
+                    psv.SetPlotConfigurationName(probe, viewer.PlotDevice, null);
+                    stage = $"RefreshLists[{name}]";
+                    psv.RefreshLists(probe);
+                    media = psv.GetCanonicalMediaNameList(probe)
+                        .Cast<string>()
+                        .Select(canonical => (Canonical: canonical, Locale: SafeLocaleMediaName(psv, probe, canonical)))
+                        .ToList();
+                    if (string.IsNullOrWhiteSpace(args.PaperSize)
+                        && !media.Any(m => string.Equals(m.Canonical, layout.CanonicalMediaName, StringComparison.Ordinal)))
+                    {
+                        stage = $"SetClosestMediaName[{name}]";
+                        psv.SetClosestMediaName(probe, Math.Max(layout.PlotPaperSize.X, 1), Math.Max(layout.PlotPaperSize.Y, 1), PlotPaperUnit.Millimeters, true);
+                        closestMedia = probe.CanonicalMediaName;
+                    }
+                }
 
                 string canonicalMedia;
                 if (!string.IsNullOrWhiteSpace(args.PaperSize))
@@ -202,12 +221,13 @@ public sealed partial class PluginCommandProcessor
                 }
                 else
                 {
-                    psv.SetClosestMediaName(ps, Math.Max(layout.PlotPaperSize.X, 1), Math.Max(layout.PlotPaperSize.Y, 1), PlotPaperUnit.Millimeters, true);
-                    canonicalMedia = ps.CanonicalMediaName;
+                    canonicalMedia = closestMedia!;
                     warnings.Add($"{name}: no paperSize given and the layout's paper is not on {requestedDevice}; closest size {canonicalMedia} used.");
                 }
 
-                psv.SetCanonicalMediaName(ps, canonicalMedia);
+                stage = $"SetPlotConfigurationName[{name}:{canonicalMedia}]";
+                psv.SetPlotConfigurationName(ps, viewer.PlotDevice, canonicalMedia);
+                stage = $"SetPlotPaperUnits[{name}]";
                 psv.SetPlotPaperUnits(ps, units ?? GuessPaperUnits(canonicalMedia, layout.PlotPaperUnits));
 
                 var mediaChanged = !string.Equals(canonicalMedia, layout.CanonicalMediaName, StringComparison.Ordinal);
@@ -218,6 +238,7 @@ public sealed partial class PluginCommandProcessor
                     warnings.Add($"{name}: plotArea=layout is paper-space only; Model uses extents.");
                 }
 
+                stage = $"SetPlotType[{name}:{area}]";
                 switch (area)
                 {
                     case PlotAreaKind.Window:
@@ -255,8 +276,10 @@ public sealed partial class PluginCommandProcessor
                 }
 
                 var rotation = PlotLayoutMath.ChooseRotation(orientation, ps.PlotPaperSize.X, ps.PlotPaperSize.Y, areaW, areaH) ?? 0;
+                stage = $"SetPlotRotation[{name}]";
                 psv.SetPlotRotation(ps, rotation == 90 ? PlotRotation.Degrees090 : PlotRotation.Degrees000);
 
+                stage = $"SetScale[{name}:{area}:{scaleSpec.Fit}]";
                 if (area == PlotAreaKind.Layout)
                 {
                     psv.SetUseStandardScale(ps, false);
@@ -280,6 +303,7 @@ public sealed partial class PluginCommandProcessor
                 var centered = args.Centered ?? true;
                 if (area != PlotAreaKind.Layout)
                 {
+                    stage = $"SetPlotCentered[{name}]";
                     psv.SetPlotCentered(ps, centered);
                     if (!centered)
                     {
@@ -315,6 +339,7 @@ public sealed partial class PluginCommandProcessor
                     template ??= CloneSettings(ps);
                 }
 
+                stage = $"layout.CopyFrom[{name}]";
                 layout.CopyFrom(ps);
                 var readBack = DescribeSettings(psv, layout);
                 results.Add(new
@@ -376,7 +401,7 @@ public sealed partial class PluginCommandProcessor
         }
         catch (Autodesk.AutoCAD.Runtime.Exception ex)
         {
-            return ForgeResult.Failure(command.Id, "plot_settings_invalid", $"AutoCAD rejected the plot settings: {ex.Message}", "Check device/paperSize/plotArea/scale; nothing was changed (the transaction was aborted).", data: new { appliedBeforeError = results });
+            return ForgeResult.Failure(command.Id, "plot_settings_invalid", $"AutoCAD rejected the plot settings at {stage}: {ex.Message}", "Check device/paperSize/plotArea/scale; nothing was changed (the transaction was aborted).", data: new { appliedBeforeError = results });
         }
         finally
         {
