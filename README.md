@@ -8,13 +8,15 @@ Not affiliated with Autodesk. Requires a licensed AutoCAD 2025 or 2026 seat. See
 
 ## Positioning
 
-Forge competes on **reliable sheet-set publish**, not geometry tool count:
+Forge is the **production-workflow** AutoCAD MCP — where community servers stop at draw tools, Forge carries a drawing through inspect → fix → fill → gate → publish → verify:
 
-- Configurable plot (device / paper / CTB·STB)
-- Real DSD multi-layout publish with PDF verify
-- Publish readiness gate (`forge_qa_preflight`)
-- Titleblock campaigns + issue-set recipe
-- Audit, backup, dry-run, named-pipe ACL + required token
+- 123 typed tools behind toolsets (19 on the wire by default — clients pay ~3.7k tokens, not ~30k)
+- Configurable plot (device / paper / CTB·STB) and real DSD multi-layout publish with bookmarks + PDF verify
+- Publish readiness gate (`forge_qa_preflight`), titleblock campaigns, issue-set recipe
+- Structured output on every tool, progress notifications, elicitation, MCP tasks, live drawing resources
+- Audit, backup, dry-run, named-pipe ACL + required token, unsafe-ops off by default
+
+Benchmarked against the community AutoCAD MCPs and Autodesk's Revit MCP: [docs/competitive-benchmark.md](docs/competitive-benchmark.md) (factual, linked sources).
 
 Honest status: [docs/capability-matrix.md](docs/capability-matrix.md) · Roadmap: [docs/roadmap.md](docs/roadmap.md) · Smoke lab: [docs/smoke-lab.md](docs/smoke-lab.md)
 
