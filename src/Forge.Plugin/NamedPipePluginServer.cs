@@ -207,7 +207,11 @@ public sealed class NamedPipePluginServer : IDisposable
         {
             // Long-running tools emit forge_progress lines through this reporter; the Forge
             // server skips them while reading the reply and forwards them as MCP progress.
-            PluginCommandProcessor.Progress = new PipeProgressReporter(writer, command.Id);
+            // compat-progress-flag: emit ONLY when the request asks for it — servers older
+            // than core v2 read exactly one line and would take a progress line as the reply.
+            PluginCommandProcessor.Progress = command.Progress
+                ? new PipeProgressReporter(writer, command.Id)
+                : null;
             Task<ForgeResult> work;
             try
             {

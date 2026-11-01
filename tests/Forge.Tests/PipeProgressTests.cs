@@ -77,6 +77,82 @@ public sealed class PipeProgressTests
     }
 
     [Fact]
+    public async Task NoProgressSinkOmitsWireFlagAndGetsSingleReply()
+    {
+        // compat-progress-flag: an old-style request (no progress sink anywhere) must put no
+        // "progress" flag on the wire — that is what guarantees the new plugin writes exactly
+        // one reply line for servers older than core v2.
+        var pipeName = $"forge-test-{Guid.NewGuid():N}";
+        var command = new ForgeCommand { Id = "cmd-noflag-1", Tool = "forge_plot_to_pdf" };
+
+        var serverTask = ServeAsync(pipeName, async (writer, requestLine) =>
+        {
+            using var doc = JsonDocument.Parse(requestLine);
+            var root = doc.RootElement;
+            Assert.False(
+                root.TryGetProperty("progress", out var flag) && flag.GetBoolean(),
+                "request must not ask for progress without a progress sink");
+
+            // The new plugin emits zero progress lines without the flag: exactly one reply.
+            await writer.WriteLineAsync(JsonSerializer.Serialize(
+                ForgeResult.Success(command.Id, new { outputPath = "a.pdf" }), ForgeJson.Options));
+        });
+
+        var result = await Client(pipeName).SendAsync(command, CancellationToken.None);
+
+        await serverTask;
+        Assert.True(result.Ok);
+        Assert.Equal(command.Id, result.Id);
+    }
+
+    [Fact]
+    public async Task ProgressSinkSetsWireFlag()
+    {
+        var pipeName = $"forge-test-{Guid.NewGuid():N}";
+        var command = new ForgeCommand { Id = "cmd-flag-1", Tool = "forge_plot_to_pdf" };
+
+        var serverTask = ServeAsync(pipeName, async (writer, requestLine) =>
+        {
+            using var doc = JsonDocument.Parse(requestLine);
+            Assert.True(doc.RootElement.GetProperty("progress").GetBoolean());
+            await writer.WriteLineAsync(JsonSerializer.Serialize(
+                ForgeResult.Success(command.Id, new { outputPath = "a.pdf" }), ForgeJson.Options));
+        });
+
+        var result = await Client(pipeName).SendAsync(
+            command,
+            _ => Task.CompletedTask,
+            CancellationToken.None);
+
+        await serverTask;
+        Assert.True(result.Ok);
+    }
+
+    [Fact]
+    public async Task AmbientProgressScopeSetsWireFlag()
+    {
+        // The production path: the call filter pushes ForgeProgressScope when the MCP caller
+        // sent _meta.progressToken — the wire request must then carry "progress": true even
+        // though no onProgress delegate was supplied.
+        var pipeName = $"forge-test-{Guid.NewGuid():N}";
+        var command = new ForgeCommand { Id = "cmd-ambient-1", Tool = "forge_plot_publish" };
+
+        var serverTask = ServeAsync(pipeName, async (writer, requestLine) =>
+        {
+            using var doc = JsonDocument.Parse(requestLine);
+            Assert.True(doc.RootElement.GetProperty("progress").GetBoolean());
+            await writer.WriteLineAsync(JsonSerializer.Serialize(
+                ForgeResult.Success(command.Id, new { outputPath = "set.pdf" }), ForgeJson.Options));
+        });
+
+        using var _ = ForgeProgressScope.Push(new ForgeProgressScope.Context(null!, new ModelContextProtocol.Protocol.ProgressToken("smoke")));
+        var result = await Client(pipeName).SendAsync(command, CancellationToken.None);
+
+        await serverTask;
+        Assert.True(result.Ok);
+    }
+
+    [Fact]
     public async Task CallerCancellationAbortsTheWait()
     {
         var pipeName = $"forge-test-{Guid.NewGuid():N}";

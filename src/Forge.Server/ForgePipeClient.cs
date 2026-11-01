@@ -30,6 +30,13 @@ public sealed class ForgePipeClient
         CancellationToken cancellationToken = default)
     {
         var authenticated = command.WithToken(_environment.Token);
+        // compat-progress-flag: ask the plugin for forge_progress lines only when a progress
+        // sink exists — a progress-less request must get exactly one reply line, as before.
+        if (!authenticated.Progress && (onProgress is not null || ForgeProgressScope.Current is not null))
+        {
+            authenticated = authenticated with { Progress = true };
+        }
+
         await using var pipe = new NamedPipeClientStream(
             ".",
             _environment.PipeName,
