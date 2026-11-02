@@ -43,6 +43,9 @@ public static class NativeObjectScan
 
     public static readonly string[] AllChecks = { CheckDims, CheckHatches, CheckBlocks };
 
+    /// <summary>Above this pool size the motif-fingerprint scan is skipped (reported as scan_capped).</summary>
+    public const int MaxClusterEntities = 10000;
+
     private static readonly HashSet<string> TextTypes = new(StringComparer.OrdinalIgnoreCase)
         { "DBText", "MText", "AttributeDefinition" };
     private static readonly HashSet<string> LineTypes = new(StringComparer.OrdinalIgnoreCase)
@@ -243,24 +246,63 @@ public static class NativeObjectScan
         List<NativeObjectFinding> findings)
     {
         var pool = entities.Where(e => !claimed.Contains(e.Handle)).ToArray();
+        // Cap: union-find clustering is quadratic-ish on dense sheets; a huge drawing gets
+        // dims+hatch detection but skips the motif fingerprint rather than stalling preflight.
+        if (pool.Length > MaxClusterEntities)
+        {
+            findings.Add(new NativeObjectFinding(
+                "scan_capped",
+                "info",
+                $"exploded_blocks skipped: {pool.Length} entities exceeds the {MaxClusterEntities} cap.",
+                Array.Empty<string>(),
+                Array.Empty<double>()));
+            return;
+        }
+
         var parent = new int[pool.Length];
         for (var i = 0; i < parent.Length; i++)
         {
             parent[i] = i;
         }
         int Root(int i) => parent[i] == i ? i : parent[i] = Root(parent[i]);
+
+        // Spatial grid: entities can only merge when their window-padded boxes overlap, so
+        // register each entity in every cell its padded box covers; any mergeable pair
+        // shares at least one cell. Turns the pairwise loop into ~O(n·k) on real sheets.
+        var cell = Math.Max(window, 1.0);
+        var grid = new Dictionary<(int cx, int cy), List<int>>();
         for (var i = 0; i < pool.Length; i++)
         {
-            for (var j = i + 1; j < pool.Length; j++)
+            var e = pool[i];
+            var x0 = (int)Math.Floor((e.MinX - window) / cell);
+            var x1 = (int)Math.Floor((e.MaxX + window) / cell);
+            var y0 = (int)Math.Floor((e.MinY - window) / cell);
+            var y1 = (int)Math.Floor((e.MaxY + window) / cell);
+            for (var cx = x0; cx <= x1; cx++)
             {
-                if (BoxNear(pool[i], pool[j], window))
+                for (var cy = y0; cy <= y1; cy++)
                 {
-                    var ri = Root(i);
-                    var rj = Root(j);
-                    if (ri != rj)
+                    var key = (cx, cy);
+                    if (grid.TryGetValue(key, out var bucket))
                     {
-                        parent[rj] = ri;
+                        foreach (var j in bucket)
+                        {
+                            if (BoxNear(e, pool[j], window))
+                            {
+                                var ri = Root(i);
+                                var rj = Root(j);
+                                if (ri != rj)
+                                {
+                                    parent[rj] = ri;
+                                }
+                            }
+                        }
                     }
+                    else
+                    {
+                        grid[key] = bucket = new List<int>();
+                    }
+                    bucket.Add(i);
                 }
             }
         }
