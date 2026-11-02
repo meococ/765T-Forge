@@ -45,6 +45,7 @@ public static class ToolProfiles
             "forge_qa_readback",
             "forge_qa_readback_after_timeout",
             "forge_qa_annotation_clash",
+            "forge_qa_native_objects",
             "forge_text_list",
             "forge_audit_summarize",
             "forge_issue_set_diff",
@@ -138,6 +139,7 @@ public static class ToolProfiles
             "forge_viewport_add",
             "forge_plot_preset_apply",
             "forge_qa_annotation_clash",
+            "forge_qa_native_objects",
             "forge_view_capture"
         ]
     };

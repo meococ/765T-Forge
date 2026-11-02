@@ -280,6 +280,7 @@ public sealed partial class PluginCommandProcessor
             "forge_linework_compare" => LineworkCompare(command),
             "forge_doc_import" => DocImport(command),
             "forge_qa_annotation_clash" => AnnotationClashQa(command),
+            "forge_qa_native_objects" => QaNativeObjects(command),
             "forge_standards_import" => StandardsImportTool(command),
             "forge_block_insert_bulk" => BlockInsertBulk(command),
             "forge_plot_preset_apply" => PlotPresetApply(command),
