@@ -11,8 +11,9 @@ import json, os, re, shutil, subprocess, sys, time, importlib.util
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEVIN = os.environ.get("DEVIN_EXE", "devin")
 SEEDS = os.path.join(HERE, "seeds")
-RUNS = os.path.join(HERE, "runs")
-TIMEOUT = 900
+RUNS = os.environ.get("OUTCOME_RUNS_DIR", os.path.join(HERE, "runs"))
+TIMEOUT = 900          # 15-minute wall cap
+MAX_CALLS = 80         # tool-call cap — a retry loop must not burn tokens
 
 spec = importlib.util.spec_from_file_location("grade", os.path.join(HERE, "grade.py"))
 grade = importlib.util.module_from_spec(spec); spec.loader.exec_module(grade)
@@ -123,10 +124,10 @@ def stray_files(rundir):
                     out.append(fn + " (device-name)")
     return out
 
-def export_and_grade(rundir, task):
+def export_and_grade(rundir, task, version=1):
     """Open answer.dwg in AutoCAD via orchestrator MCP, export answer.dxf, grade."""
     if not os.path.exists(os.path.join(rundir, "answer.dwg")) and not os.path.exists(os.path.join(rundir, "set.pdf")):
-        return grade.grade(rundir, task["grader"])
+        return grade.grade(rundir, task["grader"], version=version)
     p = fc.spawn({"FORGE_TOOLSETS": "all"})
     try:
         fc.init(p)
@@ -138,7 +139,7 @@ def export_and_grade(rundir, task):
             c("forge_doc_open", {"path": os.path.join(rundir, "answer.dwg")})
             c("forge_doc_export_dxf", {"outputPath": os.path.join(rundir, "answer.dxf"),
                                      "overwriteAcknowledged": True})
-        res = grade.grade(rundir, task["grader"])
+        res = grade.grade(rundir, task["grader"], version=version)
     except Exception as e:
         res = {"grader_transport": {"pass": False, "detail": f"{type(e).__name__}: {e} [grader]"}}
     finally:
@@ -162,7 +163,7 @@ def export_and_grade(rundir, task):
             pass
     return res
 
-def run_one(task, toolsets, n, model, force=False):
+def run_one(task, toolsets, n, model, force=False, version=1):
     rundir0 = os.path.join(RUNS, task["id"], toolsets, f"run{n}")
     if not force and os.path.exists(os.path.join(rundir0, "result.json")):
         print(f"[{task['id']}|{toolsets}|r{n}] skip (done)")
@@ -173,26 +174,39 @@ def run_one(task, toolsets, n, model, force=False):
            "--model", model, "--permission-mode", "dangerous",
            "--respect-workspace-trust", "false",
            "--export", os.path.join(rundir, "transcript.jsonl")]
+    cap_hit = None
+    proc = subprocess.Popen(cmd, cwd=rundir, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True)
+    while proc.poll() is None:
+        if time.time() - t0 > TIMEOUT:
+            cap_hit = "time"
+            proc.kill()
+            break
+        live_calls, _, _ = parse_audit(rundir)
+        if live_calls >= MAX_CALLS:
+            cap_hit = "calls"
+            proc.kill()
+            break
+        time.sleep(5)
     try:
-        proc = subprocess.run(cmd, cwd=rundir, capture_output=True, text=True,
-                              timeout=TIMEOUT)
-        wall = time.time() - t0
-        timed_out = False
-        stdout_tail = (proc.stdout or "")[-2000:]
-        stderr_tail = (proc.stderr or "")[-1000:]
+        out, err = proc.communicate(timeout=60)
     except subprocess.TimeoutExpired:
-        wall = time.time() - t0
-        timed_out = True
-        stdout_tail = stderr_tail = ""
+        proc.kill()
+        out, err = proc.communicate()
+    wall = time.time() - t0
+    timed_out = cap_hit == "time"
+    stdout_tail = (out or "")[-2000:]
+    stderr_tail = (err or "")[-1000:]
     calls, tools, errors = parse_audit(rundir)
     tr = parse_transcript(rundir)
-    checks = export_and_grade(rundir, task)
+    checks = export_and_grade(rundir, task, version=version)
     passed = sum(1 for v in checks.values() if v["pass"])
     total = len(checks)
     result = {
         "task": task["id"], "config": toolsets, "run": n, "model": model,
-        "runner": "devin.exe -p",
+        "runner": "devin.exe -p", "grader_version": version,
         "wall_ms": round(wall * 1000, 1), "timed_out": timed_out,
+        "cap_hit": cap_hit,
         "tool_calls": calls, "tools_used": tools, "tool_errors": errors,
         "prompt_tokens": tr["prompt_tokens"], "completion_tokens": tr["completion_tokens"],
         "agent_steps": tr["steps"], "exec_message_hints": tr["exec_hints"],
@@ -205,7 +219,8 @@ def run_one(task, toolsets, n, model, force=False):
     with open(os.path.join(RUNS, "results.jsonl"), "a") as f:
         f.write(json.dumps(result) + "\n")
     print(f"[{task['id']}|{toolsets}|r{n}] {passed}/{total} checks, {wall:.0f}s, {calls} calls, "
-          f"err={errors}, tok={tr['prompt_tokens']}/{tr['completion_tokens']}, strays={result['stray_files']}")
+          f"cap={cap_hit}, err={errors}, tok={tr['prompt_tokens']}/{tr['completion_tokens']}, "
+          f"strays={result['stray_files']}")
     return result
 
 def main():
@@ -213,6 +228,7 @@ def main():
     runs = 2
     task_ids = [t["id"] for t in TASKS["tasks"]]
     model = "swe-2-high"
+    version = 1
     a = sys.argv[1:]
     if "--config" in a:
         configs = [a[a.index("--config") + 1]] if a[a.index("--config") + 1] != "both" else ["default", "all"]
@@ -222,13 +238,15 @@ def main():
         task_ids = a[a.index("--tasks") + 1].split(",")
     if "--model" in a:
         model = a[a.index("--model") + 1]
+    if "--grader" in a:
+        version = int(a[a.index("--grader") + 1])
     os.makedirs(RUNS, exist_ok=True)
     for cfg in configs:
         for tid in task_ids:
             task = next(t for t in TASKS["tasks"] if t["id"] == tid)
             for n in range(1, runs + 1):
                 try:
-                    run_one(task, cfg, n, model, force=("--force" in a))
+                    run_one(task, cfg, n, model, force=("--force" in a), version=version)
                 except Exception as e:
                     print(f"[{tid}|{cfg}|r{n}] RUNNER ERROR {type(e).__name__}: {e}")
                     with open(os.path.join(RUNS, "results.jsonl"), "a") as f:
