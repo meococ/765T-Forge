@@ -4,7 +4,7 @@
 
 English | [Tiếng Việt](README.vi.md)
 
-All-C# MCP server + AutoCAD plugin for **metro/AEC issue-set drawing production** — inspect → fix → fill → gate → publish → verify, through typed tools instead of command strings.
+All-C# MCP server + AutoCAD plugin for **metro/AEC drawing production and issue sets** — inspect → fix → fill → gate → publish → verify, through typed tools instead of command strings.
 
 Not affiliated with Autodesk. Requires a licensed AutoCAD seat. See [NOTICE.md](NOTICE.md).
 
@@ -23,7 +23,7 @@ Measured on this codebase: an outcome eval of 32 runs (fresh agent sessions, MCP
 
 | AutoCAD | Status |
 |---------|--------|
-| 2025 | **Live-tested** — the full tool surface was exercised against a running 2025 host |
+| 2025 | **Live-tested** against a running AutoCAD 2025 host |
 | 2026 | **Built, not live-tested** — compiles against the 2026 managed references; unproven in a live session |
 
 ## Requirements
@@ -52,7 +52,7 @@ Then:
 
 **Autoloader alternative:** copy `plugin-bundle/765T-Forge.bundle` into `%APPDATA%\Autodesk\ApplicationPlugins` (per-user; preferred) or `%PROGRAMFILES%\Autodesk\ApplicationPlugins` (machine-wide, admin). Avoid `%PROGRAMDATA%` on 2026 — Autodesk tightened ProgramData auto-load. Build/bundle per year: 2025 = Series R25.0, 2026 = R25.1.
 
-**Releases:** GitHub-hosted CI packs the **server** zip only (no AutoCAD on runners). A usable install needs both `765T-Forge.Server-win-x64.zip` and `765T-Forge.Plugin.zip`.
+**Releases:** GitHub-hosted runners have no AutoCAD, so CI builds the **server** zip only; the plugin zip is built on a machine with AutoCAD and attached to the same release. A working install needs both `765T-Forge.Server-win-x64.zip` and `765T-Forge.Plugin.zip`.
 
 ### 2. Point your MCP client at Forge.Server.exe
 
@@ -71,6 +71,8 @@ The env block is identical across clients; only the config file and key name dif
   }
 }
 ```
+
+From a release zip, point `command` at `Forge.Server.exe` in the unzipped folder.
 
 - **Claude Code** — drop it as `mcpServers."765t-forge"` in the project `.mcp.json`, or:
   `claude mcp add-json 765t-forge '{"command":"...","env":{...}}'`
@@ -140,7 +142,7 @@ Known partials: `forge_exec_lisp` synchronous eval is context-limited on the pip
 - **Locked DLLs while AutoCAD is open:** Windows locks `Forge.Plugin.dll` after NETLOAD — build with `765T-Forge.ServerOnly.slnf`, or `-p:OutDir=` a scratch path, or close AutoCAD before overwriting.
 - **Token missing / auth denied:** set `FORGE_AUTOCAD_TOKEN` in the MCP host env **and** for the AutoCAD process, restart AutoCAD, re-NETLOAD.
 - **Timeout after a write:** assume it may have committed; `forge_qa_readback_after_timeout` before retrying.
-- **Release artifacts:** CI packs server only — you need **both** zips for a working install.
+- **Release artifacts:** download **both** zips from the release page.
 
 ## Build from source
 
@@ -170,13 +172,13 @@ Scripts: `scripts\build-server.ps1`, `build-plugin.ps1`, `install-plugin.ps1`, `
 
 ## Reporting vulnerabilities
 
-Report privately — do not file public issues for security findings. Preferred: **GitHub Security Advisories** ("Report a vulnerability" on this repo). Fallback: the GitHub organization profile contact. Include affected component (`Forge.Server`, `Forge.Plugin`, pipe protocol), reproduction steps, impact. We aim to acknowledge within 7 days — give us a reasonable window before public disclosure.
+Report privately — do not file public issues for security findings. Use **GitHub Security Advisories** ("Report a vulnerability" on this repo). Include the affected component (`Forge.Server`, `Forge.Plugin`, pipe protocol), reproduction steps and impact. Please allow reasonable time for a fix before public disclosure.
 
 Trust boundary notes: the pipe ACL limits to the current user + LocalSystem and the token is defense-in-depth — keep `FORGE_AUTOCAD_TOKEN` strong and unique; `forge_exec_dotnet` is the highest-risk path and stays double-gated.
 
 ## Versioning
 
-Product SemVer **0.3.0** (git tags + GitHub Releases) ≠ roadmap phase ≠ MCP protocol version ≠ AutoCAD target year. Plugin binaries are not interchangeable across AutoCAD major years — build per year.
+Product SemVer **0.3.0** (git tags + GitHub Releases) is independent of the MCP protocol version and the AutoCAD target year. Plugin binaries are not interchangeable across AutoCAD major years — build per year.
 
 ## License
 
