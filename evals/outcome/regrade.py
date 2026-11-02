@@ -2,7 +2,7 @@
 import json, os, sys, importlib.util
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-RUNS = os.path.join(HERE, "runs")
+RUNS = os.environ.get("OUTCOME_RUNS_DIR", os.path.join(HERE, "runs"))
 spec = importlib.util.spec_from_file_location("grade", os.path.join(HERE, "grade.py"))
 grade = importlib.util.module_from_spec(spec); spec.loader.exec_module(grade)
 spec2 = importlib.util.spec_from_file_location("run_eval", os.path.join(HERE, "run_eval.py"))

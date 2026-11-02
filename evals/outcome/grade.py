@@ -170,9 +170,11 @@ def g_t3(doc, rundir):
     vps = []
     if sheet_lay:
         vps = [e for e in sheet_lay if e.dxftype() == "VIEWPORT" and e.dxf.status == 0 or (e.dxftype() == "VIEWPORT" and getattr(e.dxf, 'id', 1) > 1)]
-    scale_ok = any(near(getattr(v.dxf, "custom_scale", 0), 0.02, 0.003) for v in vps)
+    zooms = [round(v.dxf.view_height / v.dxf.height, 4) for v in vps
+             if getattr(v.dxf, "view_height", None) and getattr(v.dxf, "height", None)]
+    scale_ok = any(near(z, 50.0, 0.5) for z in zooms)
     c["viewport_1to50"] = {"pass": len(vps) >= 1 and scale_ok,
-                           "detail": f"{len(vps)} viewports; scales={[round(getattr(v.dxf,'custom_scale',-1),4) for v in vps]}"}
+                           "detail": f"{len(vps)} viewports; zooms={zooms}"}
     return c
 
 # ---------------- T4 ----------------
@@ -434,9 +436,10 @@ def g2_t3(doc, rundir):
     c["attrs_exact_register"] = {"pass": len(attrs) >= 4 and exact,
                                  "detail": f"attrs={attrs} vs target={target}"}
     vps = [e for e in sheet_lay if e.dxftype() == "VIEWPORT"] if sheet_lay else []
-    scales = [getattr(v.dxf, "custom_scale", None) for v in vps]
-    c["viewport_exact_1to50"] = {"pass": any(s is not None and abs(s - 0.02) <= 0.001 for s in scales),
-                                 "detail": f"viewports={len(vps)}, custom_scales={scales}"}
+    zooms = [v.dxf.view_height / v.dxf.height for v in vps
+             if getattr(v.dxf, "view_height", None) and getattr(v.dxf, "height", None)]
+    c["viewport_exact_1to50"] = {"pass": any(abs(z - 50.0) <= 0.5 for z in zooms),
+                                 "detail": f"viewports={len(vps)}, zooms={[round(z,4) for z in zooms]}"}
     return c
 
 def g2_t4(doc, rundir):
