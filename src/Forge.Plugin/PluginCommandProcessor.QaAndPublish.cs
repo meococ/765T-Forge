@@ -306,6 +306,7 @@ public sealed partial class PluginCommandProcessor
                 "forge_block_set_attr"));
         }
 
+        findings.AddRange(NativeObjectFindings());
         var report = QaReport.FromFindings(ActiveDocumentPath(), findings, new
         {
             contractId = contract.ContractId,
@@ -507,6 +508,7 @@ public sealed partial class PluginCommandProcessor
             findings.AddRange(contract.ValidateAgainst(layoutNames, DrawingRegistryStore.Current));
         }
 
+        findings.AddRange(NativeObjectFindings());
         return QaReport.FromFindings(document, findings, new
         {
             xrefCount = xrefs.Length,

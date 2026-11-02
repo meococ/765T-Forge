@@ -1097,6 +1097,17 @@ public sealed class ForgeMcpTools
         CancellationToken cancellationToken = default)
         => runner.InvokeAsync("forge_qa_annotation_clash", new { layout, window, checks, textLayers, curveLayers, excludeLayers, doorLayers, doorBlocks, wallLayers, plotScale, minTextHeightMm, drawingUnits, minOverlapRatio, padding, reportMaskedCrossings, includeBlocks, blockDepth, includeXrefs, maxFindings }, document: document, cancellationToken: cancellationToken);
 
+    [McpServerTool(Name = "forge_qa_native_objects", Title = "QA Native Objects", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
+    [Description("Detect geometry left behind when real objects were exploded — the failure mode of reused public sources. Checks (checks arg, default all): exploded_dimensions (numeric text beside linework + arrowhead solids with NO live DIMENSION within window), exploded_hatches (>=5 parallel lines on one layer at near-constant spacing), exploded_blocks (two spatially separate clusters sharing an identical type/length/angle fingerprint — exploded-then-copied motif). window (default 1500 drawing units) controls the proximity radius for dimension clusters and motif grouping. Each finding carries code, severity 'warning', message, handles[], and at [x,y]. Returns passed, entitiesScanned, per-check summary counts, findings (maxFindings default 200), findingsTruncated. The same scan runs automatically inside forge_qa_preflight and forge_recipe_issue_set as warning findings.")]
+    public static Task<ForgeResult> QaNativeObjects(
+        ForgeToolRunner runner,
+        double? window = null,
+        string[]? checks = null,
+        int? maxFindings = null,
+        string? document = null,
+        CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_qa_native_objects", new { window, checks, maxFindings }, document: document, cancellationToken: cancellationToken);
+
     [McpServerTool(Name = "forge_standards_import", Title = "Standards Import", ReadOnly = false, Destructive = true, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Copy drawing standards from a template DWG/DWT into the ACTIVE drawing in one call: include = any of linetypes, textStyles, layers, dimStyles, mleaderStyles, tableStyles, pageSetups (default all). Copied in dependency order (linetypes and text styles before the layers and dim styles that use them), one WblockCloneObjects per kind. onConflict: skip (default — existing definitions are kept) or overwrite (replaced in place; everything using them restyles). filter = comma-separated wildcards on names. Layer 0, Defpoints and the ByLayer/ByBlock/Continuous linetypes are never overwritten; xref-dependent and anonymous names are never copied. dryRun returns the per-item plan (add/overwrite/skip_existing/skip_protected/skip_filtered). The result is a change report per kind (added, overwritten, skipped with reasons) read back from the drawing.")]
     public static Task<ForgeResult> StandardsImport(
