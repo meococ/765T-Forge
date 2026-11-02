@@ -158,6 +158,7 @@ public static class ForgeToolRegistry
         // forge_layout_page_setup_apply. forge_qa_annotation_clash is a pure read.
         ["forge_doc_import"] = new ToolMetadata("forge_doc_import", "document", false, true, false, false, true),
         ["forge_qa_annotation_clash"] = Read("forge_qa_annotation_clash", "qa"),
+        ["forge_qa_native_objects"] = Read("forge_qa_native_objects", "qa"),
         ["forge_standards_import"] = new ToolMetadata("forge_standards_import", "style", false, true, true, false, true),
         ["forge_block_insert_bulk"] = new ToolMetadata("forge_block_insert_bulk", "block", false, true, false, false, true),
         ["forge_plot_preset_apply"] = Write("forge_plot_preset_apply", "plot", idempotent: true),
