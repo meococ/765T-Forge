@@ -27,13 +27,3 @@ jobs:
 
       - name: Test
         run: dotnet test .\765T-Forge.ServerOnly.slnf --no-build --configuration Release --verbosity normal
-
-      - name: Docs drift guard
-        shell: pwsh
-        run: |
-          $hits = Select-String -Path CLAUDE.md,docs\troubleshooting.md,docs\safety.md -Pattern 'scaffolded|Phase 0.*scaffold|hardcoded device' -SimpleMatch:$false -ErrorAction SilentlyContinue
-          if ($hits) {
-            $hits | ForEach-Object { Write-Host $_.Path $_.LineNumber $_.Line }
-            throw "Stale Phase-0 / scaffold language found in agent-facing docs. Sync with docs/capability-matrix.md."
-          }
-          Write-Host "Docs drift guard passed."

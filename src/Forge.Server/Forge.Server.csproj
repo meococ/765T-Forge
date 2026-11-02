@@ -4,8 +4,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <!-- Prepared for `dnx` distribution (docs/packaging-nuget.md) — packed, NOT published.
-         PackAsTool only affects `dotnet pack`; normal build/test output is unchanged. -->
+    <!-- PackAsTool only affects `dotnet pack`; normal build/test output is unchanged. -->
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>forge-server</ToolCommandName>
     <PackageId>Forge765T.Server</PackageId>
@@ -20,12 +19,6 @@
     <PackageReference Include="ModelContextProtocol" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" />
-  </ItemGroup>
-
-  <!-- Ship honesty docs with the server so forge:// resources work from Release zips -->
-  <ItemGroup>
-    <Content Include="..\..\docs\capability-matrix.md" Link="docs\capability-matrix.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <Content Include="..\..\docs\safety.md" Link="docs\safety.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- Pack the repo README (carries the mcp-name ownership marker) into the nupkg -->

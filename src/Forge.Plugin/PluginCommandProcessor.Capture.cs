@@ -8,7 +8,7 @@ using Forge.Shared;
 
 namespace Forge.Plugin;
 
-// docs/cad-authoring-tools.md C24 — forge_view_capture. The agent's eyes: PrintWindow renders
+// C24 — forge_view_capture. The agent's eyes: PrintWindow renders
 // AutoCAD's main window into a bitmap even while the window is in the background (U-C4N's
 // screenshot approach); the MCP client reads the PNG to visually verify what was drawn.
 // Read-only on the drawing — when fit=true, adjusts the active ViewTableRecord via SetCurrentView

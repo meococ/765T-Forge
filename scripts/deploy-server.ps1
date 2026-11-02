@@ -20,8 +20,8 @@
   - the checkout is dirty: any tracked file modified or staged, any untracked
     file under <RepoRoot>\src\, or an untracked root build input
     (Directory.Build.props, Directory.Build.targets, Directory.Packages.props,
-    global.json, NuGet.config, *.slnf, *.rsp). Other untracked files (docs\,
-    examples\, ...) do
+    global.json, NuGet.config, *.slnf, *.rsp). Other untracked files (notes,
+    scratch output, ...) do
     not block. The deploy must trace to a committed tree; commit first or
     pass -AllowDirty. The dirty paths are recorded in DEPLOYED.json.
   - a Forge.Server.exe process is running from the destination - close or
@@ -331,7 +331,7 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
                 # Dirty = any tracked change anywhere, or an untracked file
                 # that feeds the deployed payload: under src\, or a root build
                 # input (props/targets/global.json/NuGet.config/*.slnf/*.rsp).
-                # Untracked files elsewhere (docs\, examples\, ...) do not
+                # Untracked files elsewhere (notes, scratch output, ...) do not
                 # count.
                 $st = Invoke-Git @('status', '--porcelain', '--untracked-files=no')
                 $un = Invoke-Git @('ls-files', '--others', '--exclude-standard')

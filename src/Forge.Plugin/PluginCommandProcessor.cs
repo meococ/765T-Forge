@@ -49,7 +49,7 @@ public sealed partial class PluginCommandProcessor
         "forge_dgn_import"
     };
 
-    /// <summary>docs/cad-job-tools.md C2 — the year this build targets, from the ForgeTargetYear assembly stamp.</summary>
+    /// <summary>The AutoCAD year this build targets (job wave C2), from the ForgeTargetYear assembly stamp.</summary>
     private static readonly int? TargetYear = ReadTargetYear();
 
     private static int? _hostYear;
@@ -121,7 +121,7 @@ public sealed partial class PluginCommandProcessor
         BeginUndoCallScope(command.Tool);
         ResetHatchBaselines();
 
-        // docs/cad-job-tools.md C2: the year gate runs before safety eval, backup, undo mark and
+        // C2: the year gate runs before safety eval, backup, undo mark and
         // dispatch; the two diagnostic tools still answer so the mismatch is visible by name.
         MeasureHostYear();
         var yearGate = HostYearPolicy.Check(TargetYear, _hostYear, _hostVersionRaw);

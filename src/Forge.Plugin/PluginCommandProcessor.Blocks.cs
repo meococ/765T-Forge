@@ -5,7 +5,7 @@ using Forge.Shared;
 
 namespace Forge.Plugin;
 
-// docs/cad-authoring-tools.md C22–C23 — forge_block_create / forge_block_insert / forge_block_list,
+// C22–C23 — forge_block_create / forge_block_insert / forge_block_list,
 // forge_layer_create and forge_layout_create. Two orderings are load-bearing here: block
 // definitions consume their source geometry as clone → transform by −basePoint → erase the
 // originals last (entities cannot be re-parented, so the sources must outlive every clone), and

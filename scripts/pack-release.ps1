@@ -34,16 +34,8 @@ dotnet publish $serverProj `
     -o $serverOut
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-# Honesty docs must be present next to the exe for forge:// MCP resources.
-$matrixInZip = Join-Path $serverOut "docs\capability-matrix.md"
-$safetyInZip = Join-Path $serverOut "docs\safety.md"
-if (-not (Test-Path $matrixInZip) -or -not (Test-Path $safetyInZip)) {
-    Write-Warning "docs missing from publish output - copying from repo."
-    $docsOut = Join-Path $serverOut "docs"
-    New-Item -ItemType Directory -Force -Path $docsOut | Out-Null
-    Copy-Item (Join-Path $root "docs\capability-matrix.md") $docsOut -Force
-    Copy-Item (Join-Path $root "docs\safety.md") $docsOut -Force
-}
+# forge:// MCP resources are self-contained in the server assembly (generated capability
+# matrix + embedded safety text); nothing extra ships inside the zip.
 
 $serverZip = Join-Path $releaseRoot "765T-Forge.Server-win-x64.zip"
 if (Test-Path $serverZip) { Remove-Item $serverZip -Force }
@@ -55,7 +47,7 @@ if (-not $SkipPlugin) {
     New-Item -ItemType Directory -Force -Path $pluginOut | Out-Null
 
     # Delegate to build-plugin.ps1 so the release zip carries the same ForgeTargetYear
-    # stamp (docs/cad-job-tools.md C2); a second build path here used to bypass the year table.
+    # stamp as a normal year-targeted build; a second build path here used to bypass it.
     # Run as a child powershell process so build-plugin's exit codes reach $LASTEXITCODE.
     Write-Host "Building Forge.Plugin (year $Year) via scripts\build-plugin.ps1..."
     powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "build-plugin.ps1") `

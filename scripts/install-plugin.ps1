@@ -58,6 +58,6 @@ Write-Host "     matching the MCP server env. Restart AutoCAD after changing env
 Write-Host "  3. In AutoCAD ${Year}: NETLOAD -> $installed"
 Write-Host "  4. Run MCP_STATUS and confirm the pipe name matches FORGE_PIPE_NAME."
 Write-Host "  5. Optional Autoloader: copy plugin-bundle\765T-Forge.bundle into an ApplicationPlugins folder."
-Write-Host "     See docs\install-plugin.md"
+Write-Host "     See README.md (Install the AutoCAD plugin)"
 Write-Host ""
 Write-Host "This script does not NETLOAD into a running AutoCAD session."

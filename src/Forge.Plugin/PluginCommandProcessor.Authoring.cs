@@ -5,7 +5,7 @@ using Forge.Shared;
 
 namespace Forge.Plugin;
 
-// docs/cad-authoring-tools.md C20–C23 — shared plumbing for the authoring wave. Every
+// C20–C23 — shared plumbing for the authoring wave. Every
 // forge_draw_* / forge_entity_* / forge_block_* handler builds on these helpers so the
 // transaction, handle and error conventions stay identical across the partial files.
 public sealed partial class PluginCommandProcessor

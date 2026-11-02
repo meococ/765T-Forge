@@ -4,7 +4,7 @@ using Forge.Shared;
 
 namespace Forge.Plugin;
 
-// docs/cad-authoring-tools.md C20 — forge_draw_* typed authoring tools. Pure DB API: no
+// C20 — forge_draw_* typed authoring tools. Pure DB API: no
 // dialogs, no prompts, no Editor.Command. Coordinates are WCS, angles arrive in degrees
 // at the boundary, results carry the new handle plus an entity read-back. All tools are
 // additive-only: they create entities and never touch existing geometry.

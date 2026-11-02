@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Build Forge.Plugin against one AutoCAD year from build/AutoCadYears.props (docs/cad-job-tools.md C2).
+  Build Forge.Plugin against one AutoCAD year from build/AutoCadYears.props.
 .PARAMETER Configuration
   Build configuration (Debug or Release).
 .PARAMETER Year

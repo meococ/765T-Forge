@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Check [docs/capability-matrix.md](../../docs/capability-matrix.md) first — the feature may already be **partial** or **planned** for 0.2.
+        Check the [tool overview](../../README.md#tools) first — the feature may already exist or be planned.
   - type: dropdown
     id: wave
     attributes:

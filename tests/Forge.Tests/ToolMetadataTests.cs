@@ -81,7 +81,7 @@ public sealed class ToolMetadataTests
     [Fact]
     public void AuthoringWaveSafetyContract()
     {
-        // docs/cad-authoring-tools.md C20–C23: draw tools and block_insert are additive-only
+        // C20–C23: draw tools and block_insert are additive-only
         // (no pre-write DWG copy), every entity mutation is destructive with backup, and no
         // authoring tool is OpenWorld (typed params only — SafetyPolicy allow-lists them).
         foreach (var name in new[]

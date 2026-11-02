@@ -5,7 +5,7 @@ public static class ForgeConstants
     public const string DefaultPipeName = "765T.Forge.AutoCAD";
     public const string ServerName = "765T-Forge";
 
-    /// <summary>Product SemVer shipped in releases and CHANGELOG.</summary>
+    /// <summary>Product SemVer shipped in releases and release notes.</summary>
     public const string ProductVersion = "0.3.0";
 
     /// <summary>Named-pipe / JSON envelope contract version.</summary>

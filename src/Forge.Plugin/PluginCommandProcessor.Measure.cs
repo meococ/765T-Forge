@@ -4,7 +4,7 @@ using Forge.Shared;
 
 namespace Forge.Plugin;
 
-// docs/cad-authoring-tools.md C24 — forge_measure_batch and forge_entity_array. Measurement
+// C24 — forge_measure_batch and forge_entity_array. Measurement
 // comes from the geometry engine (Curve.GetDistanceAtParameter / Area), never from re-reading
 // vertices — shoelace math silently loses area on curved segments. Array is entity_copy
 // generalized: clones + TransformBy placements, sources untouched.
