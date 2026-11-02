@@ -108,6 +108,37 @@ public sealed class NativeObjectScanTests
     }
 
     [Fact]
+    public void LongEntitySpanningManyCellsStillMerges()
+    {
+        // A wall-long line (bbox covers >10 cells at window 1500) must still union with the
+        // cluster it touches — the center-cell shortcut would have missed this.
+        var ents = new List<NativeEntitySnapshot>();
+        foreach (var (ox, tag) in new[] { (0.0, "a"), (30000.0, "b") })
+        {
+            ents.Add(Line($"{tag}w", ox - 5000, -500, ox + 100, -500)); // long member
+            ents.Add(Line($"{tag}1", ox, 0, ox + 100, 0));
+            ents.Add(Line($"{tag}2", ox + 100, 0, ox + 100, 100));
+            ents.Add(Line($"{tag}3", ox + 100, 100, ox, 100));
+            ents.Add(Line($"{tag}4", ox, 100, ox, 0));
+        }
+        var result = NativeObjectScan.Scan(ents, window: 1500);
+        var finding = Assert.Single(result.Findings, f => f.Code == "exploded_block_suspect");
+        Assert.Contains("aw", finding.Handles);
+        Assert.Contains("bw", finding.Handles);
+    }
+
+    [Fact]
+    public void OversizedPoolIsCappedNotScanned()
+    {
+        var ents = Enumerable.Range(0, NativeObjectScan.MaxClusterEntities + 1)
+            .Select(i => Line($"e{i}", i * 3000, 0, i * 3000 + 50, 0))
+            .ToList();
+        var result = NativeObjectScan.Scan(ents, checks: new[] { NativeObjectScan.CheckBlocks });
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("scan_capped", finding.Code);
+    }
+
+    [Fact]
     public void CheckFilterNarrowsDetection()
     {
         var ents = ExplodedDim(0, 0, "a");
