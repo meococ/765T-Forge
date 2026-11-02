@@ -11,7 +11,7 @@ public static class ForgeMcpHost
     public const string ServerName = ForgeConstants.ServerName;
 
     public const string Instructions =
-        "Call forge_system_health before other tools. Prefer typed tools (forge_<group>_<action>) over generic executors. Take drawing numbers only from forge_registry_lookup. Pass handle (or blockName when the handle is unknown) on forge_block_set_attr. A gate fails when passed is false or Ok is false; the report stays in data. completed=false or dryRun means the work is not finished - call again with dryRun=false to perform it. On timeout, call forge_qa_readback_after_timeout; do not retry a write blindly.";
+        "Call forge_system_health before other tools. Prefer typed tools (forge_<group>_<action>) over generic executors. Take drawing numbers only from forge_registry_lookup. Pass handle (or blockName when the handle is unknown) on forge_block_set_attr. A gate fails when passed is false or Ok is false; the report stays in data. completed=false or dryRun means the work is not finished - call again with dryRun=false to perform it. On timeout, call forge_qa_readback_after_timeout; do not retry a write blindly. Every failure carries retryable and hint: when retryable is false, the same call with the same arguments will fail again - change the inputs or report the error; never repeat a non-retryable call verbatim.";
 
     public static void ApplyServerOptions(McpServerOptions options)
     {

@@ -59,7 +59,8 @@ public sealed class ForgeToolRunner
 
         if (!decision.Allowed)
         {
-            return ForgeResult.Failure(command.Id, decision.Code, decision.Message, decision.Suggestion, auditId);
+            return ForgeFailureHint.Annotate(
+                ForgeResult.Failure(command.Id, decision.Code, decision.Message, decision.Suggestion, auditId));
         }
 
         var result = tool.ToLowerInvariant() switch
@@ -98,7 +99,7 @@ public sealed class ForgeToolRunner
             Message = result.Error?.Message
         }, cancellationToken).ConfigureAwait(false);
 
-        return result with { AuditId = result.AuditId ?? auditId };
+        return ForgeFailureHint.Annotate(result with { AuditId = result.AuditId ?? auditId });
     }
 
     /// <summary>
