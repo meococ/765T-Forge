@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for filing a bug. For **security** issues, use private reporting in [SECURITY.md](../SECURITY.md) instead.
+        Thanks for filing a bug. For **security** issues, report privately via GitHub Security Advisories (see README → Reporting vulnerabilities) — do not file a public issue.
   - type: dropdown
     id: component
     attributes:
@@ -61,4 +61,4 @@ body:
       options:
         - label: I set FORGE_AUTOCAD_TOKEN explicitly (not relying on a default secret)
         - label: I called forge_system_health successfully before the failing write (if applicable)
-        - label: I searched existing issues / capability-matrix for known partial tools
+        - label: I searched existing issues and the README tool overview for known partial tools

@@ -48,8 +48,7 @@
   The printed MCP server entry points at deploy\server\Forge.Server.exe
   under the repo root so the snippet matches the live entry;
   -ServerExe <path> overrides it. The deploy folder is produced by
-  scripts\deploy-server.ps1 (see "Deploying the server" in
-  docs\parallel-acad-instances.md).
+  scripts\deploy-server.ps1.
 
   -DryRun performs every check and prints the full plan
   ([WOULD-COPY] / [WOULD-RECREATE] / [WOULD-SET] / [WOULD-RESTORE] / [WOULD-ENV]
@@ -543,8 +542,7 @@ try {
     $repoRoot  = Split-Path -Parent $PSScriptRoot
     # The live MCP entry runs the deployed server under deploy\server, so
     # the snippet below must point there. The deploy folder is produced by
-    # scripts\deploy-server.ps1 (see "Deploying the server" in
-    # docs\parallel-acad-instances.md). -ServerExe overrides this default.
+    # scripts\deploy-server.ps1. -ServerExe overrides this default.
     $serverExePath = Join-Path $repoRoot 'deploy\server\Forge.Server.exe'
     if ($ServerExe) { $serverExePath = $ServerExe }
     $serverExeNote = if (Test-Path -LiteralPath $serverExePath) { $null } else { '  (not found on this machine - run scripts\deploy-server.ps1 first or pass -ServerExe)' }

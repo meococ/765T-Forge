@@ -27,11 +27,23 @@ artifacts/
 *.pfx
 *.snk
 
-# Per-user Devin config (run-local MCP servers, permissions)
-.devin/*.local.json
-
-# Eval run outputs (kept: code, tasks, seed fixtures)
-evals/outcome/runs/
+# Agent/host-local files — public repo carries READMEs + source only
+CLAUDE.md
+AGENTS.md
+.claude/
+.devin/
+skills/
+docs/
+evals/
+examples/
+packs/
+CHANGELOG.md
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+SECURITY.md
+scripts/smoke-lab.ps1
+__pycache__/
+*.pyc
 
 # JetBrains
 .idea/

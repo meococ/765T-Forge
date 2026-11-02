@@ -69,7 +69,7 @@ public static class ToolProfiles
             "forge_entity_list",
             "forge_layer_list"
         ],
-        // Authoring wave C20–C30 (docs/cad-authoring-tools.md): the complete draw-and-modify surface.
+        // Authoring wave C20–C30: the complete draw-and-modify surface.
         ["authoring"] =
         [
             "forge_system_health",

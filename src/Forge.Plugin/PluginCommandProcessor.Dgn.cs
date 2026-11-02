@@ -4,7 +4,7 @@ using Forge.Shared;
 
 namespace Forge.Plugin;
 
-// docs/cad-job-tools.md C15 — forge_dgn_import. The import runs in a fresh temporary
+// C15 — forge_dgn_import. The import runs in a fresh temporary
 // document so neither the source DGN nor the user's active drawing is ever modified;
 // RequiresBackup is therefore false in the registry, and an existing target is backed up
 // explicitly here before SaveAs (same rule as forge_doc_save).

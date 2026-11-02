@@ -6,16 +6,14 @@
 
 - [ ] Bug fix
 - [ ] Feature / capability
-- [ ] Docs / examples / skill
+- [ ] Docs
 - [ ] CI / packaging
 - [ ] Safety / security hardening
 
-## Capability matrix
+## Tool surface
 
 - [ ] No tool surface change
-- [ ] Updated `docs/capability-matrix.md` (implemented / partial / planned)
-- [ ] Updated `CHANGELOG.md` under Unreleased
-- [ ] Updated `skills/765t-forge/SKILL.md` (if agent workflow changed)
+- [ ] Tool list/flags changed — `forge://docs/capability-matrix` regenerates from the registry; update the README tool overview if groups changed
 
 ## Adding a tool checklist
 

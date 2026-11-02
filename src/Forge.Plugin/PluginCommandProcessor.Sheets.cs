@@ -6,7 +6,7 @@ using Forge.Shared;
 
 namespace Forge.Plugin;
 
-// docs/cad-authoring-tools.md C24 — document/lifecycle authoring: forge_doc_new,
+// C24 — document/lifecycle authoring: forge_doc_new,
 // forge_layer_set, forge_doc_export_dxf, forge_draw_polyline_from_csv, forge_viewport_add.
 // Same conventions as the C20–C23 wave: typed params, handles out, read-back, dry-run.
 public sealed partial class PluginCommandProcessor

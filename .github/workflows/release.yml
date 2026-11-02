@@ -75,9 +75,7 @@ jobs:
                pack-release.ps1 -Year 2025|2026; AUTOCAD_2026_ROOT overrides the default root.
             2. Run: .\scripts\pack-release.ps1 -Configuration Release
             3. Attach artifacts/release/765T-Forge.Plugin.zip to the GitHub Release for tag $($env:GITHUB_REF_NAME).
-            4. Confirm docs/smoke-lab.md has a maintainer pass (or note deferral in release notes).
-            5. Confirm server zip contains docs/capability-matrix.md and docs/safety.md.
-          See CONTRIBUTING.md release checklist.
+            4. Note in the release notes whether a live AutoCAD smoke pass ran for this build.
           "@
           if ($env:FORGE_REQUIRE_PLUGIN_ZIP -eq "true") {
             throw "FORGE_REQUIRE_PLUGIN_ZIP=true but plugin was not packed on this runner."

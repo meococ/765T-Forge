@@ -4,7 +4,7 @@ using Forge.Shared;
 
 namespace Forge.Plugin;
 
-// docs/cad-authoring-tools.md C21 — forge_entity_get/list/move/copy/rotate/scale/mirror/
+// C21 — forge_entity_get/list/move/copy/rotate/scale/mirror/
 // offset/erase/set_props plus forge_undo. Entities are referenced by explicit handle strings
 // only (uppercase hex); there is no selection and no "all" path. Clones and offset results are
 // appended with AppendExistingToModelSpace — they already carry their properties and

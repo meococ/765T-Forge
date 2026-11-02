@@ -3,7 +3,7 @@ using System.Globalization;
 namespace Forge.Shared;
 
 /// <summary>
-/// Year-mismatch policy (docs/cad-job-tools.md C2): a plugin dispatch is decided from two
+/// Year-mismatch policy (job wave C2): a plugin dispatch is decided from two
 /// typed facts — the build's <c>ForgeTargetYear</c> assembly stamp and the host year mapped
 /// from <c>Application.Version</c> through the table below — never from name or path
 /// inference. A mismatch refuses with a named error until a live smoke proves the year

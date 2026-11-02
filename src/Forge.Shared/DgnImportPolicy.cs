@@ -1,7 +1,7 @@
 namespace Forge.Shared;
 
 /// <summary>
-/// Typed argument surface for forge_dgn_import (docs/cad-job-tools.md C15): convert a
+/// Typed argument surface for forge_dgn_import (job wave C15): convert a
 /// MicroStation DGN V8 drawing into a new DWG. The source DGN is never written and the
 /// active drawing is never touched — the import runs in a fresh temporary document.
 /// </summary>
