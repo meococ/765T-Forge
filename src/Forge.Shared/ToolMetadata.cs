@@ -85,6 +85,10 @@ public static class ForgeToolRegistry
         ["forge_measure_batch"] = Read("forge_measure_batch", "measure"),
         ["forge_entity_array"] = new ToolMetadata("forge_entity_array", "entity", false, true, false, false, true),
         ["forge_layer_set"] = Write("forge_layer_set", "layer", idempotent: true),
+        // Erases a symbol-table record: destructive like entity_erase (pre-write backup),
+        // but guarded — refuses 0/Defpoints, the current layer, xref-dependent layers and
+        // layers still in use.
+        ["forge_layer_delete"] = new ToolMetadata("forge_layer_delete", "layer", false, true, false, false, true),
         ["forge_doc_new"] = new ToolMetadata("forge_doc_new", "document", false, false, false, false, false),
         ["forge_doc_export_dxf"] = new ToolMetadata("forge_doc_export_dxf", "document", false, false, false, false, false),
         ["forge_draw_polyline_from_csv"] = new ToolMetadata("forge_draw_polyline_from_csv", "draw", false, false, false, false, false),
