@@ -30,6 +30,9 @@ artifacts/
 # Per-user Devin config (run-local MCP servers, permissions)
 .devin/*.local.json
 
+# Eval run outputs (kept: code, tasks, seed fixtures)
+evals/outcome/runs/
+
 # JetBrains
 .idea/
 *.sln.iml
