@@ -111,10 +111,16 @@ public static class NativeObjectScan
         => a.MinX <= b.MaxX + pad && a.MaxX >= b.MinX - pad
            && a.MinY <= b.MaxY + pad && a.MaxY >= b.MinY - pad;
 
-    private static double WindowFor(NativeEntitySnapshot text, double fallback)
+    private static double ParseNumber(NativeEntitySnapshot text)
     {
         var digits = Regex.Replace(FormatStrip.Replace(text.Content ?? "", ""), "[^0-9.,]", "").Replace(",", "");
-        return double.TryParse(digits, out var v) && v > 0 ? Math.Max(fallback, v * 1.5) : fallback;
+        return double.TryParse(digits, out var v) ? v : 0.0;
+    }
+
+    private static double WindowFor(NativeEntitySnapshot text, double fallback)
+    {
+        var v = ParseNumber(text);
+        return v > 0 ? Math.Max(fallback, v * 1.5) : fallback;
     }
 
     private static bool IsNumericText(NativeEntitySnapshot e)
@@ -149,7 +155,23 @@ public static class NativeObjectScan
             var nearLines = lines.Where(l => BoxNear(text, l, w)).ToArray();
             var nearSolids = solids.Where(s => BoxNear(text, s, w)).ToArray();
             var nearDims = dims.Where(d => BoxNear(text, d, w)).ToArray();
-            if (nearLines.Length < 2 || nearSolids.Length < 1 || nearDims.Length > 0)
+            if (nearDims.Length > 0)
+            {
+                continue;
+            }
+
+            // Path A: classic explosion — linework + arrowhead SOLIDs beside the text.
+            // Path B: lines-only explosion — a line whose length equals the text's own
+            // value, the text sitting inside that line's padded bbox, with extension/tick
+            // linework nearby (no SOLIDs at all in this style).
+            var value = ParseNumber(text);
+            var solidPath = nearLines.Length >= 2 && nearSolids.Length >= 1;
+            var measuredPath = value > 0
+                && nearLines.Any(l => l.Length is { } len
+                                      && Math.Abs(len - value) <= value * 0.12
+                                      && BoxNear(text, l, value * 0.15))
+                && nearLines.Length >= 4;
+            if (!solidPath && !measuredPath)
             {
                 continue;
             }

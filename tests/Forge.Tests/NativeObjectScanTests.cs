@@ -45,6 +45,25 @@ public sealed class NativeObjectScanTests
     }
 
     [Fact]
+    public void LinesOnlyExplodedDimensionIsFlagged()
+    {
+        // t6 seed shape: dimension LINEs whose length equals the text value, plus tick
+        // diagonals and extension LINEs — no SOLIDs at all.
+        var ents = new List<NativeEntitySnapshot>
+        {
+            Line("dl", 0, -600, 3600, -600),
+            Line("t1", -60, -660, 60, -540),
+            Line("t2", 3540, -660, 3660, -540),
+            Line("e1", 0, -100, 0, -800),
+            Line("e2", 3600, -100, 3600, -800),
+            Ent("txt", "MText", 1600, -520, 1900, -480, "0", "3600")
+        };
+        var result = NativeObjectScan.Scan(ents);
+        var finding = Assert.Single(result.Findings, f => f.Code == "exploded_dimension_like");
+        Assert.Contains("txt", finding.Handles);
+    }
+
+    [Fact]
     public void RealDimensionNearbySuppressesTheFlag()
     {
         var ents = ExplodedDim(0, 0, "a");
