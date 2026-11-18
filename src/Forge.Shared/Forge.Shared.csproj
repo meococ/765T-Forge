@@ -4,6 +4,9 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- See Forge.Plugin.csproj: -p:DevAsmSuffix=.Dev renames this assembly for dev
+         side-by-side NETLOAD next to a deployed bundle. -->
+    <AssemblyName Condition="'$(DevAsmSuffix)' != ''">$(MSBuildProjectName)$(DevAsmSuffix)</AssemblyName>
   </PropertyGroup>
 
 </Project>

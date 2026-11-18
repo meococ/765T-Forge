@@ -16,6 +16,15 @@ public sealed class Plugin : IExtensionApplication
         try
         {
             var environment = ForgeEnvironment.FromProcess();
+            // Side-by-side dev NETLOAD: when a dev build shares a session with a deployed
+            // bundle, both would read FORGE_PIPE_NAME and race for one pipe. A dev-only
+            // override lets the second plugin bind its own lane. (LISP setenv can't reach
+            // .NET's process-env snapshot, so this must come from the launch environment.)
+            var devPipe = Environment.GetEnvironmentVariable("FORGE_PIPE_NAME_DEV");
+            if (!string.IsNullOrWhiteSpace(devPipe))
+            {
+                environment = environment with { PipeName = devPipe };
+            }
             if (environment.UsingDevDefaultToken)
             {
                 WriteMessage("\n[765T-Forge] WARNING: FORGE_DEV_ALLOW_DEFAULT_TOKEN is enabled.");

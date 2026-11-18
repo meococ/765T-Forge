@@ -165,3 +165,66 @@ public static class PaperMatch
         return count;
     }
 }
+
+/// <summary>Outcome of checking one layout's stored media against its stored device.</summary>
+public enum PublishMediaVerdict
+{
+    /// <summary>The stored media name is offered by the layout's own device.</summary>
+    OnDevice,
+    /// <summary>Not a listed media, but the stored sheet size maps to exactly one device medium.</summary>
+    MappedBySize,
+    /// <summary>No device medium matches — the DSD publish would enter the paper-mismatch path.</summary>
+    NotOnDevice,
+    /// <summary>More than one device medium maps the stored size — refusing to guess.</summary>
+    Ambiguous
+}
+
+/// <summary>
+/// readiness-20261118 gap 5: DSD publish plots each sheet with the layout's STORED device+media
+/// (the DSD `Setup=` field stays empty). A stored media the device cannot resolve — the
+/// `psk:` placeholder names virgin layouts carry — sends the publisher into its interactive
+/// paper-mismatch path and wedges the serialized lane. This pure decision mirrors the
+/// plot_to_pdf resolution (exact canonical match, else unambiguous match by stored size) so
+/// the plugin can refuse before <c>PublishDsd</c>, typed as
+/// <see cref="PaperMatch.NotOnDeviceCode"/>.
+/// </summary>
+public static class PublishMediaGate
+{
+    /// <summary>Stored device names that mean "no plottable device configured".</summary>
+    public static bool DeviceIsMissing(string? device)
+        => string.IsNullOrWhiteSpace(device)
+            || string.Equals(device.Trim(), "none", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(device.Trim(), "none_device", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Evaluate a layout's stored media against the media list of its OWN stored device.
+    /// Exact canonical match wins; otherwise the stored sheet size is matched once, and only
+    /// an unambiguous map passes — everything else must be refused before publish.
+    /// </summary>
+    public static PublishMediaVerdict Evaluate(
+        string? storedMedia,
+        double? storedWidthMm,
+        double? storedHeightMm,
+        IReadOnlyList<PaperMedia> deviceMedia,
+        out string? mappedMedia,
+        out IReadOnlyList<string> nearest)
+    {
+        mappedMedia = null;
+        if (!string.IsNullOrWhiteSpace(storedMedia)
+            && deviceMedia.Any(m => string.Equals(m.Canonical, storedMedia, StringComparison.Ordinal)))
+        {
+            nearest = [];
+            return PublishMediaVerdict.OnDevice;
+        }
+
+        var match = PaperMatch.MatchBySize(storedWidthMm, storedHeightMm, deviceMedia);
+        nearest = match.Nearest;
+        if (match.Matched)
+        {
+            mappedMedia = match.Canonical;
+            return PublishMediaVerdict.MappedBySize;
+        }
+
+        return match.Ambiguous ? PublishMediaVerdict.Ambiguous : PublishMediaVerdict.NotOnDevice;
+    }
+}
