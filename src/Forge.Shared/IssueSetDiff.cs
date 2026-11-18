@@ -13,6 +13,53 @@ public sealed class SheetInventory
     public string Format { get; init; } = "csv";
     public List<IssueSetSheet> Sheets { get; init; } = [];
 
+    // Header-name aliases, compared after removing every non-alphanumeric character —
+    // "drawing_no", "drawing-number" and "DrawingNo" all normalize to "drawingno".
+    private static readonly string[] LayoutColumns = ["layout", "layoutname"];
+    private static readonly string[] DrawingNoColumns = ["drawingno", "drawingnumber", "drawing", "dwgno", "sheetno", "sheetnumber"];
+    private static readonly string[] RevColumns = ["rev", "revision", "revno"];
+    private static readonly string[] TitleColumns = ["title", "sheettitle", "sheetname"];
+
+    private static string NormalizeHeader(string raw)
+    {
+        var t = raw.Trim().Trim('"').Trim();
+        var sb = new System.Text.StringBuilder(t.Length);
+        foreach (var ch in t)
+        {
+            if (char.IsLetterOrDigit(ch))
+            {
+                sb.Append(char.ToLowerInvariant(ch));
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    private static int FindColumn(string[] headers, string[] aliases, string displayName)
+    {
+        var index = IndexOfAny(headers, aliases);
+        if (index < 0)
+        {
+            throw new InvalidOperationException(
+                $"Sheet inventory CSV header must include a {displayName} column (found: {string.Join(", ", headers)}).");
+        }
+
+        return index;
+    }
+
+    private static int IndexOfAny(string[] headers, string[] aliases)
+    {
+        for (var i = 0; i < headers.Length; i++)
+        {
+            if (aliases.Contains(headers[i], StringComparer.Ordinal))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
     public static SheetInventory LoadFromCsv(string path)
     {
         var lines = File.ReadAllLines(path)
@@ -23,11 +70,25 @@ public sealed class SheetInventory
             throw new InvalidOperationException("Sheet inventory CSV is empty.");
         }
 
+        // Positional default for headerless files: layout,drawingNo[,rev[,title]].
         var start = 0;
+        var idxLayout = 0;
+        var idxDrawingNo = 1;
+        var idxRev = 2;
+        var idxTitle = 3;
+        var headerMapped = false;
         if (lines[0].Contains("layout", StringComparison.OrdinalIgnoreCase)
             && lines[0].Contains("drawing", StringComparison.OrdinalIgnoreCase))
         {
+            // A header row maps every column by name — positions never leak across columns,
+            // so a `...,title,rev` order can no longer swap the fields (readiness gap 7).
             start = 1;
+            headerMapped = true;
+            var headers = lines[0].Split(',').Select(NormalizeHeader).ToArray();
+            idxLayout = FindColumn(headers, LayoutColumns, "layout");
+            idxDrawingNo = FindColumn(headers, DrawingNoColumns, "drawingNo");
+            idxRev = IndexOfAny(headers, RevColumns);
+            idxTitle = IndexOfAny(headers, TitleColumns);
         }
 
         var sheets = new List<IssueSetSheet>();
@@ -39,12 +100,15 @@ public sealed class SheetInventory
                 throw new InvalidOperationException($"Invalid CSV row {i + 1}: need layout,drawingNo[,rev[,title]].");
             }
 
+            string Cell(int index) => index >= 0 && index < parts.Length ? parts[index].Trim() : "";
+            string? CellOrNull(int index) => index >= 0 && index < parts.Length ? parts[index].Trim() : null;
+
             sheets.Add(new IssueSetSheet
             {
-                Layout = parts[0].Trim(),
-                DrawingNo = parts[1].Trim(),
-                Rev = parts.Length > 2 ? parts[2].Trim() : null,
-                Title = parts.Length > 3 ? parts[3].Trim() : null
+                Layout = Cell(idxLayout),
+                DrawingNo = Cell(idxDrawingNo),
+                Rev = headerMapped ? CellOrNull(idxRev) : (parts.Length > 2 ? parts[2].Trim() : null),
+                Title = headerMapped ? CellOrNull(idxTitle) : (parts.Length > 3 ? parts[3].Trim() : null)
             });
         }
 

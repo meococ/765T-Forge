@@ -127,6 +127,205 @@ public sealed class PublishAndContractTests
         }
     }
 
+    // readiness-20261118 gap 7: columns are mapped by header name, so a swapped
+    // title/rev order can no longer land in the wrong fields.
+    [Fact]
+    public void SheetInventoryCsvMapsColumnsByHeaderName()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"forge-inv-{Guid.NewGuid():N}.csv");
+        File.WriteAllText(path, "layout,drawingNo,title,rev\nS-1,MTR-001,SITE PLAN,1\n");
+        try
+        {
+            var inv = SheetInventory.LoadFromCsv(path);
+            Assert.Single(inv.Sheets);
+            var sheet = inv.Sheets[0];
+            Assert.Equal("S-1", sheet.Layout);
+            Assert.Equal("MTR-001", sheet.DrawingNo);
+            Assert.Equal("SITE PLAN", sheet.Title);
+            Assert.Equal("1", sheet.Rev);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void SheetInventoryCsvNamedHeaderNormalOrderStillWorks()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"forge-inv-{Guid.NewGuid():N}.csv");
+        File.WriteAllText(path, "layout,drawingNo,rev,title\nS-1,MTR-001,1,SITE PLAN\nS-2,MTR-002,2,ELEVATIONS\n");
+        try
+        {
+            var inv = SheetInventory.LoadFromCsv(path);
+            Assert.Equal(2, inv.Sheets.Count);
+            Assert.Equal("1", inv.Sheets[0].Rev);
+            Assert.Equal("SITE PLAN", inv.Sheets[0].Title);
+            Assert.Equal("ELEVATIONS", inv.Sheets[1].Title);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void SheetInventoryCsvHeaderWithoutRevOrTitleLeavesThemNull()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"forge-inv-{Guid.NewGuid():N}.csv");
+        File.WriteAllText(path, "layout,drawingNo\nS-1,MTR-001\n");
+        try
+        {
+            var inv = SheetInventory.LoadFromCsv(path);
+            Assert.Single(inv.Sheets);
+            Assert.Null(inv.Sheets[0].Rev);
+            Assert.Null(inv.Sheets[0].Title);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void SheetInventoryCsvHeaderlessPositionalStillWorks()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"forge-inv-{Guid.NewGuid():N}.csv");
+        File.WriteAllText(path, "S-1,MTR-001,1,SITE PLAN\n");
+        try
+        {
+            var inv = SheetInventory.LoadFromCsv(path);
+            Assert.Single(inv.Sheets);
+            Assert.Equal("S-1", inv.Sheets[0].Layout);
+            Assert.Equal("MTR-001", inv.Sheets[0].DrawingNo);
+            Assert.Equal("1", inv.Sheets[0].Rev);
+            Assert.Equal("SITE PLAN", inv.Sheets[0].Title);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void SheetInventoryCsvHeaderMissingRequiredColumnFails()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"forge-inv-{Guid.NewGuid():N}.csv");
+        File.WriteAllText(path, "layout,drawingRef,title,rev\nS-1,D1,SITE PLAN,1\n");
+        try
+        {
+            var ex = Assert.Throws<InvalidOperationException>(() => SheetInventory.LoadFromCsv(path));
+            Assert.Contains("drawingNo", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    // readiness-20261118 gap 5: the publish media gate mirrors the plot_to_pdf resolution —
+    // exact stored-media match or an unambiguous size map passes; everything else is refused
+    // before PublishDsd can enter the paper-mismatch path and wedge the lane.
+    private static readonly PaperMedia[] DwgToPdfMedia =
+    [
+        PaperMatch.ToMedia("ISO_A3_(420.00_x_297.00_MM)", "ISO A3 (420.00 x 297.00 MM)"),
+        PaperMatch.ToMedia("ISO_A4_(297.00_x_210.00_MM)", "ISO A4 (297.00 x 210.00 MM)"),
+        PaperMatch.ToMedia("ANSI_B_(17.00_x_11.00_Inches)", "ANSI B (17.00 x 11.00 Inches)")
+    ];
+
+    [Fact]
+    public void PublishMediaGateRefusesPlaceholderMediaNotOnDevice()
+    {
+        // The virgin-layout repro: a psk:* placeholder name and a ~5.5x7m stored sheet that
+        // maps to no real device medium.
+        var verdict = PublishMediaGate.Evaluate(
+            "psk:NorthAmericaLetter", 5483.0, 7096.0, DwgToPdfMedia, out var mapped, out var nearest);
+
+        Assert.Equal(PublishMediaVerdict.NotOnDevice, verdict);
+        Assert.Null(mapped);
+        Assert.NotEmpty(nearest);
+    }
+
+    [Fact]
+    public void PublishMediaGatePassesExactStoredMedia()
+    {
+        var verdict = PublishMediaGate.Evaluate(
+            "ISO_A3_(420.00_x_297.00_MM)", 420.0, 297.0, DwgToPdfMedia, out var mapped, out _);
+
+        Assert.Equal(PublishMediaVerdict.OnDevice, verdict);
+        Assert.Null(mapped);
+    }
+
+    [Fact]
+    public void PublishMediaGateMapsUnlistedMediaByStoredSize()
+    {
+        var verdict = PublishMediaGate.Evaluate(
+            "ezdxf_(420.00_x_297.00_MM)", 420.0, 297.0, DwgToPdfMedia, out var mapped, out _);
+
+        Assert.Equal(PublishMediaVerdict.MappedBySize, verdict);
+        Assert.Equal("ISO_A3_(420.00_x_297.00_MM)", mapped);
+    }
+
+    [Fact]
+    public void PublishMediaGateRefusesAmbiguousSizeMap()
+    {
+        // Two equally-plain device media at the stored size — MatchBySize refuses to guess.
+        var media = new[]
+        {
+            PaperMatch.ToMedia("ISO_A3_(420.00_x_297.00_MM)", "ISO A3 (420.00 x 297.00 MM)"),
+            PaperMatch.ToMedia("EZDXF_SHEET_(420.00_x_297.00_MM)", "ezdxf (420.00 x 297.00 MM)")
+        };
+        var verdict = PublishMediaGate.Evaluate("stored_(420.00_x_297.00_MM)", 420.0, 297.0, media, out _, out var nearest);
+
+        Assert.Equal(PublishMediaVerdict.Ambiguous, verdict);
+        Assert.Equal(2, nearest.Count);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("  ")]
+    [InlineData("None")]
+    [InlineData("none_device")]
+    public void PublishMediaGateDetectsMissingDevice(string? device)
+    {
+        Assert.True(PublishMediaGate.DeviceIsMissing(device));
+        Assert.False(PublishMediaGate.DeviceIsMissing("DWG To PDF.pc3"));
+    }
+
+    // readiness-20261118 gap 8: point-loop terminator decision for forge_exec_command.
+    [Theory]
+    [InlineData("_.LINE 0,0 10,10", true)]
+    [InlineData("_.LINE", true)]
+    [InlineData("_.PLINE 0,0 10,10", true)]
+    [InlineData("_.PLINE 0,0 10,10 C", false)]   // self-terminating Close — an Enter would repeat at the prompt
+    [InlineData("_.MLINE 0,0 10,10", true)]
+    [InlineData("_.RECTANG 0,0 10,10", false)]
+    [InlineData("_.CIRCLE 0,0 5", false)]
+    [InlineData("_.ZOOM _E", false)]
+    [InlineData("(setq e 42)", false)]
+    public void PointLoopTerminatorOnlyAppendsInsideAnUnterminatedLoop(string command, bool expected)
+    {
+        var tokens = AutoCadCommandSequence.Tokenize(command);
+        Assert.Equal(expected, AutoCadCommandSequence.EndsInUnterminatedPointLoop(tokens));
+    }
+
+    // readiness-20261118 gap 8: a bare point-loop command can never finish — refuse it before
+    // dispatch instead of parking the lane for the whole watchdog window.
+    [Theory]
+    [InlineData("_.LINE", true)]
+    [InlineData("_.PLINE", true)]
+    [InlineData("MLINE", true)]
+    [InlineData("_.LINE 0,0", false)]
+    [InlineData("_.PLINE 0,0 10,10 C", false)]
+    [InlineData("_.CIRCLE", false)]
+    [InlineData("_.ZOOM _E", false)]
+    public void BarePointLoopCommandIsUnfinishable(string command, bool expected)
+    {
+        var tokens = AutoCadCommandSequence.Tokenize(command);
+        Assert.Equal(expected, AutoCadCommandSequence.IsUnfinishable(tokens));
+    }
+
     [Fact]
     public void IssueSetDiffDetectsAddedLayouts()
     {

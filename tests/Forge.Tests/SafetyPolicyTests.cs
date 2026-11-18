@@ -49,7 +49,12 @@ public sealed class SafetyPolicyTests
     [InlineData("(ssget \"X\") (command \"ERASE\")")]
     [InlineData("(command \"_.ERASE\" (ssget \"_X\") \"\")")]
     [InlineData("(command \"_.ERASE\" (ssget \"_A\") \"\")")]
+    [InlineData("(command \"_.E\" (ssget \"_X\") \"\")")]
+    [InlineData("(setq s (ssget \"_X\")) (command \"_.ERASE\" s \"\")")]
+    [InlineData("(setq e (ssget \"_X\")) (command \"E\" e \"\")")]
     [InlineData("(setq s (ssget \"_X\")) (entdel (ssname s 0))")]
+    [InlineData("(setq s (ssget \"_X\")) (vla-delete (ssname s 0))")]
+    [InlineData("_.ERASE\n(ssget \"_X\")\n")]
     [InlineData("E\nALL\n")]
     [InlineData("PU\nA\n*\nN\n")]
     [InlineData("(setvar \"SECURELOAD\" 0)")]
@@ -84,6 +89,22 @@ public sealed class SafetyPolicyTests
     public void AliasRegexDoesNotFalsePositiveOnLayerBlockOrText(string commandText)
     {
         var decision = _policy.EvaluateText("forge_exec_command", commandText);
+
+        Assert.True(decision.Allowed, $"Expected '{commandText}' to be allowed, but got {decision.Code}: {decision.Message}");
+    }
+
+    // readiness-20261118 gap 4: a selection-set variable named `e` is not an erase verb —
+    // the reported false positive on (setq e (ssget "_X" ...)).
+    [Theory]
+    [InlineData("(setq e (ssget \"_X\" '((0 . \"INSERT\"))) (if e (princ (sslength e)))")]
+    [InlineData("(defun c:REVCOUNT ()\n  (setq e (ssget \"_X\" '((0 . \"INSERT\"))))\n  (if e (princ (sslength e)))\n  (princ))")]
+    [InlineData("(setq e (ssget \"_A\"))")]
+    [InlineData("(setq sel (ssget \"_X\" '((0 . \"INSERT\"))))")]
+    [InlineData("(setq s (ssget \"_X\")) (command \"_.UNDO\" \"E\")")]
+    [InlineData("(setq e 42) (princ e)")]
+    public void SsgetAllEraseAllowsSelectionSetVariableNamedE(string commandText)
+    {
+        var decision = _policy.EvaluateText("forge_exec_lisp", commandText);
 
         Assert.True(decision.Allowed, $"Expected '{commandText}' to be allowed, but got {decision.Code}: {decision.Message}");
     }

@@ -525,21 +525,22 @@ public sealed partial class PluginCommandProcessor
 
         if (command.DryRun)
         {
-            return DryRun(command, new { handles = args.Handles, delta = new[] { delta.X, delta.Y, delta.Z } });
+            return DryRun(command, new { handles = args.Handles, delta = new[] { delta.X, delta.Y, delta.Z }, args.InsertPath });
         }
 
         var db = ActiveDb;
         using var tr = db.TransactionManager.StartTransaction();
         var unknown = new List<string>();
         var locked = new List<string>();
-        var opened = OpenHandlesForWrite(db, tr, args.Handles!, unknown, locked);
+        var opened = OpenForScopedWrite(db, tr, args.Handles!, args.InsertPath, unknown, locked, out var scopeBtr, out var pathFailure);
         if (opened.Count == 0)
         {
             return ForgeResult.Failure(
                 command.Id,
-                locked.Count > 0 ? "layer_locked" : "handle_not_found",
-                locked.Count > 0 ? "All target entities are on locked layers." : "No valid layout entities found for the supplied handles.",
-                data: new { unknownHandles = unknown, lockedHandles = locked });
+                pathFailure is not null ? "insert_path_mismatch" : locked.Count > 0 ? "layer_locked" : "handle_not_found",
+                pathFailure ?? (locked.Count > 0 ? "All target entities are on locked layers." : "No valid layout entities found for the supplied handles."),
+                "For entities inside a block definition pass the insertPath reported by forge_entity_list(includeBlocks=true).",
+                data: new { unknownHandles = unknown, lockedHandles = locked, args.InsertPath });
         }
 
         var displacement = Matrix3d.Displacement(delta);
@@ -552,8 +553,72 @@ public sealed partial class PluginCommandProcessor
         tr.Commit();
         return ForgeResult.Success(
             command.Id,
-            new { moved = opened.Count, unknownHandles = unknown, lockedHandles = locked, handles = args.Handles },
+            new
+            {
+                moved = opened.Count,
+                unknownHandles = unknown,
+                lockedHandles = locked,
+                handles = args.Handles,
+                scope = scopeBtr is not null ? "block_definition" : "layout_space",
+                blockName = scopeBtr?.Name,
+                warning = scopeBtr is not null
+                    ? $"Edited block definition '{scopeBtr.Name}' — every insert of it moved. delta is in the definition's own coordinates."
+                    : null
+            },
             verification: new ForgeVerification { Attempted = true, Passed = opened.Count > 0 && unknown.Count == 0 && locked.Count == 0, ReadBack = readBack });
+    }
+
+    /// <summary>
+    /// readiness-20261118 gap 6: batch entity open honouring an optional insertPath — the
+    /// ancestor-INSERT chain forge_entity_list(includeBlocks) reports. With a path every handle
+    /// resolves inside the block definition the path ends in (siblings share one path); without
+    /// it the layout-space-only rules apply unchanged.
+    /// </summary>
+    private static List<Entity> OpenForScopedWrite(
+        Database db,
+        Transaction tr,
+        string[] handles,
+        string? insertPath,
+        List<string> unknown,
+        List<string> locked,
+        out BlockTableRecord? scopeBtr,
+        out string? pathFailure)
+    {
+        scopeBtr = null;
+        pathFailure = null;
+        if (string.IsNullOrWhiteSpace(insertPath))
+        {
+            return OpenHandlesForWrite(db, tr, handles, unknown, locked);
+        }
+
+        var opened = new List<Entity>();
+        var seen = new HashSet<ObjectId>();
+        foreach (var h in handles)
+        {
+            var entity = TryOpenEntityInBlockPath(db, tr, h, insertPath!, out var status, out var btr, out var detail);
+            if (entity is null)
+            {
+                if (status == EntityOpenStatus.LayerLocked)
+                {
+                    locked.Add(h);
+                }
+                else
+                {
+                    unknown.Add(h);
+                    pathFailure ??= detail;
+                }
+
+                continue;
+            }
+
+            scopeBtr ??= btr;
+            if (seen.Add(entity.ObjectId))
+            {
+                opened.Add(entity);
+            }
+        }
+
+        return opened;
     }
 
     private static ForgeResult EntityCopy(ForgeCommand command)
@@ -652,7 +717,8 @@ public sealed partial class PluginCommandProcessor
             {
                 handles = args.Handles,
                 basePoint = new[] { basePoint.X, basePoint.Y, basePoint.Z },
-                angleDeg = args.AngleDeg
+                angleDeg = args.AngleDeg,
+                args.InsertPath
             });
         }
 
@@ -660,17 +726,19 @@ public sealed partial class PluginCommandProcessor
         using var tr = db.TransactionManager.StartTransaction();
         var unknown = new List<string>();
         var locked = new List<string>();
-        var opened = OpenHandlesForWrite(db, tr, args.Handles!, unknown, locked);
+        var opened = OpenForScopedWrite(db, tr, args.Handles!, args.InsertPath, unknown, locked, out var scopeBtr, out var pathFailure);
         if (opened.Count == 0)
         {
             return ForgeResult.Failure(
                 command.Id,
-                locked.Count > 0 ? "layer_locked" : "handle_not_found",
-                locked.Count > 0 ? "All target entities are on locked layers." : "No valid layout entities found for the supplied handles.",
-                data: new { unknownHandles = unknown, lockedHandles = locked });
+                pathFailure is not null ? "insert_path_mismatch" : locked.Count > 0 ? "layer_locked" : "handle_not_found",
+                pathFailure ?? (locked.Count > 0 ? "All target entities are on locked layers." : "No valid layout entities found for the supplied handles."),
+                "For entities inside a block definition pass the insertPath reported by forge_entity_list(includeBlocks=true).",
+                data: new { unknownHandles = unknown, lockedHandles = locked, args.InsertPath });
         }
 
         // Degrees at the boundary, radians inside; CCW positive about the WCS Z axis.
+        // With insertPath, basePoint is expressed in the block definition's own coordinates.
         var rotation = Matrix3d.Rotation(DegreesToRadians(args.AngleDeg), Vector3d.ZAxis, basePoint);
         foreach (var entity in opened)
         {
@@ -681,7 +749,18 @@ public sealed partial class PluginCommandProcessor
         tr.Commit();
         return ForgeResult.Success(
             command.Id,
-            new { rotated = opened.Count, unknownHandles = unknown, lockedHandles = locked, handles = args.Handles },
+            new
+            {
+                rotated = opened.Count,
+                unknownHandles = unknown,
+                lockedHandles = locked,
+                handles = args.Handles,
+                scope = scopeBtr is not null ? "block_definition" : "layout_space",
+                blockName = scopeBtr?.Name,
+                warning = scopeBtr is not null
+                    ? $"Edited block definition '{scopeBtr.Name}' — every insert of it rotated. basePoint is in the definition's own coordinates."
+                    : null
+            },
             verification: new ForgeVerification { Attempted = true, Passed = opened.Count > 0 && unknown.Count == 0 && locked.Count == 0, ReadBack = readBack });
     }
 
@@ -872,9 +951,57 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, "layer_not_found", $"Layer not found: {args.Layer}", "Create it with forge_layer_create first.");
         }
 
-        // Plane-normal offset keeps the side deterministic; bad geometry throws and bubbles to
-        // the dispatcher as plugin_exception.
-        var offsetCurves = curve.GetOffsetCurvesGivenPlaneNormal(Vector3d.ZAxis, args.Distance);
+        // Plane-normal offset keeps the side deterministic. On some hosts the plane-normal
+        // entry point is not implemented for every curve class (readiness gap 1: Polyline and
+        // Circle threw eNotImplementedYet) — the classic entity-normal offset is the fallback
+        // and keeps the same sign convention. An entity that implements neither gets a typed
+        // unsupported_entity_type instead of leaking a raw plugin_exception.
+        DBObjectCollection? offsetCurves = null;
+        Autodesk.AutoCAD.Runtime.Exception? notImplemented = null;
+        foreach (var produce in new Func<DBObjectCollection>[]
+        {
+            () => curve.GetOffsetCurvesGivenPlaneNormal(Vector3d.ZAxis, args.Distance),
+            () => curve.GetOffsetCurves(args.Distance)
+        })
+        {
+            try
+            {
+                offsetCurves = produce();
+                break;
+            }
+            catch (Autodesk.AutoCAD.Runtime.Exception ex) when (OffsetIsNotImplemented(ex))
+            {
+                notImplemented ??= ex;
+            }
+            catch (Autodesk.AutoCAD.Runtime.Exception ex)
+            {
+                return ForgeResult.Failure(
+                    command.Id,
+                    "offset_failed",
+                    $"Offset failed on {entity.GetType().Name}: {ex.ErrorStatus} ({ex.Message}).",
+                    data: new { entityType = entity.GetType().Name, errorStatus = ex.ErrorStatus.ToString() });
+            }
+        }
+
+        if (offsetCurves is null)
+        {
+            return ForgeResult.Failure(
+                command.Id,
+                "unsupported_entity_type",
+                $"Handle {args.Handle} is a {entity.GetType().Name}; this entity type cannot be offset ({notImplemented?.ErrorStatus}).",
+                "Offset works on lines, polylines, arcs, circles and ellipses.",
+                data: new { entityType = entity.GetType().Name });
+        }
+
+        if (offsetCurves.Count == 0)
+        {
+            return ForgeResult.Failure(
+                command.Id,
+                "offset_no_result",
+                $"Offset of {entity.GetType().Name} by {args.Distance} produced no geometry.",
+                data: new { entityType = entity.GetType().Name, distance = args.Distance });
+        }
+
         var created = new List<Entity>();
         foreach (Entity offsetEntity in offsetCurves)
         {
@@ -897,6 +1024,10 @@ public sealed partial class PluginCommandProcessor
             new { created = created.Count, newHandles, sourceHandle = args.Handle },
             verification: new ForgeVerification { Attempted = true, Passed = created.Count > 0, ReadBack = readBack });
     }
+
+    private static bool OffsetIsNotImplemented(Autodesk.AutoCAD.Runtime.Exception ex)
+        => ex.ErrorStatus is Autodesk.AutoCAD.Runtime.ErrorStatus.NotImplementedYet
+            or Autodesk.AutoCAD.Runtime.ErrorStatus.NotApplicable;
 
     private static ForgeResult EntityErase(ForgeCommand command)
     {
@@ -2543,9 +2674,9 @@ public sealed partial class PluginCommandProcessor
 
     private sealed record EntityGetArgs { public string? Handle { get; init; } }
     private sealed record EntityListArgs { public double[][]? Window { get; init; } public string? Layer { get; init; } public string? Type { get; init; } public int? MaxEntities { get; init; } public bool IncludeBlocks { get; init; } public int? BlockDepth { get; init; } }
-    private sealed record EntityMoveArgs { public string[]? Handles { get; init; } public double[]? Delta { get; init; } }
+    private sealed record EntityMoveArgs { public string[]? Handles { get; init; } public double[]? Delta { get; init; } public string? InsertPath { get; init; } }
     private sealed record EntityCopyArgs { public string[]? Handles { get; init; } public double[]? Delta { get; init; } public int Copies { get; init; } = 1; }
-    private sealed record EntityRotateArgs { public string[]? Handles { get; init; } public double[]? BasePoint { get; init; } public double AngleDeg { get; init; } }
+    private sealed record EntityRotateArgs { public string[]? Handles { get; init; } public double[]? BasePoint { get; init; } public double AngleDeg { get; init; } public string? InsertPath { get; init; } }
     private sealed record EntityScaleArgs { public string[]? Handles { get; init; } public double[]? BasePoint { get; init; } public double Factor { get; init; } }
     private sealed record EntityMirrorArgs { public string[]? Handles { get; init; } public double[]? P1 { get; init; } public double[]? P2 { get; init; } public bool EraseSource { get; init; } }
     private sealed record EntityOffsetArgs { public string? Handle { get; init; } public double Distance { get; init; } public string? Layer { get; init; } }

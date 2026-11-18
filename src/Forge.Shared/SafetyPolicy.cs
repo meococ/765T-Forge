@@ -49,8 +49,19 @@ public sealed class SafetyPolicy
 
     private static readonly Regex LayerDelete = new(@"\b_?-?(?:LAYDEL|DELLAYER)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    // An ssget "_X"/"_A" all-selection is only dangerous next to a real erase/delete verb.
+    // A bare `e` is a variable name, not a verb — (setq e (ssget "_X" ...)) must pass —
+    // so E only counts as ERASE when it is the first quoted argument of (command|vl-cmdf),
+    // e.g. (command "E" ss ""). Bare/full ERASE, entdel and the vla delete primitives keep
+    // matching in any position.
+    private const string SsgetAllOperand = @"\bSSGET\b(?:[\s\r\n;'""]|\(|\))*""_?[XA]""";
+    private const string EraseVerb =
+        @"(?:(?<![\w-])_?\.?-?ERASE(?![\w-])|\(\s*(?:command|vl-cmdf)\s+""_?\.?-?E""|ENTDEL\b|VLA-DELETE\b|VLA-ERASE\b)";
+
     private static readonly Regex SsgGetAllErase = new(
-        @"\bSSGET\b(?:[\s\r\n;'""]|\(|\))*""_?[XA]""[\s\S]*\b(?:_?-?(?:ERASE|E)|ENTDEL|VLA-DELETE|VLA-ERASE)\b|\b(?:_?-?(?:ERASE|E)|ENTDEL|VLA-DELETE|VLA-ERASE)\b[\s\S]*\bSSGET\b(?:[\s\r\n;'""]|\(|\))*""_?[XA]""|\(\s*(?:VLAX-INVOKE(?:-METHOD)?\b[\s\S]{0,80}?'?DELETE\b|VLA-(?:DELETE|ERASE)\b)",
+        SsgetAllOperand + @"[\s\S]*" + EraseVerb +
+        "|" + EraseVerb + @"[\s\S]*" + SsgetAllOperand +
+        @"|\(\s*(?:VLAX-INVOKE(?:-METHOD)?\b[\s\S]{0,80}?'?DELETE\b|VLA-(?:DELETE|ERASE)\b)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex LispOsAccess = new(

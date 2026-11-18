@@ -77,6 +77,31 @@ public sealed partial class PluginCommandProcessor
     }
 
     /// <summary>
+    /// readiness-20261118 gap 8: a real command parked on the document's prompt stream, or null
+    /// when the lane is free. Verified live against the alternatives: inside Forge's own
+    /// ExecuteInCommandContextAsync dispatch, CMDACTIVE reads 1, Editor.IsQuiescent reads
+    /// false, and Document.CommandInProgress reads "EXECUTEFUNCTION" — all for the dispatch
+    /// context itself (a plain ZOOM dispatched fine while every one reported busy). Only a
+    /// non-EXECUTEFUNCTION name is a real parked command — the EXECUTEFUNCTION slot is us.
+    /// </summary>
+    private static string? ActiveCommandInProgress()
+    {
+        try
+        {
+            var inProgress = ActiveDoc?.CommandInProgress;
+            return string.IsNullOrWhiteSpace(inProgress)
+                || inProgress.Equals("EXECUTEFUNCTION", StringComparison.OrdinalIgnoreCase)
+                ? null
+                : inProgress;
+        }
+        catch
+        {
+            // Unreadable state must not block dispatch — treat as free.
+            return null;
+        }
+    }
+
+    /// <summary>
     /// review-wp2-r1 finding 1 (D13): the pipe-token gate, hoisted so the dispatcher can
     /// authenticate before routing — the zero-document lane and the fast refusals must answer
     /// `unauthorized` to a bad token, never `ok`. Process keeps its own check because it stays
@@ -1369,6 +1394,134 @@ public sealed partial class PluginCommandProcessor
         }
     }
 
+    /// <summary>
+    /// One entry of the publish media gate (readiness-20261118 gap 5). DSD publish plots each
+    /// sheet with the layout's OWN stored device+media — a stored media the device cannot
+    /// resolve (the `psk:` placeholders on virgin layouts) sends the publisher into its
+    /// paper-mismatch path and wedges the serialized lane. Verdicts that are not ok/mapped
+    /// fail fast before WriteDsdFile/PublishDsd ever run.
+    /// </summary>
+    private sealed record PublishMediaCheck(
+        string Layout,
+        string Verdict,
+        string? Device,
+        string? StoredMedia,
+        double[]? StoredSheetMm,
+        string? MappedMedia,
+        string[]? Nearest,
+        string? Error);
+
+    private static List<PublishMediaCheck> PublishMediaChecks(Database db, IReadOnlyList<string> layoutNames)
+    {
+        var checks = new List<PublishMediaCheck>(layoutNames.Count);
+        var psv = PlotSettingsValidator.Current;
+        using var tr = db.TransactionManager.StartTransaction();
+        foreach (var layoutName in layoutNames)
+        {
+            var layoutId = TryGetLayoutId(layoutName);
+            if (layoutId.IsNull)
+            {
+                checks.Add(new PublishMediaCheck(layoutName, "layout_not_found", null, null, null, null, null, "layout does not exist"));
+                continue;
+            }
+
+            var layout = (Layout)tr.GetObject(layoutId, OpenMode.ForRead);
+            string? storedMedia = null;
+            string? storedDevice = null;
+            (double WidthMm, double HeightMm)? sheetMm = null;
+            try
+            {
+                storedMedia = layout.CanonicalMediaName;
+                storedDevice = layout.PlotConfigurationName;
+                sheetMm = PaperMatch.ParseSizeMm(storedMedia) ?? StoredSheetMm(layout);
+            }
+            catch
+            {
+                // Unreadable stored page setup — evaluate with whatever could be read.
+            }
+
+            var storedSheetMm = sheetMm is { } s ? new[] { s.WidthMm, s.HeightMm } : (double[]?)null;
+            if (PublishMediaGate.DeviceIsMissing(storedDevice))
+            {
+                checks.Add(new PublishMediaCheck(
+                    layoutName, "device_missing", storedDevice, storedMedia, storedSheetMm, null, null,
+                    "layout has no plot device — apply forge_plot_preset_apply first"));
+                continue;
+            }
+
+            // Bind the stored device on a CLEAN settings probe (not CopyFrom — a virgin layout's
+            // bogus stored media can make a copied settings object unresolvable, the same trap
+            // the preset path documents). Enumeration failures mean the stored device is not
+            // usable on this machine.
+            PaperMedia[] deviceMedia;
+            try
+            {
+                using var probe = new PlotSettings(layout.ModelType);
+                psv.SetPlotConfigurationName(probe, storedDevice!.Trim(), null);
+                psv.RefreshLists(probe);
+                deviceMedia = psv.GetCanonicalMediaNameList(probe)
+                    .Cast<string>()
+                    .Select(c => PaperMatch.ToMedia(c, SafeLocaleMediaName(psv, probe, c)))
+                    .ToArray();
+            }
+            catch (System.Exception ex)
+            {
+                checks.Add(new PublishMediaCheck(
+                    layoutName, "device_invalid", storedDevice, storedMedia, storedSheetMm, null, null, ex.Message));
+                continue;
+            }
+
+            var verdict = PublishMediaGate.Evaluate(
+                storedMedia, sheetMm?.WidthMm, sheetMm?.HeightMm, deviceMedia,
+                out var mappedMedia, out var nearest);
+            checks.Add(new PublishMediaCheck(
+                layoutName,
+                verdict switch
+                {
+                    PublishMediaVerdict.OnDevice => "ok",
+                    PublishMediaVerdict.MappedBySize => "mapped",
+                    PublishMediaVerdict.Ambiguous => "media_ambiguous",
+                    _ => "media_unresolved"
+                },
+                storedDevice,
+                storedMedia,
+                storedSheetMm,
+                mappedMedia,
+                nearest.Count > 0 ? nearest.ToArray() : null,
+                null));
+        }
+
+        tr.Commit();
+        return checks;
+    }
+
+    /// <summary>Fail-fast wrapper over <see cref="PublishMediaChecks"/>; null when every layout passes.</summary>
+    private static ForgeResult? PublishMediaGateFailure(ForgeCommand command, List<PublishMediaCheck> checks)
+    {
+        var bad = checks.Where(c => c.Verdict is not ("ok" or "mapped")).ToArray();
+        if (bad.Length == 0)
+        {
+            return null;
+        }
+
+        var first = bad[0];
+        var code = first.Verdict switch
+        {
+            "layout_not_found" => "layout_not_found",
+            "device_missing" or "device_invalid" => "plot_device_invalid",
+            _ => PaperMatch.NotOnDeviceCode
+        };
+        var detail = string.Join("; ", bad.Select(c =>
+            $"{c.Layout}: media '{c.StoredMedia ?? "(none)"}' on '{c.Device ?? "(none)"}' -> {c.Verdict}" +
+            (c.Nearest is { Length: > 0 } n ? $" (nearest: {string.Join(", ", n)})" : "")));
+        return ForgeResult.Failure(
+            command.Id,
+            code,
+            $"Publish media gate refused {bad.Length} layout(s): {detail}.",
+            "Apply forge_plot_preset_apply (or fix each layout's stored device/paper) so every layout's stored media exists on its device, then republish.",
+            data: new { checks });
+    }
+
     private static ForgeResult PlotPublish(ForgeCommand command)
     {
         var args = Args<PublishArgs>(command);
@@ -1399,6 +1552,17 @@ public sealed partial class PluginCommandProcessor
             return underlayPublishFailure;
         }
 
+        // readiness-20261118 gap 5: every requested layout's stored device+media must resolve
+        // BEFORE the DSD publish starts — a stored media the device cannot offer (the `psk:`
+        // placeholders on virgin layouts) otherwise enters the publisher's paper-mismatch path
+        // and wedges the serialized lane (observed 6+ min). Read-only; runs before the dry-run
+        // return so a dry-run predicts the real failure.
+        var publishMediaChecks = PublishMediaChecks(ActiveDb, args.Layouts);
+        if (PublishMediaGateFailure(command, publishMediaChecks) is { } mediaGateFailure)
+        {
+            return mediaGateFailure;
+        }
+
         if (command.DryRun)
         {
             return DryRun(command, new
@@ -1410,6 +1574,8 @@ public sealed partial class PluginCommandProcessor
                 args.OverwriteAcknowledged,
                 underlayCount = publishUnderlays.Count,
                 underlaysResolved = true,
+                mediaChecked = true,
+                mediaChecks = publishMediaChecks,
                 sheetType = args.SinglePdf ? "MultiPdf" : "SinglePdf",
                 bookmarks = args.Bookmarks && args.SinglePdf
             });
@@ -1725,9 +1891,50 @@ public sealed partial class PluginCommandProcessor
             return DryRun(command, new { args.Command });
         }
 
-        var tokens = TokenizeAutoCadCommand(args.Command);
-        if (tokens.Length > 0)
+        // readiness-20261118 gap 8: an interactive sequence that runs out of input mid-prompt
+        // (e.g. "_.LINE 0,0 10,10") parks Editor.Command on the "next point" prompt and wedges
+        // the serialized lane (~115s observed, and any parked command keeps blocking the lane).
+        // Two guards: refuse to feed tokens while another command is still active (unless the
+        // caller is deliberately sending ESC), and give unbounded point-loop commands a
+        // terminating Enter so the loop ends instead of idling on a prompt. The busy check is
+        // Document.CommandInProgress — CMDACTIVE/IsQuiescent read busy for our own dispatch
+        // context and cannot tell a parked prompt from our own callback.
+        var inProgress = ActiveCommandInProgress();
+        var wantsEsc = args.Command.Contains('\x03');
+        if (inProgress is not null && !wantsEsc)
         {
+            return ForgeResult.Failure(
+                command.Id,
+                "command_in_progress",
+                $"AutoCAD command '{inProgress}' is still active in this document; dispatching now would inject input into its prompt stream.",
+                "Finish or cancel the active command first — send \"\\x03\" (ESC) via forge_exec_command, then retry.",
+                data: new { inProgress });
+        }
+
+        var tokens = AutoCadCommandSequence.Tokenize(args.Command);
+        if (tokens.Length > 0 && !wantsEsc)
+        {
+            // "_.LINE" (bare) can never finish — it waits at the first-point prompt until ESC;
+            // dispatching it would park the lane for the whole watchdog window for nothing.
+            if (AutoCadCommandSequence.IsUnfinishable(tokens))
+            {
+                return ForgeResult.Failure(
+                    command.Id,
+                    "incomplete_command",
+                    $"Command '{tokens[0]}' starts an interactive loop but the input contains no points; it can only park and wait for ESC.",
+                    "Send a complete sequence (command + coordinates — a terminating Enter is added when needed) or finish/cancel the pending command first.");
+            }
+
+            // An unbounded point loop (LINE/PLINE/MLINE/LWPOLYLINE) cannot finish on its own
+            // while input remains — a trailing Enter is consumed INSIDE the loop and ends it.
+            // Only when the last token still feeds that loop (a coordinate, or the bare
+            // command): an already-terminated sequence must NOT get an extra Enter, which at
+            // the "Command:" prompt would just repeat the previous command.
+            if (AutoCadCommandSequence.EndsInUnterminatedPointLoop(tokens))
+            {
+                tokens = [.. tokens, ""];
+            }
+
             try
             {
                 ActiveEditor.Command(tokens.Cast<object>().ToArray());
@@ -1747,6 +1954,7 @@ public sealed partial class PluginCommandProcessor
                 {
                     queued = true,
                     completed = false,
+                    pending = true,
                     mode = "queued_fallback",
                     fallbackReason = ex.Message,
                     args.Command
@@ -1754,43 +1962,12 @@ public sealed partial class PluginCommandProcessor
             }
         }
 
-        ActiveDoc.SendStringToExecute(args.Command.TrimEnd() + " ", true, false, false);
-        return ForgeResult.Success(command.Id, new { queued = true, completed = false, mode = "queued", args.Command });
-    }
-
-    private static string[] TokenizeAutoCadCommand(string command)
-    {
-        var tokens = new List<string>();
-        var current = new StringBuilder();
-        var inQuotes = false;
-        foreach (var ch in command.Trim())
-        {
-            if (ch == '"')
-            {
-                inQuotes = !inQuotes;
-                continue;
-            }
-
-            if (!inQuotes && char.IsWhiteSpace(ch))
-            {
-                if (current.Length > 0)
-                {
-                    tokens.Add(current.ToString());
-                    current.Clear();
-                }
-
-                continue;
-            }
-
-            current.Append(ch);
-        }
-
-        if (current.Length > 0)
-        {
-            tokens.Add(current.ToString());
-        }
-
-        return tokens.ToArray();
+        // A trailing space doubles as Enter — required to execute a queued command string, but
+        // fatal after ESC: "ESC " cancels the pending command and then the space RE-RUNS the
+        // previous command, re-parking its prompt (CMDACTIVE never drops back to 0).
+        var sendText = wantsEsc ? args.Command : args.Command.TrimEnd() + " ";
+        ActiveDoc.SendStringToExecute(sendText, true, false, false);
+        return ForgeResult.Success(command.Id, new { queued = true, completed = false, pending = true, mode = "queued", args.Command });
     }
 
     private static ForgeResult ExecDotNet(ForgeCommand command)
