@@ -432,9 +432,9 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_entity_list", new { window, layer, type, maxEntities, includeBlocks, blockDepth }, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_entity_move", Title = "Entity Move", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
-    [Description("Move entities by explicit handles: delta [dx,dy,(dz)]. Pre-write backup + undo mark apply; read-back echoes the moved geometry.")]
-    public static Task<ForgeResult> EntityMove(ForgeToolRunner runner, string[] handles, double[] delta, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_entity_move", new { handles, delta }, dryRun, document: document, cancellationToken: cancellationToken);
+    [Description("Move entities by explicit handles: delta [dx,dy,(dz)]. Pre-write backup + undo mark apply; read-back echoes the moved geometry. insertPath (from forge_entity_list includeBlocks) moves an entity inside a block definition — the definition changes for every insert; delta is then in the definition's own coordinates.")]
+    public static Task<ForgeResult> EntityMove(ForgeToolRunner runner, string[] handles, double[] delta, string? insertPath = null, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_entity_move", new { handles, delta, insertPath }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_entity_copy", Title = "Entity Copy", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Copy entities by explicit handles with delta [dx,dy,(dz)], copies=1..100 (copy n lands n×delta away). Returns the new handles.")]
@@ -442,9 +442,9 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_entity_copy", new { handles, delta, copies }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_entity_rotate", Title = "Entity Rotate", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
-    [Description("Rotate entities by explicit handles about basePoint, angleDeg CCW around WCS Z. Pre-write backup + undo mark apply.")]
-    public static Task<ForgeResult> EntityRotate(ForgeToolRunner runner, string[] handles, double[] basePoint, double angleDeg, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_entity_rotate", new { handles, basePoint, angleDeg }, dryRun, document: document, cancellationToken: cancellationToken);
+    [Description("Rotate entities by explicit handles about basePoint, angleDeg CCW around WCS Z. Pre-write backup + undo mark apply. insertPath (from forge_entity_list includeBlocks) rotates an entity inside a block definition — the definition changes for every insert; basePoint is then in the definition's own coordinates.")]
+    public static Task<ForgeResult> EntityRotate(ForgeToolRunner runner, string[] handles, double[] basePoint, double angleDeg, string? insertPath = null, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_entity_rotate", new { handles, basePoint, angleDeg, insertPath }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_entity_scale", Title = "Entity Scale", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Uniformly scale entities by explicit handles about basePoint, factor > 0. Pre-write backup + undo mark apply.")]

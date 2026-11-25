@@ -236,6 +236,137 @@ public sealed partial class PluginCommandProcessor
     };
 
     /// <summary>
+    /// readiness-20261118 gap 6: resolves a write-open entity inside a block definition through
+    /// the insertPath that forge_entity_list (includeBlocks) reports — ancestor INSERT handles
+    /// outermost-first, "1F2A>2B07" (MINSERT steps may carry a "[r,c]" suffix). The real owner
+    /// chain is validated step by step: every path step must be a BlockReference owned by the
+    /// previous step's definition (outermost must sit in a layout space) and the target's
+    /// OwnerId must be the last step's block table record. Editing a definition changes every
+    /// insert of it — the caller opts in by passing the path. Xref definitions refuse.
+    /// On success <paramref name="ownerBtr"/> is the (read-opened) block table record the entity
+    /// lives in, so callers can report which definition changed.
+    /// </summary>
+    internal static Entity? TryOpenEntityInBlockPath(
+        Database db,
+        Transaction tr,
+        string handle,
+        string insertPath,
+        out EntityOpenStatus status,
+        out BlockTableRecord? ownerBtr,
+        out string? pathDetail)
+    {
+        ownerBtr = null;
+        pathDetail = null;
+        status = EntityOpenStatus.NotFound;
+
+        var id = TryResolveHandle(db, handle);
+        if (id is null || id.Value.IsNull || !id.Value.IsValid)
+        {
+            return null;
+        }
+
+        if (id.Value.IsErased)
+        {
+            status = EntityOpenStatus.Erased;
+            return null;
+        }
+
+        Entity? entity;
+        try
+        {
+            entity = tr.GetObject(id.Value, OpenMode.ForRead, false) as Entity;
+        }
+        catch (Autodesk.AutoCAD.Runtime.Exception)
+        {
+            return null;
+        }
+
+        if (entity is null)
+        {
+            status = EntityOpenStatus.NotAnEntity;
+            return null;
+        }
+
+        var steps = insertPath
+            .Split('>', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(s => s.Split('[')[0].Trim()) // strip MINSERT "[r,c]" instance suffixes
+            .Where(s => s.Length > 0)
+            .ToArray();
+        if (steps.Length == 0)
+        {
+            pathDetail = "insertPath has no usable steps.";
+            return null;
+        }
+
+        ObjectId scope = ObjectId.Null; // containing block table record at this point in the path
+        foreach (var step in steps)
+        {
+            var stepId = TryResolveHandle(db, step);
+            if (stepId is null || stepId.Value.IsNull || !stepId.Value.IsValid || stepId.Value.IsErased)
+            {
+                pathDetail = $"insert path step '{step}' not found.";
+                return null;
+            }
+
+            if (tr.GetObject(stepId.Value, OpenMode.ForRead, false) is not BlockReference insert)
+            {
+                pathDetail = $"insert path step '{step}' is not an INSERT.";
+                status = EntityOpenStatus.NotAnEntity;
+                return null;
+            }
+
+            if (scope.IsNull
+                    ? !IsInLayoutSpace(tr, insert)
+                    : insert.OwnerId != scope)
+            {
+                pathDetail = scope.IsNull
+                    ? $"outermost insert '{step}' is itself nested — the path must start at a layout-space INSERT."
+                    : $"insert '{step}' is not owned by the previous block in the path.";
+                status = EntityOpenStatus.NotInLayout;
+                return null;
+            }
+
+            if (tr.GetObject(insert.BlockTableRecord, OpenMode.ForRead) is not BlockTableRecord def)
+            {
+                pathDetail = $"insert '{step}' has no readable block definition.";
+                status = EntityOpenStatus.NotAnEntity;
+                return null;
+            }
+
+            if (def.IsFromExternalReference || def.IsFromOverlayReference)
+            {
+                pathDetail = $"insert path enters xref block '{def.Name}' — xref content is read-only.";
+                status = EntityOpenStatus.NotInLayout;
+                return null;
+            }
+
+            scope = insert.BlockTableRecord;
+        }
+
+        if (entity.OwnerId != scope)
+        {
+            pathDetail = $"entity {handle} is not owned by the block the path ends in (insertPath mismatch).";
+            status = EntityOpenStatus.NotInLayout;
+            return null;
+        }
+
+        if (IsOnLockedLayer(tr, entity))
+        {
+            status = EntityOpenStatus.LayerLocked;
+            return null;
+        }
+
+        if (!entity.IsWriteEnabled)
+        {
+            entity.UpgradeOpen();
+        }
+
+        ownerBtr = (BlockTableRecord)tr.GetObject(scope, OpenMode.ForRead);
+        status = EntityOpenStatus.Ok;
+        return entity;
+    }
+
+    /// <summary>
     /// Appends an entity that already carries its properties to the block that owns its source
     /// (model space, a paper-space layout or a block definition) instead of always model space.
     /// Falls back to model space when the owner is null or not a block table record.

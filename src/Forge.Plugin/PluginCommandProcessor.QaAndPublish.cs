@@ -750,6 +750,30 @@ public sealed partial class PluginCommandProcessor
 
         if (command.DryRun)
         {
+            // Run the publish pre-flight too: the media/device gate must reject a dry run the
+            // same way it rejects the real publish, or the recipe reports "would publish" and
+            // then wedges AutoCAD's plot lane on the very next call.
+            var publishCheck = PlotPublish(new ForgeCommand
+            {
+                Id = command.Id,
+                Tool = "forge_plot_publish",
+                Args = ForgeJson.ToElement(new
+                {
+                    outputPath = args.OutputPath,
+                    layouts = args.Layouts,
+                    singlePdf = args.SinglePdf,
+                    overwriteAcknowledged = true,
+                    requirePreflight = false,
+                    force = args.Force
+                }),
+                DryRun = true
+            });
+            steps.Add(new { step = "publish", publishCheck.Ok, publishCheck.Data, publishCheck.Error });
+            if (!publishCheck.Ok)
+            {
+                return publishCheck with { Data = new { steps, publishCheck.Data } };
+            }
+
             return DryRun(command, new { steps, wouldPublish = args.OutputPath, args.Layouts });
         }
 

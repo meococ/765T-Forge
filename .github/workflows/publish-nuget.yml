@@ -1,0 +1,84 @@
+name: Publish to NuGet
+
+# Manual: packs Forge.Server from a release tag and pushes it to nuget.org with
+# Trusted Publishing (GitHub OIDC -> one-hour NuGet key), so no API key is stored.
+# Needs a nuget.org Trusted Publishing policy: owner meococ, repository 765T-Forge,
+# workflow file publish-nuget.yml.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to pack (for example v0.3.0)
+        required: true
+        default: v0.3.0
+      nuget_user:
+        description: nuget.org profile name that owns the Trusted Publishing policy
+        required: true
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    permissions:
+      id-token: write # NuGet Trusted Publishing
+      contents: read
+    env:
+      TAG: ${{ inputs.tag }}
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore and test (ServerOnly)
+        shell: pwsh
+        run: |
+          dotnet restore .\765T-Forge.ServerOnly.slnf --locked-mode
+          dotnet test .\765T-Forge.ServerOnly.slnf --configuration Release --no-restore
+
+      - name: Pack Forge.Server
+        shell: pwsh
+        run: dotnet pack .\src\Forge.Server\Forge.Server.csproj --configuration Release --no-restore --output artifacts\nuget
+
+      - name: Check the package matches the tag and server.json
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:TAG.TrimStart('v')
+          $server = Get-Content server.json -Raw | ConvertFrom-Json
+          $id = $server.packages[0].identifier
+          if ($server.version -ne $version -or $server.packages[0].version -ne $version) {
+            throw "server.json version does not match tag $env:TAG"
+          }
+          $nupkg = "artifacts\nuget\$id.$version.nupkg"
+          if (-not (Test-Path $nupkg)) { throw "missing $nupkg" }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $nupkg))
+          try {
+            $entry = $zip.GetEntry('README.md')
+            if (-not $entry) { throw 'README.md is not packed' }
+            $reader = New-Object System.IO.StreamReader($entry.Open())
+            $readme = $reader.ReadToEnd(); $reader.Dispose()
+            if ($readme -notmatch "mcp-name: $([regex]::Escape($server.name))") {
+              throw "packed README lacks the mcp-name marker for $($server.name)"
+            }
+          } finally { $zip.Dispose() }
+          "NUPKG=$nupkg" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Get-FileHash $nupkg -Algorithm SHA256 | Format-List Hash, Path
+
+      - name: NuGet login (OIDC -> temporary API key)
+        id: login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: ${{ inputs.nuget_user }}
+
+      - name: Push to nuget.org
+        shell: pwsh
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: dotnet nuget push $env:NUPKG --api-key $env:NUGET_API_KEY --source https://api.nuget.org/v3/index.json --skip-duplicate

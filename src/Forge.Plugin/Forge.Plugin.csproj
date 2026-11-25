@@ -10,6 +10,10 @@
          metadata; build-plugin.ps1 -Year feeds it. The plugin refuses dispatch on a
          host of another year (HostYearPolicy) until that pair is proven. -->
     <ForgeTargetYear Condition="'$(ForgeTargetYear)' == ''">2026</ForgeTargetYear>
+    <!-- Dev side-by-side NETLOAD: -p:DevAsmSuffix=.Dev renames the assembly so a dev build
+         can load next to an autoloaded deploy bundle (same simple name would just resolve to
+         the already-loaded deployed copy). Forge.Shared gets the same suffix via its csproj. -->
+    <AssemblyName Condition="'$(DevAsmSuffix)' != ''">$(MSBuildProjectName)$(DevAsmSuffix)</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>
