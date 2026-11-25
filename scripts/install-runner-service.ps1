@@ -39,6 +39,10 @@ if (-not (Test-Path $configCmd)) {
     throw "config.cmd not found at $configCmd"
 }
 
+$transcriptPath = Join-Path $RunnerRoot "install-runner-service.log"
+try { Stop-Transcript | Out-Null } catch { }
+Start-Transcript -Path $transcriptPath -Force | Out-Null
+
 Write-Host "Stopping interactive runner process if present..."
 Get-Process Runner.Listener -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Seconds 3
@@ -103,3 +107,4 @@ if ($service.State -ne "Running") {
 
 Write-Host "Runner service installed: $($service.Name) [$($service.State)]"
 Write-Host "Startup-folder fallback can remain installed; it exits automatically while this service is running."
+Stop-Transcript | Out-Null
