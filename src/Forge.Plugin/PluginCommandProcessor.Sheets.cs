@@ -388,6 +388,31 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, "invalid_args", "scale must be > 0 (e.g. 50 for 1:50).");
         }
 
+        if (args.CustomScale is <= 0)
+        {
+            return ForgeResult.Failure(command.Id, "invalid_args", "customScale must be > 0.");
+        }
+
+        if (command.DryRun)
+        {
+            return DryRun(command, new
+            {
+                args.Layout,
+                center = new[] { center.X, center.Y, center.Z },
+                args.Width,
+                args.Height,
+                args.Scale,
+                args.CustomScale,
+                args.ModelUnits,
+                args.ViewCenter,
+                args.TwistDeg,
+                args.AlignAngleDeg,
+                args.Locked,
+                args.FreezeLayers,
+                args.ClipBoundaryHandle
+            });
+        }
+
         var db = ActiveDb;
         var previousLayout = LayoutManager.Current.CurrentLayout;
         var switched = false;
@@ -425,29 +450,35 @@ public sealed partial class PluginCommandProcessor
             // On first: activation re-fits the view to model extents, so view parameters
             // must be applied after or they get clobbered.
             viewport.On = true;
-            if (viewCenter is { } vc)
+
+            if (ApplyViewportCameraAndLayers(
+                    command,
+                    db,
+                    tr,
+                    viewport,
+                    viewCenter,
+                    args.TwistDeg,
+                    args.AlignAngleDeg,
+                    args.CustomScale,
+                    args.Scale,
+                    args.ModelUnits,
+                    args.Locked,
+                    args.FreezeLayers,
+                    thawLayers: null,
+                    args.ClipBoundaryHandle,
+                    isCreate: true) is { } vpError)
             {
-                viewport.ViewCenter = new Point2d(vc.X, vc.Y);
-            }
-            if (args.Scale is { } s)
-            {
-                viewport.CustomScale = 1.0 / s;
+                return vpError;
             }
 
-            var readBack = new
-            {
-                handle = HandleString(viewport),
-                number = viewport.Number,
-                layout = args.Layout,
-                center = new[] { center.X, center.Y, center.Z },
-                width = args.Width,
-                height = args.Height,
-                customScale = viewport.CustomScale
-            };
+            var readBack = BuildViewportReadBack(tr, viewport, layout.LayoutName);
+            var handle = HandleString(viewport);
+            var number = viewport.Number;
+            var customScale = viewport.CustomScale;
             tr.Commit();
             return ForgeResult.Success(
                 command.Id,
-                new { handle = readBack.handle, number = readBack.number, layout = args.Layout, customScale = readBack.customScale },
+                new { handle, number, layout = args.Layout, customScale, viewport = readBack },
                 verification: new ForgeVerification { Attempted = true, Passed = true, ReadBack = readBack });
         }
         finally
@@ -490,6 +521,13 @@ public sealed partial class PluginCommandProcessor
         public double Width { get; init; }
         public double Height { get; init; }
         public double? Scale { get; init; }
+        public double? CustomScale { get; init; }
+        public string? ModelUnits { get; init; }
         public double[]? ViewCenter { get; init; }
+        public double? TwistDeg { get; init; }
+        public double? AlignAngleDeg { get; init; }
+        public bool? Locked { get; init; }
+        public string[]? FreezeLayers { get; init; }
+        public string? ClipBoundaryHandle { get; init; }
     }
 }

@@ -85,7 +85,7 @@ public sealed partial class PluginCommandProcessor
             atoms = rb is null ? [] : ToLispAtoms(rb);
         }
 
-        if (status != LispCodes.RtNorm)
+        if (!LispCodes.IsSuccess(status))
         {
             return ForgeResult.Failure(
                 command.Id,

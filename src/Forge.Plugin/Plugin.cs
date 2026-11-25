@@ -1,3 +1,6 @@
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Runtime.Loader;
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.Runtime;
 using Forge.Shared;
@@ -9,9 +12,23 @@ namespace Forge.Plugin;
 
 public sealed class Plugin : IExtensionApplication
 {
+    private static readonly string PluginDirectory =
+        Path.GetDirectoryName(typeof(Plugin).Assembly.Location) ?? string.Empty;
+
     private NamedPipePluginServer? _server;
 
     public void Initialize()
+    {
+        // AutoCAD 2025/2026 (.NET 8) loads plugins with the AutoCAD install root as the probing base,
+        // so Roslyn scripting assemblies sitting beside Forge.Plugin.dll must be resolved explicitly
+        // BEFORE any method referencing Roslyn types is JIT-compiled.
+        AssemblyLoadContext.Default.Resolving += ResolvePluginAssembly;
+        AppDomain.CurrentDomain.AssemblyResolve += ResolveAppDomainAssembly;
+        InitializeCore();
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void InitializeCore()
     {
         try
         {
@@ -40,7 +57,25 @@ public sealed class Plugin : IExtensionApplication
     {
         _server?.Dispose();
         _server = null;
+        AssemblyLoadContext.Default.Resolving -= ResolvePluginAssembly;
+        AppDomain.CurrentDomain.AssemblyResolve -= ResolveAppDomainAssembly;
         WriteMessage("\n[765T-Forge] Plugin stopped.");
+    }
+
+    private static Assembly? ResolvePluginAssembly(AssemblyLoadContext context, AssemblyName assemblyName)
+    {
+        if (string.IsNullOrWhiteSpace(assemblyName.Name) || string.IsNullOrWhiteSpace(PluginDirectory))
+        {
+            return null;
+        }
+
+        var candidate = Path.Combine(PluginDirectory, $"{assemblyName.Name}.dll");
+        return File.Exists(candidate) ? context.LoadFromAssemblyPath(candidate) : null;
+    }
+
+    private static Assembly? ResolveAppDomainAssembly(object? sender, ResolveEventArgs args)
+    {
+        return ResolvePluginAssembly(AssemblyLoadContext.Default, new AssemblyName(args.Name));
     }
 
     private static void WriteMessage(string message)

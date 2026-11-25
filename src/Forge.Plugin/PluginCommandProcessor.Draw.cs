@@ -47,7 +47,9 @@ public sealed partial class PluginCommandProcessor
         }
 
         var db = ActiveDb;
+        using var spaceScope = EnterTargetSpace(args.Layout);
         using var tr = db.TransactionManager.StartTransaction();
+        if (ValidateTargetLayout(command, db, tr, args.Layout) is { } layoutErr) return layoutErr;
         if (args.Layer is not null && !LayerExists(db, tr, args.Layer))
         {
             return ForgeResult.Failure(command.Id, "layer_not_found", $"Layer not found: {args.Layer}", "Create the layer first with forge_layer_create.");
@@ -97,7 +99,9 @@ public sealed partial class PluginCommandProcessor
         }
 
         var db = ActiveDb;
+        using var spaceScope = EnterTargetSpace(args.Layout);
         using var tr = db.TransactionManager.StartTransaction();
+        if (ValidateTargetLayout(command, db, tr, args.Layout) is { } layoutErr) return layoutErr;
         if (args.Layer is not null && !LayerExists(db, tr, args.Layer))
         {
             return ForgeResult.Failure(command.Id, "layer_not_found", $"Layer not found: {args.Layer}", "Create the layer first with forge_layer_create.");
@@ -153,7 +157,9 @@ public sealed partial class PluginCommandProcessor
         }
 
         var db = ActiveDb;
+        using var spaceScope = EnterTargetSpace(args.Layout);
         using var tr = db.TransactionManager.StartTransaction();
+        if (ValidateTargetLayout(command, db, tr, args.Layout) is { } layoutErr) return layoutErr;
         if (args.Layer is not null && !LayerExists(db, tr, args.Layer))
         {
             return ForgeResult.Failure(command.Id, "layer_not_found", $"Layer not found: {args.Layer}", "Create the layer first with forge_layer_create.");
@@ -210,7 +216,9 @@ public sealed partial class PluginCommandProcessor
         }
 
         var db = ActiveDb;
+        using var spaceScope = EnterTargetSpace(args.Layout);
         using var tr = db.TransactionManager.StartTransaction();
+        if (ValidateTargetLayout(command, db, tr, args.Layout) is { } layoutErr) return layoutErr;
         if (args.Layer is not null && !LayerExists(db, tr, args.Layer))
         {
             return ForgeResult.Failure(command.Id, "layer_not_found", $"Layer not found: {args.Layer}", "Create the layer first with forge_layer_create.");
@@ -271,7 +279,9 @@ public sealed partial class PluginCommandProcessor
         }
 
         var db = ActiveDb;
+        using var spaceScope = EnterTargetSpace(args.Layout);
         using var tr = db.TransactionManager.StartTransaction();
+        if (ValidateTargetLayout(command, db, tr, args.Layout) is { } layoutErr) return layoutErr;
         if (args.Layer is not null && !LayerExists(db, tr, args.Layer))
         {
             return ForgeResult.Failure(command.Id, "layer_not_found", $"Layer not found: {args.Layer}", "Create the layer first with forge_layer_create.");
@@ -333,7 +343,9 @@ public sealed partial class PluginCommandProcessor
         }
 
         var db = ActiveDb;
+        using var spaceScope = EnterTargetSpace(args.Layout);
         using var tr = db.TransactionManager.StartTransaction();
+        if (ValidateTargetLayout(command, db, tr, args.Layout) is { } layoutErr) return layoutErr;
         if (args.Layer is not null && !LayerExists(db, tr, args.Layer))
         {
             return ForgeResult.Failure(command.Id, "layer_not_found", $"Layer not found: {args.Layer}", "Create the layer first with forge_layer_create.");
@@ -389,7 +401,9 @@ public sealed partial class PluginCommandProcessor
         }
 
         var db = ActiveDb;
+        using var spaceScope = EnterTargetSpace(args.Layout);
         using var tr = db.TransactionManager.StartTransaction();
+        if (ValidateTargetLayout(command, db, tr, args.Layout) is { } layoutErr) return layoutErr;
         if (args.Layer is not null && !LayerExists(db, tr, args.Layer))
         {
             return ForgeResult.Failure(command.Id, "layer_not_found", $"Layer not found: {args.Layer}", "Create the layer first with forge_layer_create.");
@@ -449,7 +463,8 @@ public sealed partial class PluginCommandProcessor
         ObjectId hatchId;
         try
         {
-            hatchId = CreateHatchOnBoundary(db, tr, boundary.ObjectId, args.Pattern ?? "ANSI31", args.Scale ?? 1, args.AngleDeg, associative: true, args.Layer, colorIndex: null);
+            RequireValidColor(args.ColorIndex, args.TrueColor);
+            hatchId = CreateHatchOnBoundary(db, tr, boundary.ObjectId, args.Pattern ?? "ANSI31", args.Scale ?? 1, args.AngleDeg, associative: true, args.Layer, args.ColorIndex, args.TrueColor, args.SendToBack);
         }
         catch (System.Exception ex) when (IsStepError(ex))
         {
@@ -497,7 +512,9 @@ public sealed partial class PluginCommandProcessor
         };
 
         var db = ActiveDb;
+        using var spaceScope = EnterTargetSpace(args.Layout);
         using var tr = db.TransactionManager.StartTransaction();
+        if (ValidateTargetLayout(command, db, tr, args.Layout) is { } layoutErr) return layoutErr;
         if (ValidateForCommand(command, db, tr, step) is { } invalid)
         {
             return invalid;
@@ -574,7 +591,9 @@ public sealed partial class PluginCommandProcessor
         };
 
         var db = ActiveDb;
+        using var spaceScope = EnterTargetSpace(args.Layout);
         using var tr = db.TransactionManager.StartTransaction();
+        if (ValidateTargetLayout(command, db, tr, args.Layout) is { } layoutErr) return layoutErr;
         if (ValidateForCommand(command, db, tr, step) is { } invalid)
         {
             return invalid;
@@ -642,7 +661,9 @@ public sealed partial class PluginCommandProcessor
         };
 
         var db = ActiveDb;
+        using var spaceScope = EnterTargetSpace(args.Layout);
         using var tr = db.TransactionManager.StartTransaction();
+        if (ValidateTargetLayout(command, db, tr, args.Layout) is { } layoutErr) return layoutErr;
         if (ValidateForCommand(command, db, tr, step) is { } invalid)
         {
             return invalid;
@@ -706,7 +727,9 @@ public sealed partial class PluginCommandProcessor
         };
 
         var db = ActiveDb;
+        using var spaceScope = EnterTargetSpace(args.Layout);
         using var tr = db.TransactionManager.StartTransaction();
+        if (ValidateTargetLayout(command, db, tr, args.Layout) is { } layoutErr) return layoutErr;
         if (ValidateForCommand(command, db, tr, step) is { } invalid)
         {
             return invalid;
@@ -772,7 +795,9 @@ public sealed partial class PluginCommandProcessor
         };
 
         var db = ActiveDb;
+        using var spaceScope = EnterTargetSpace(args.Layout);
         using var tr = db.TransactionManager.StartTransaction();
+        if (ValidateTargetLayout(command, db, tr, args.Layout) is { } layoutErr) return layoutErr;
         if (ValidateForCommand(command, db, tr, step) is { } invalid)
         {
             return invalid;
@@ -834,7 +859,9 @@ public sealed partial class PluginCommandProcessor
         };
 
         var db = ActiveDb;
+        using var spaceScope = EnterTargetSpace(args.Layout);
         using var tr = db.TransactionManager.StartTransaction();
+        if (ValidateTargetLayout(command, db, tr, args.Layout) is { } layoutErr) return layoutErr;
         if (ValidateForCommand(command, db, tr, step) is { } invalid)
         {
             return invalid;
@@ -892,7 +919,9 @@ public sealed partial class PluginCommandProcessor
         };
 
         var db = ActiveDb;
+        using var spaceScope = EnterTargetSpace(args.Layout);
         using var tr = db.TransactionManager.StartTransaction();
+        if (ValidateTargetLayout(command, db, tr, args.Layout) is { } layoutErr) return layoutErr;
         if (ValidateForCommand(command, db, tr, step) is { } invalid)
         {
             return invalid;
@@ -953,7 +982,9 @@ public sealed partial class PluginCommandProcessor
         }
 
         var db = ActiveDb;
+        using var spaceScope = EnterTargetSpace(args.Layout);
         using var tr = db.TransactionManager.StartTransaction();
+        if (ValidateTargetLayout(command, db, tr, args.Layout) is { } layoutErr) return layoutErr;
         try
         {
             RequireValidColor(args.ColorIndex);
@@ -1048,7 +1079,29 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, "invalid_result_mode", $"Unknown resultMode '{args.ResultMode}'.", "Use full (default), errors, or summary.");
         }
 
+        var parsedSteps = new DrawBatchStep?[args.Steps.Length];
+        var parseErrors = new string?[args.Steps.Length];
+        for (var i = 0; i < args.Steps.Length; i++)
+        {
+            var rawStep = args.Steps[i];
+            if (rawStep.ValueKind != System.Text.Json.JsonValueKind.Object)
+            {
+                parseErrors[i] = $"Step {i} must be a JSON object (got {rawStep.ValueKind}).";
+                continue;
+            }
+
+            try
+            {
+                parsedSteps[i] = ForgeJson.FromElement<DrawBatchStep>(rawStep) ?? new DrawBatchStep();
+            }
+            catch (System.Exception ex)
+            {
+                parseErrors[i] = $"Step {i} JSON invalid: {ex.Message}";
+            }
+        }
+
         var db = ActiveDb;
+        using var spaceScope = EnterTargetSpace(args.Layout, args.AutoCreateLayers);
         var watch = System.Diagnostics.Stopwatch.StartNew();
 
         // Name → id lookups (layers, styles, blocks, model space) are cached for the whole batch;
@@ -1057,6 +1110,15 @@ public sealed partial class PluginCommandProcessor
         _drawCache = new DrawIdCache(db);
         try
         {
+            using (var ltrCheck = db.TransactionManager.StartTransaction())
+            {
+                if (ValidateTargetLayout(command, db, ltrCheck, args.Layout) is { } layoutErr)
+                {
+                    return layoutErr;
+                }
+                ltrCheck.Commit();
+            }
+
             if (command.DryRun || args.Atomic)
             {
                 // Same per-step validation as the real run (tool type, required keys, geometry,
@@ -1064,13 +1126,25 @@ public sealed partial class PluginCommandProcessor
                 using var vtr = db.TransactionManager.StartTransaction();
                 var checks = new List<object>();
                 var invalidCount = 0;
-                for (var index = 0; index < args.Steps.Length; index++)
+                for (var index = 0; index < parsedSteps.Length; index++)
                 {
-                    var step = args.Steps[index] ?? new DrawBatchStep();
+                    if (parseErrors[index] is { } pErr)
+                    {
+                        invalidCount++;
+                        checks.Add(new { index, tool = "", ok = false, error = new { code = "invalid_step", message = pErr } });
+                        continue;
+                    }
+
+                    var step = parsedSteps[index] ?? new DrawBatchStep();
                     var tool = NormalizeStepTool(step.Tool);
                     try
                     {
-                        ValidateStep(db, vtr, step);
+                        using var stepSpace = step.Layout is not null ? EnterTargetSpace(step.Layout, args.AutoCreateLayers) : default;
+                        if (step.Layout is not null)
+                        {
+                            ResolveTargetSpaceId(db, vtr, step.Layout);
+                        }
+                        ValidateStep(db, vtr, step, allowMissingLayerForAutoCreate: args.AutoCreateLayers);
                         if (command.DryRun && resultMode == "full")
                         {
                             checks.Add(new { index, tool, ok = true });
@@ -1090,8 +1164,10 @@ public sealed partial class PluginCommandProcessor
                     return DryRun(command, new
                     {
                         tool = "forge_draw_batch",
-                        steps = args.Steps.Length,
-                        valid = args.Steps.Length - invalidCount,
+                        layout = args.Layout ?? "Model",
+                        autoCreateLayers = args.AutoCreateLayers,
+                        steps = parsedSteps.Length,
+                        valid = parsedSteps.Length - invalidCount,
                         invalid = invalidCount,
                         atomic = args.Atomic,
                         results = checks
@@ -1103,24 +1179,32 @@ public sealed partial class PluginCommandProcessor
                     return ForgeResult.Failure(
                         command.Id,
                         "batch_invalid",
-                        $"{invalidCount} of {args.Steps.Length} steps are invalid; the atomic batch created nothing.",
+                        $"{invalidCount} of {parsedSteps.Length} steps are invalid; the atomic batch created nothing.",
                         "Fix the listed steps, or drop atomic=true to create the valid steps and skip the rest.",
                         data: new { created = 0, failed = invalidCount, results = checks });
                 }
             }
 
             using var tr = db.TransactionManager.StartTransaction();
-            var results = new List<object>(resultMode == "full" ? args.Steps.Length : 8);
-            var createdHandles = new List<string>(args.Steps.Length);
+            var results = new List<object>(resultMode == "full" ? parsedSteps.Length : 8);
+            var createdHandles = new List<string>(parsedSteps.Length);
             var failedIndexes = new List<int>();
             var typeCounts = new SortedDictionary<string, int>(StringComparer.Ordinal);
             var succeeded = 0;
-            for (var index = 0; index < args.Steps.Length; index++)
+            for (var index = 0; index < parsedSteps.Length; index++)
             {
-                var step = args.Steps[index] ?? new DrawBatchStep();
+                if (parseErrors[index] is { } pErr)
+                {
+                    failedIndexes.Add(index);
+                    results.Add(new { index, tool = "", ok = false, error = new { code = "invalid_step", message = pErr } });
+                    continue;
+                }
+
+                var step = parsedSteps[index] ?? new DrawBatchStep();
                 var tool = NormalizeStepTool(step.Tool);
                 try
                 {
+                    using var stepSpace = step.Layout is not null ? EnterTargetSpace(step.Layout, args.AutoCreateLayers) : default;
                     StepOutcome outcome;
                     if (args.Atomic)
                     {
@@ -1173,14 +1257,14 @@ public sealed partial class PluginCommandProcessor
                 }
             }
 
-            var failed = args.Steps.Length - succeeded;
+            var failed = parsedSteps.Length - succeeded;
             if (succeeded == 0)
             {
                 // Nothing was created; the outer transaction is disposed without commit.
                 return ForgeResult.Failure(
                     command.Id,
                     "batch_all_failed",
-                    $"All {args.Steps.Length} batch steps failed; nothing was created.",
+                    $"All {parsedSteps.Length} batch steps failed; nothing was created.",
                     "Fix the per-step errors in data.results (forge_draw_batch with dryRun=true validates every step).",
                     data: new { created = 0, failed, results, createdHandles });
             }
@@ -1266,7 +1350,7 @@ public sealed partial class PluginCommandProcessor
     /// creates anything (tool type, required keys, geometry, colour, layer, dimstyle, block).
     /// Read-only — never mutates the database.
     /// </summary>
-    private static void ValidateStep(Database db, Transaction tr, DrawBatchStep step)
+    private static void ValidateStep(Database db, Transaction tr, DrawBatchStep step, bool allowMissingLayerForAutoCreate = false)
     {
         var tool = NormalizeStepTool(step.Tool);
         if (Array.IndexOf(DrawBatchTools, tool) < 0)
@@ -1274,8 +1358,8 @@ public sealed partial class PluginCommandProcessor
             throw UnsupportedTool(step.Tool);
         }
 
-        RequireValidColor(step.ColorIndex);
-        RequireLayer(db, tr, step.Layer);
+        RequireValidColor(step.ColorIndex, step.TrueColor);
+        RequireLayer(db, tr, step.Layer, allowMissingLayerForAutoCreate);
         switch (tool)
         {
             case "line":
@@ -1376,7 +1460,20 @@ public sealed partial class PluginCommandProcessor
     /// run once and first, so they cannot reset what configure set. If anything throws before
     /// the entity is database-resident it is disposed (no finalizer on a non-resident object).
     /// </summary>
-    private static ObjectId AppendNew<T>(Database db, Transaction tr, T entity, string? layer, int? colorIndex, Action<T>? configure = null)
+    private static ForgeResult? ValidateTargetLayout(ForgeCommand command, Database db, Transaction tr, string? layout)
+    {
+        if (string.IsNullOrWhiteSpace(layout) || string.Equals(layout.Trim(), "Model", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var dict = (DBDictionary)tr.GetObject(db.LayoutDictionaryId, OpenMode.ForRead);
+        return dict.Contains(layout.Trim())
+            ? null
+            : ForgeResult.Failure(command.Id, "layout_not_found", $"Layout not found: {layout}", "Call forge_doc_list_layouts for available tabs.");
+    }
+
+    private static ObjectId AppendNew<T>(Database db, Transaction tr, T entity, string? layer, int? colorIndex, Action<T>? configure = null, int[]? trueColor = null)
         where T : Entity
     {
         try
@@ -1394,7 +1491,7 @@ public sealed partial class PluginCommandProcessor
                 entity.LayerId = layerId;
             }
 
-            ApplyColor(entity, colorIndex);
+            ApplyColor(entity, colorIndex, trueColor);
             return AppendExistingToModelSpace(db, tr, entity);
         }
         catch
@@ -1410,15 +1507,15 @@ public sealed partial class PluginCommandProcessor
 
     private static ObjectId CreateLine(Database db, Transaction tr, DrawBatchStep step)
     {
-        RequireValidColor(step.ColorIndex);
+        RequireValidColor(step.ColorIndex, step.TrueColor);
         RequireLayer(db, tr, step.Layer);
         var (start, end) = PlanLine(step);
-        return AppendNew(db, tr, new Line(start, end), step.Layer, step.ColorIndex);
+        return AppendNew(db, tr, new Line(start, end), step.Layer, step.ColorIndex, trueColor: step.TrueColor);
     }
 
     private static ObjectId CreatePolyline(Database db, Transaction tr, DrawBatchStep step, double[]? bulges = null)
     {
-        RequireValidColor(step.ColorIndex);
+        RequireValidColor(step.ColorIndex, step.TrueColor);
         RequireLayer(db, tr, step.Layer);
         PlanPolyline(step, bulges);
         var vertices = step.Vertices!;
@@ -1432,28 +1529,28 @@ public sealed partial class PluginCommandProcessor
             }
 
             pl.Closed = step.Closed;
-        });
+        }, step.TrueColor);
     }
 
     private static ObjectId CreateCircle(Database db, Transaction tr, DrawBatchStep step)
     {
-        RequireValidColor(step.ColorIndex);
+        RequireValidColor(step.ColorIndex, step.TrueColor);
         RequireLayer(db, tr, step.Layer);
         var (center, radius) = PlanCircle(step);
-        return AppendNew(db, tr, new Circle(center, Vector3d.ZAxis, radius), step.Layer, step.ColorIndex);
+        return AppendNew(db, tr, new Circle(center, Vector3d.ZAxis, radius), step.Layer, step.ColorIndex, trueColor: step.TrueColor);
     }
 
     private static ObjectId CreateArc(Database db, Transaction tr, DrawBatchStep step)
     {
-        RequireValidColor(step.ColorIndex);
+        RequireValidColor(step.ColorIndex, step.TrueColor);
         RequireLayer(db, tr, step.Layer);
         var (center, radius, startRad, endRad) = PlanArc(step);
-        return AppendNew(db, tr, new Arc(center, radius, startRad, endRad), step.Layer, step.ColorIndex);
+        return AppendNew(db, tr, new Arc(center, radius, startRad, endRad), step.Layer, step.ColorIndex, trueColor: step.TrueColor);
     }
 
     private static ObjectId CreateText(Database db, Transaction tr, DrawBatchStep step)
     {
-        RequireValidColor(step.ColorIndex);
+        RequireValidColor(step.ColorIndex, step.TrueColor);
         RequireLayer(db, tr, step.Layer);
         var position = PlanText(step);
         var style = ResolveTextStyle(db, tr, step.TextStyle);
@@ -1468,12 +1565,12 @@ public sealed partial class PluginCommandProcessor
             text.Height = step.Height!.Value;
             text.Rotation = DegreesToRadians(step.RotationDeg ?? 0);
             text.TextString = step.Text!;
-        });
+        }, step.TrueColor);
     }
 
     private static ObjectId CreateMText(Database db, Transaction tr, DrawBatchStep step)
     {
-        RequireValidColor(step.ColorIndex);
+        RequireValidColor(step.ColorIndex, step.TrueColor);
         RequireLayer(db, tr, step.Layer);
         var (position, attachment) = PlanMText(step);
         ValidateMaskScale(step.MaskScale);
@@ -1499,7 +1596,7 @@ public sealed partial class PluginCommandProcessor
 
             mtext.Width = step.Width ?? 0;
             mtext.Rotation = DegreesToRadians(step.RotationDeg ?? 0);
-        });
+        }, step.TrueColor);
 
         // The background mask is a resident-only override (set once the MText is in the database).
         if (step.BackgroundMask == true)
@@ -1530,7 +1627,7 @@ public sealed partial class PluginCommandProcessor
 
     private static ObjectId CreateEllipse(Database db, Transaction tr, DrawBatchStep step)
     {
-        RequireValidColor(step.ColorIndex);
+        RequireValidColor(step.ColorIndex, step.TrueColor);
         RequireLayer(db, tr, step.Layer);
         var plan = PlanEllipse(step);
         Ellipse ellipse;
@@ -1543,12 +1640,12 @@ public sealed partial class PluginCommandProcessor
             throw new DrawStepException("invalid_args", $"AutoCAD rejected the ellipse definition ({ex.ErrorStatus}).");
         }
 
-        return AppendNew(db, tr, ellipse, step.Layer, step.ColorIndex);
+        return AppendNew(db, tr, ellipse, step.Layer, step.ColorIndex, trueColor: step.TrueColor);
     }
 
     private static ObjectId CreateSpline(Database db, Transaction tr, DrawBatchStep step)
     {
-        RequireValidColor(step.ColorIndex);
+        RequireValidColor(step.ColorIndex, step.TrueColor);
         RequireLayer(db, tr, step.Layer);
         var plan = PlanSpline(step);
         Spline spline;
@@ -1575,20 +1672,20 @@ public sealed partial class PluginCommandProcessor
             }
         }
 
-        return AppendNew(db, tr, spline, step.Layer, step.ColorIndex);
+        return AppendNew(db, tr, spline, step.Layer, step.ColorIndex, trueColor: step.TrueColor);
     }
 
     private static StepOutcome CreateHatchStep(Database db, Transaction tr, DrawBatchStep step)
     {
-        RequireValidColor(step.ColorIndex);
+        RequireValidColor(step.ColorIndex, step.TrueColor);
         RequireLayer(db, tr, step.Layer);
         var (pattern, scale, angleDeg) = PlanHatch(step);
         var boundaryId = CreatePolyline(
             db,
             tr,
-            new DrawBatchStep { Vertices = step.Vertices, Closed = true, Layer = step.Layer, ColorIndex = step.ColorIndex },
+            new DrawBatchStep { Vertices = step.Vertices, Closed = true, Layer = step.Layer, ColorIndex = step.ColorIndex, TrueColor = step.TrueColor },
             step.Bulges);
-        var hatchId = CreateHatchOnBoundary(db, tr, boundaryId, pattern, scale, angleDeg, associative: true, step.Layer, step.ColorIndex);
+        var hatchId = CreateHatchOnBoundary(db, tr, boundaryId, pattern, scale, angleDeg, associative: true, step.Layer, step.ColorIndex, step.TrueColor, step.SendToBack ?? false);
         return new StepOutcome(hatchId, [boundaryId]);
     }
 
@@ -1600,7 +1697,7 @@ public sealed partial class PluginCommandProcessor
     /// from the new scale/angle, Associative before AppendLoop, EvaluateHatch last. The result is read
     /// back (name, scale, angle, loops, first definition line) before the step reports success.
     /// </summary>
-    private static ObjectId CreateHatchOnBoundary(Database db, Transaction tr, ObjectId boundaryId, string pattern, double scale, double angleDeg, bool associative, string? layer, int? colorIndex)
+    private static ObjectId CreateHatchOnBoundary(Database db, Transaction tr, ObjectId boundaryId, string pattern, double scale, double angleDeg, bool associative, string? layer, int? colorIndex, int[]? trueColor = null, bool sendToBack = false)
     {
         var patternName = pattern.Trim().ToUpperInvariant();
         var isSolid = patternName.Equals("SOLID", StringComparison.Ordinal);
@@ -1617,7 +1714,7 @@ public sealed partial class PluginCommandProcessor
                 hatch.LayerId = LookupLayerId(db, tr, layer);
             }
 
-            ApplyColor(hatch, colorIndex);
+            ApplyColor(hatch, colorIndex, trueColor);
             id = AppendToOwner(db, tr, ownerId, hatch);
         }
         catch
@@ -1635,6 +1732,11 @@ public sealed partial class PluginCommandProcessor
         hatch.AppendLoop(HatchLoopTypes.Outermost, new ObjectIdCollection { boundaryId });
         hatch.EvaluateHatch(true);
         VerifyHatch(db, hatch, patternName, isSolid, scale, angleRad);
+        if (sendToBack && !ownerId.IsNull && tr.GetObject(ownerId, OpenMode.ForRead) is BlockTableRecord ownerBtr)
+        {
+            var dot = (DrawOrderTable)tr.GetObject(ownerBtr.DrawOrderTableId, OpenMode.ForWrite);
+            dot.MoveToBottom(new ObjectIdCollection { id });
+        }
         return id;
     }
 
@@ -1747,7 +1849,7 @@ public sealed partial class PluginCommandProcessor
 
     private static ObjectId CreateDimension(Database db, Transaction tr, DrawBatchStep step)
     {
-        RequireValidColor(step.ColorIndex);
+        RequireValidColor(step.ColorIndex, step.TrueColor);
         RequireLayer(db, tr, step.Layer);
         var plan = PlanDimension(step);
         var styleId = ResolveDimStyle(db, tr, step.DimStyle);
@@ -1764,7 +1866,7 @@ public sealed partial class PluginCommandProcessor
             _ => new OrdinateDimension(plan.UseXAxis, plan.P1, (plan.DimLine ?? plan.P2)!.Value, "", styleId)
         };
 
-        var id = AppendNew(db, tr, dim, step.Layer, step.ColorIndex, d => d.DimensionStyle = styleId);
+        var id = AppendNew(db, tr, dim, step.Layer, step.ColorIndex, d => d.DimensionStyle = styleId, step.TrueColor);
 
         // Per-entity overrides are written once the dimension is resident (xdata needs the
         // database); defaults are never re-applied after this point.
@@ -1800,7 +1902,7 @@ public sealed partial class PluginCommandProcessor
 
     private static ObjectId CreateLeader(Database db, Transaction tr, DrawBatchStep step, List<string>? warnings = null)
     {
-        RequireValidColor(step.ColorIndex);
+        RequireValidColor(step.ColorIndex, step.TrueColor);
         RequireLayer(db, tr, step.Layer);
         var plan = PlanLeader(step);
         ValidateMaskScale(step.MaskScale);
@@ -1879,7 +1981,7 @@ public sealed partial class PluginCommandProcessor
             {
                 mleader.ContentType = ContentType.NoneContent;
             }
-        });
+        }, step.TrueColor);
 
         if (!contentBlockId.IsNull)
         {
@@ -1963,11 +2065,11 @@ public sealed partial class PluginCommandProcessor
 
     private static StepOutcome CreateBlockInsertStep(Database db, Transaction tr, DrawBatchStep step)
     {
-        RequireValidColor(step.ColorIndex);
+        RequireValidColor(step.ColorIndex, step.TrueColor);
         RequireLayer(db, tr, step.Layer);
         var (blockId, position, scale) = PlanBlockInsert(db, tr, step);
         var bref = new BlockReference(position, blockId);
-        var id = AppendNew(db, tr, bref, step.Layer, step.ColorIndex);
+        var id = AppendNew(db, tr, bref, step.Layer, step.ColorIndex, trueColor: step.TrueColor);
 
         // Mirrors forge_block_insert: scale/rotation first, then one AttributeReference per
         // non-constant definition bound to the final block transform; supplied values are set
@@ -2646,19 +2748,38 @@ public sealed partial class PluginCommandProcessor
         }
     }
 
-    private static void RequireLayer(Database db, Transaction tr, string? layer)
+    private static void RequireLayer(Database db, Transaction tr, string? layer, bool allowMissingForAutoCreate = false)
     {
-        if (layer is not null && LookupLayerId(db, tr, layer).IsNull)
+        if (layer is null)
+        {
+            return;
+        }
+
+        if (allowMissingForAutoCreate)
+        {
+            if (!IsValidBlockName(layer))
+            {
+                throw new DrawStepException("invalid_layer_name", $"Invalid layer name: {layer}");
+            }
+            return;
+        }
+
+        if (LookupLayerId(db, tr, layer).IsNull)
         {
             throw new DrawStepException("layer_not_found", $"Layer not found: {layer}");
         }
     }
 
-    private static void RequireValidColor(int? colorIndex)
+    private static void RequireValidColor(int? colorIndex, int[]? trueColor = null)
     {
         if (colorIndex is < 0 or > 256)
         {
             throw new DrawStepException("invalid_args", "colorIndex must be 0 (ByBlock), 1–255, or 256 (ByLayer).");
+        }
+
+        if (trueColor is not null && (trueColor.Length != 3 || trueColor.Any(c => c is < 0 or > 255)))
+        {
+            throw new DrawStepException("invalid_args", "trueColor must be [r, g, b] with each channel in 0..255.");
         }
     }
 
@@ -2798,31 +2919,37 @@ public sealed partial class PluginCommandProcessor
         public int TotalRows => DataRows + (Title is null ? 0 : 1);
     }
 
-    private sealed record DrawLineArgs { public double[]? Start { get; init; } public double[]? End { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } }
-    private sealed record DrawPolylineArgs { public double[][]? Vertices { get; init; } public bool Closed { get; init; } public double[]? Bulges { get; init; } public double? ConstantWidth { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } }
-    private sealed record DrawRectangleArgs { public double[]? P1 { get; init; } public double[]? P2 { get; init; } public double[]? Corner1 { get; init; } public double[]? Corner2 { get; init; } public double[]? Center { get; init; } public double? Width { get; init; } public double? Height { get; init; } public double? FilletRadius { get; init; } public double? ChamferDistance1 { get; init; } public double? ChamferDistance2 { get; init; } public double RotationDeg { get; init; } public double? ConstantWidth { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } }
-    private sealed record DrawPolygonArgs { public double[]? Center { get; init; } public int Sides { get; init; } public double Radius { get; init; } public bool? Inscribed { get; init; } public string? Mode { get; init; } public double RotationDeg { get; init; } public double? ConstantWidth { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } }
-    private sealed record DrawCircleArgs { public double[]? Center { get; init; } public double Radius { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } }
-    private sealed record DrawArcArgs { public double[]? Center { get; init; } public double Radius { get; init; } public double StartAngleDeg { get; init; } public double EndAngleDeg { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } }
-    private sealed record DrawEllipseArgs { public double[]? Center { get; init; } public double[]? MajorAxis { get; init; } public double? MajorRadius { get; init; } public double? MinorRadius { get; init; } public double? RadiusRatio { get; init; } public double RotationDeg { get; init; } public double? StartAngleDeg { get; init; } public double? EndAngleDeg { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } }
-    private sealed record DrawSplineArgs { public double[][]? FitPoints { get; init; } public bool Closed { get; init; } public int? Degree { get; init; } public double[]? StartTangent { get; init; } public double[]? EndTangent { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } }
-    private sealed record DrawRevCloudArgs { public double[]? P1 { get; init; } public double[]? P2 { get; init; } public double[]? Corner1 { get; init; } public double[]? Corner2 { get; init; } public double[][]? Vertices { get; init; } public double? ArcLength { get; init; } public double? BulgeMagnitude { get; init; } public double? ConstantWidth { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } }
-    private sealed record DrawTextArgs { public double[]? Position { get; init; } public double Height { get; init; } public string? Text { get; init; } public double RotationDeg { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } }
-    private sealed record DrawMTextArgs { public double[]? Position { get; init; } public double Height { get; init; } public string? Text { get; init; } public double? Width { get; init; } public string? AttachmentPoint { get; init; } public double RotationDeg { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } }
-    private sealed record DrawHatchArgs { public string? Pattern { get; init; } public double? Scale { get; init; } public double AngleDeg { get; init; } public HatchBoundaryArgs? Boundary { get; init; } public string? Layer { get; init; } }
+    private sealed record DrawLineArgs { public double[]? Start { get; init; } public double[]? End { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } public string? Layout { get; init; } }
+    private sealed record DrawPolylineArgs { public double[][]? Vertices { get; init; } public bool Closed { get; init; } public double[]? Bulges { get; init; } public double? ConstantWidth { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } public string? Layout { get; init; } }
+    private sealed record DrawRectangleArgs { public double[]? P1 { get; init; } public double[]? P2 { get; init; } public double[]? Corner1 { get; init; } public double[]? Corner2 { get; init; } public double[]? Center { get; init; } public double? Width { get; init; } public double? Height { get; init; } public double? FilletRadius { get; init; } public double? ChamferDistance1 { get; init; } public double? ChamferDistance2 { get; init; } public double RotationDeg { get; init; } public double? ConstantWidth { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } public string? Layout { get; init; } }
+    private sealed record DrawPolygonArgs { public double[]? Center { get; init; } public int Sides { get; init; } public double Radius { get; init; } public bool? Inscribed { get; init; } public string? Mode { get; init; } public double RotationDeg { get; init; } public double? ConstantWidth { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } public string? Layout { get; init; } }
+    private sealed record DrawCircleArgs { public double[]? Center { get; init; } public double Radius { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } public string? Layout { get; init; } }
+    private sealed record DrawArcArgs { public double[]? Center { get; init; } public double Radius { get; init; } public double StartAngleDeg { get; init; } public double EndAngleDeg { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } public string? Layout { get; init; } }
+    private sealed record DrawEllipseArgs { public double[]? Center { get; init; } public double[]? MajorAxis { get; init; } public double? MajorRadius { get; init; } public double? MinorRadius { get; init; } public double? RadiusRatio { get; init; } public double RotationDeg { get; init; } public double? StartAngleDeg { get; init; } public double? EndAngleDeg { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } public string? Layout { get; init; } }
+    private sealed record DrawSplineArgs { public double[][]? FitPoints { get; init; } public bool Closed { get; init; } public int? Degree { get; init; } public double[]? StartTangent { get; init; } public double[]? EndTangent { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } public string? Layout { get; init; } }
+    private sealed record DrawRevCloudArgs { public double[]? P1 { get; init; } public double[]? P2 { get; init; } public double[]? Corner1 { get; init; } public double[]? Corner2 { get; init; } public double[][]? Vertices { get; init; } public double? ArcLength { get; init; } public double? BulgeMagnitude { get; init; } public double? ConstantWidth { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } public string? Layout { get; init; } }
+    private sealed record DrawTextArgs { public double[]? Position { get; init; } public double Height { get; init; } public string? Text { get; init; } public double RotationDeg { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } public string? Layout { get; init; } }
+    private sealed record DrawMTextArgs { public double[]? Position { get; init; } public double Height { get; init; } public string? Text { get; init; } public double? Width { get; init; } public string? AttachmentPoint { get; init; } public double RotationDeg { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } public string? Layout { get; init; } }
+    private sealed record DrawHatchArgs { public string? Pattern { get; init; } public double? Scale { get; init; } public double AngleDeg { get; init; } public HatchBoundaryArgs? Boundary { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } public int[]? TrueColor { get; init; } public bool SendToBack { get; init; } public string? Layout { get; init; } }
     private sealed record HatchBoundaryArgs { public string? Handle { get; init; } public double[][]? Vertices { get; init; } }
-    private sealed record DrawDimensionArgs { public string? Kind { get; init; } public double[]? P1 { get; init; } public double[]? P2 { get; init; } public double[]? Vertex { get; init; } public double[]? DimLinePoint { get; init; } public double RotationDeg { get; init; } public bool UseXAxis { get; init; } = true; public string? TextOverride { get; init; } public string? DimStyle { get; init; } public double? DimScale { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } }
-    private sealed record DrawLeaderArgs { public double[][]? Points { get; init; } public string? Text { get; init; } public double? TextHeight { get; init; } public double? ArrowSize { get; init; } public bool HasArrowHead { get; init; } = true; public string? Layer { get; init; } public int? ColorIndex { get; init; } }
-    private sealed record DrawTableArgs { public double[]? Position { get; init; } public string?[][]? Rows { get; init; } public string?[][]? Cells { get; init; } public string? Title { get; init; } public bool HasTitleRow { get; init; } public double? RowHeight { get; init; } public double? ColumnWidth { get; init; } public double[]? ColumnWidths { get; init; } public double? TextHeight { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } }
+    private sealed record DrawDimensionArgs { public string? Kind { get; init; } public double[]? P1 { get; init; } public double[]? P2 { get; init; } public double[]? Vertex { get; init; } public double[]? DimLinePoint { get; init; } public double RotationDeg { get; init; } public bool UseXAxis { get; init; } = true; public string? TextOverride { get; init; } public string? DimStyle { get; init; } public double? DimScale { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } public string? Layout { get; init; } }
+    private sealed record DrawLeaderArgs { public double[][]? Points { get; init; } public string? Text { get; init; } public double? TextHeight { get; init; } public double? ArrowSize { get; init; } public bool HasArrowHead { get; init; } = true; public string? Layer { get; init; } public int? ColorIndex { get; init; } public string? Layout { get; init; } }
+    private sealed record DrawTableArgs { public double[]? Position { get; init; } public string?[][]? Rows { get; init; } public string?[][]? Cells { get; init; } public string? Title { get; init; } public bool HasTitleRow { get; init; } public double? RowHeight { get; init; } public double? ColumnWidth { get; init; } public double[]? ColumnWidths { get; init; } public double? TextHeight { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } public string? Layout { get; init; } }
     private sealed record DrawBatchArgs
     {
-        public DrawBatchStep[]? Steps { get; init; }
+        public System.Text.Json.JsonElement[]? Steps { get; init; }
 
         /// <summary>true = validate every step first and create all-or-nothing in one transaction (no nested transactions).</summary>
         public bool Atomic { get; init; }
 
         /// <summary>full (default, per-step results), errors (failed steps + handles), summary (counts + failed steps only).</summary>
         public string? ResultMode { get; init; }
+
+        /// <summary>Optional paper-space layout name (defaults to Model Space).</summary>
+        public string? Layout { get; init; }
+
+        /// <summary>When true, automatically creates any missing layers referenced by steps.</summary>
+        public bool AutoCreateLayers { get; init; }
     }
 
     // Keep the property set identical to Forge.Server DrawStepDto (camelCase on the wire).
@@ -2891,5 +3018,10 @@ public sealed partial class PluginCommandProcessor
         public double? MaskScale { get; init; }
         public string? LeaderStyle { get; init; }
         public string? ContentBlock { get; init; }
+
+        // V2 Big Update: per-step Paper Space layout, TrueColor RGB, and hatch sendToBack.
+        public string? Layout { get; init; }
+        public int[]? TrueColor { get; init; }
+        public bool? SendToBack { get; init; }
     }
 }

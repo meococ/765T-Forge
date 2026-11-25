@@ -15,12 +15,42 @@ public sealed partial class PluginCommandProcessor
     [ThreadStatic]
     private static DrawIdCache? _drawCache;
 
+    [ThreadStatic]
+    private static string? _activeTargetLayout;
+
+    [ThreadStatic]
+    private static bool _activeAutoCreateLayers;
+
+    private readonly struct TargetSpaceScope : IDisposable
+    {
+        private readonly string? _prevLayout;
+        private readonly bool _prevAutoCreate;
+
+        public TargetSpaceScope(string? layout, bool autoCreateLayers)
+        {
+            _prevLayout = _activeTargetLayout;
+            _prevAutoCreate = _activeAutoCreateLayers;
+            _activeTargetLayout = string.IsNullOrWhiteSpace(layout) ? null : layout.Trim();
+            _activeAutoCreateLayers = autoCreateLayers;
+        }
+
+        public void Dispose()
+        {
+            _activeTargetLayout = _prevLayout;
+            _activeAutoCreateLayers = _prevAutoCreate;
+        }
+    }
+
+    private static TargetSpaceScope EnterTargetSpace(string? layout, bool autoCreateLayers = false)
+        => new(layout, autoCreateLayers);
+
     private sealed class DrawIdCache
     {
         public DrawIdCache(Database db) => Db = db;
 
         public Database Db { get; }
         public ObjectId ModelSpaceId { get; set; } = ObjectId.Null;
+        public Dictionary<string, ObjectId> LayoutSpaces { get; } = new(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, ObjectId> Layers { get; } = new(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, ObjectId> DimStyles { get; } = new(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, (ObjectId Id, double FixedHeight)> TextStyles { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -30,18 +60,43 @@ public sealed partial class PluginCommandProcessor
 
     private static DrawIdCache? CacheFor(Database db) => _drawCache is { } cache && ReferenceEquals(cache.Db, db) ? cache : null;
 
-    /// <summary>Layer id by name, or ObjectId.Null when the layer does not exist.</summary>
+    /// <summary>Layer id by name, or ObjectId.Null when the layer does not exist (auto-creates when _activeAutoCreateLayers is true).</summary>
     private static ObjectId LookupLayerId(Database db, Transaction tr, string layer)
     {
         var cache = CacheFor(db);
-        if (cache is not null && cache.Layers.TryGetValue(layer, out var cached))
+        if (cache is not null && cache.Layers.TryGetValue(layer, out var cached) && (!cached.IsNull || !_activeAutoCreateLayers))
         {
             return cached;
         }
 
         var table = (LayerTable)tr.GetObject(db.LayerTableId, OpenMode.ForRead);
-        var id = table.Has(layer) ? table[layer] : ObjectId.Null;
-        if (cache is not null)
+        ObjectId id;
+        var createdInCurrentTransaction = false;
+        if (table.Has(layer))
+        {
+            id = table[layer];
+        }
+        else if (_activeAutoCreateLayers && IsValidBlockName(layer))
+        {
+            table.UpgradeOpen();
+            var ltr = new LayerTableRecord
+            {
+                Name = layer,
+                Color = Autodesk.AutoCAD.Colors.Color.FromColorIndex(Autodesk.AutoCAD.Colors.ColorMethod.ByAci, 7)
+            };
+            id = table.Add(ltr);
+            tr.AddNewlyCreatedDBObject(ltr, true);
+            createdInCurrentTransaction = true;
+        }
+        else
+        {
+            id = ObjectId.Null;
+        }
+
+        // Never cache an id created inside the current step transaction: when that step is
+        // rolled back the id dies with it, and a cached zombie id would poison later steps.
+        // A successful step makes the layer visible to the next table lookup anyway.
+        if (cache is not null && !createdInCurrentTransaction)
         {
             cache.Layers[layer] = id;
         }
@@ -49,23 +104,54 @@ public sealed partial class PluginCommandProcessor
         return id;
     }
 
-    /// <summary>Model-space record id (cached in a batch); callers still open it in their own transaction.</summary>
+    /// <summary>Target layout BTR id (ModelSpace when layout is null/'Model', or the named PaperSpace layout BTR).</summary>
     private static ObjectId ModelSpaceIdFor(Database db, Transaction tr)
+        => ResolveTargetSpaceId(db, tr, _activeTargetLayout);
+
+    internal static ObjectId ResolveTargetSpaceId(Database db, Transaction tr, string? layout)
     {
         var cache = CacheFor(db);
-        if (cache is not null && !cache.ModelSpaceId.IsNull)
+        if (string.IsNullOrWhiteSpace(layout) || string.Equals(layout.Trim(), "Model", StringComparison.OrdinalIgnoreCase))
         {
-            return cache.ModelSpaceId;
+            if (cache is not null && !cache.ModelSpaceId.IsNull)
+            {
+                return cache.ModelSpaceId;
+            }
+
+            var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+            var id = blockTable[BlockTableRecord.ModelSpace];
+            if (cache is not null)
+            {
+                cache.ModelSpaceId = id;
+            }
+
+            return id;
         }
 
-        var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
-        var id = blockTable[BlockTableRecord.ModelSpace];
+        var trimmed = layout.Trim();
+        if (cache is not null && cache.LayoutSpaces.TryGetValue(trimmed, out var cachedSpace))
+        {
+            return cachedSpace.IsNull
+                ? throw new DrawStepException("layout_not_found", $"Layout not found: {trimmed}. Call forge_doc_list_layouts for available tabs.")
+                : cachedSpace;
+        }
+
+        var layoutDict = (DBDictionary)tr.GetObject(db.LayoutDictionaryId, OpenMode.ForRead);
+        var btrId = ObjectId.Null;
+        if (layoutDict.Contains(trimmed))
+        {
+            var lay = (Layout)tr.GetObject(layoutDict.GetAt(trimmed), OpenMode.ForRead);
+            btrId = lay.BlockTableRecordId;
+        }
+
         if (cache is not null)
         {
-            cache.ModelSpaceId = id;
+            cache.LayoutSpaces[trimmed] = btrId;
         }
 
-        return id;
+        return btrId.IsNull
+            ? throw new DrawStepException("layout_not_found", $"Layout not found: {trimmed}. Call forge_doc_list_layouts for available tabs.")
+            : btrId;
     }
 
     /// <summary>Text style id + fixed height (0 = variable); Null id when no style was requested.</summary>

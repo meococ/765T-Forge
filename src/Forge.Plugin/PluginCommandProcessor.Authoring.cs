@@ -348,9 +348,20 @@ public sealed partial class PluginCommandProcessor
         return linetypeTable.Has(linetype);
     }
 
-    /// <summary>Applies optional color index (0 ByBlock, 1–255 ACI, 256 ByLayer) to an entity.</summary>
-    internal static void ApplyColor(Entity entity, int? colorIndex)
+    /// <summary>Applies optional color index (0 ByBlock, 1–255 ACI, 256 ByLayer) or RGB trueColor [r,g,b] to an entity.</summary>
+    internal static void ApplyColor(Entity entity, int? colorIndex, int[]? trueColor = null)
     {
+        if (trueColor is not null)
+        {
+            if (trueColor.Length != 3 || trueColor.Any(c => c is < 0 or > 255))
+            {
+                throw new ArgumentException("trueColor must be [r, g, b] with each channel in 0..255.");
+            }
+
+            entity.Color = Color.FromRgb((byte)trueColor[0], (byte)trueColor[1], (byte)trueColor[2]);
+            return;
+        }
+
         if (colorIndex is null)
         {
             return;

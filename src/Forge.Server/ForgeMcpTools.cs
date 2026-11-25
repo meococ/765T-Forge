@@ -109,28 +109,28 @@ public sealed class ForgeMcpTools
 
     [McpServerTool(Name = "forge_xref_list", Title = "Xref List", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("List xrefs with names, paths, load state, and unresolved path hints.")]
-    public static Task<ForgeResult> XrefList(ForgeToolRunner runner, CancellationToken cancellationToken)
-        => runner.InvokeAsync("forge_xref_list", new { }, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> XrefList(ForgeToolRunner runner, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_xref_list", new { }, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_xref_reload", Title = "Xref Reload", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Reload one xref by name, or all xrefs when name is omitted. Refreshes the referenced DWG content in the host drawing; a write to the drawing state (idempotent).")]
-    public static Task<ForgeResult> XrefReload(ForgeToolRunner runner, string? name = null, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_xref_reload", new { name }, dryRun, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> XrefReload(ForgeToolRunner runner, string? name = null, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_xref_reload", new { name }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_xref_repath", Title = "Xref Repath", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Set an xref path, preserving audit/read-back so missing metro xrefs can be fixed before publish.")]
-    public static Task<ForgeResult> XrefRepath(ForgeToolRunner runner, string name, string path, bool reload = true, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_xref_repath", new { name, path, reload }, dryRun, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> XrefRepath(ForgeToolRunner runner, string name, string path, bool reload = true, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_xref_repath", new { name, path, reload }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_xref_normalize_relative", Title = "Xref Normalize Relative", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Rewrite absolute xref paths to host-relative paths and optionally reload them. Mutates xref records — audit-recorded; dryRun lists the planned rewrites first.")]
-    public static Task<ForgeResult> XrefNormalizeRelative(ForgeToolRunner runner, string? name = null, bool reload = true, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_xref_normalize_relative", new { name, reload }, dryRun, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> XrefNormalizeRelative(ForgeToolRunner runner, string? name = null, bool reload = true, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_xref_normalize_relative", new { name, reload }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_layer_list", Title = "Layer List", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("List layer properties relevant to plotting and locked/frozen states.")]
-    public static Task<ForgeResult> LayerList(ForgeToolRunner runner, CancellationToken cancellationToken)
-        => runner.InvokeAsync("forge_layer_list", new { }, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> LayerList(ForgeToolRunner runner, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_layer_list", new { }, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_layer_state_list", Title = "Layer State List", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("List known layer states saved in the drawing (name, saved-at). Read-only; pair with forge_layer_state_restore to apply one.")]
@@ -144,23 +144,23 @@ public sealed class ForgeMcpTools
 
     [McpServerTool(Name = "forge_block_list_attributes", Title = "Block List Attributes", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("List attributes on block references, optionally filtered by block name or handle.")]
-    public static Task<ForgeResult> BlockListAttributes(ForgeToolRunner runner, string? blockName = null, string? handle = null, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_block_list_attributes", new { blockName, handle }, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> BlockListAttributes(ForgeToolRunner runner, string? blockName = null, string? handle = null, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_block_list_attributes", new { blockName, handle }, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_block_get_attr", Title = "Block Get Attribute", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Read a single block attribute from a titleblock or other attributed block.")]
-    public static Task<ForgeResult> BlockGetAttr(ForgeToolRunner runner, string tag, string? blockName = null, string? handle = null, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_block_get_attr", new { tag, blockName, handle }, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> BlockGetAttr(ForgeToolRunner runner, string tag, string? blockName = null, string? handle = null, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_block_get_attr", new { tag, blockName, handle }, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_block_set_attr", Title = "Block Set Attribute", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Set one block attribute on a reference by handle/tag and read it back for titleblock verification. Writes to the drawing (audit-recorded).")]
-    public static Task<ForgeResult> BlockSetAttr(ForgeToolRunner runner, string tag, string value, string? blockName = null, string? handle = null, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_block_set_attr", new { tag, value, blockName, handle }, dryRun, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> BlockSetAttr(ForgeToolRunner runner, string tag, string value, string? blockName = null, string? handle = null, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_block_set_attr", new { tag, value, blockName, handle }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_block_campaign", Title = "Block Campaign", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Apply a titleblock attribute campaign (multi layout/tag) with dry-run diffs. Supports Unicode values.")]
-    public static Task<ForgeResult> BlockCampaign(ForgeToolRunner runner, CampaignEntryDto[] entries, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_block_campaign", new { entries }, dryRun, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> BlockCampaign(ForgeToolRunner runner, CampaignEntryDto[] entries, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_block_campaign", new { entries }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_layout_page_setup_import", Title = "Layout Page Setup Import", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Import page setup from a DWT/DWG template using AutoCAD command automation.")]
@@ -169,8 +169,8 @@ public sealed class ForgeMcpTools
 
     [McpServerTool(Name = "forge_layout_page_setup_apply", Title = "Layout Page Setup Apply", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Apply an existing page setup to a layout synchronously via PlotSettings API.")]
-    public static Task<ForgeResult> PageSetupApply(ForgeToolRunner runner, string setupName, string? layout = null, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_layout_page_setup_apply", new { setupName, layout }, dryRun, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> PageSetupApply(ForgeToolRunner runner, string setupName, string? layout = null, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_layout_page_setup_apply", new { setupName, layout }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_plot_to_pdf", Title = "Plot to PDF", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Plot one layout (or Model) to PDF through the PlotEngine API. Never opens a PDF viewer: the plot always goes through a Forge-owned copy of the device PC3 with View_New_File=FALSE (\"765T-Forge <device> (no viewer).pc3\"). Defaults: device \"DWG To PDF.pc3\"; a layout keeps its own paper and its own stored plot type (plotAreaSource=\"stored\" — a stored Window uses the stored window box, a stored named View the stored view name); only when the stored type is unusable does the area default to layout, or to extents + fit + centered when the paper differs from the layout's own; Model defaults to ISO A1 + extents + fit. plotArea: layout|extents|display|limits|window (window=[[x1,y1],[x2,y2]] in the plotted space) — an explicit plotArea always wins over the stored type. Stored paper missing on the device is mapped by sheet size (mediaMapped + warning); no match fails plot_paper_not_on_device with nearest candidates. scale: fit or \"1:100\". centered applies only to window/extents/display/limits — an explicit centered on plotArea=layout or a stored named-View area is ignored on both engines and the layout's stored centring and offset stand (warning emitted). orientation: auto (default, long side to long side)|landscape|portrait, honoured against the real paper. paperSize accepts the localized or canonical media name; an unknown one fails with candidates. A layout that is not current is made current for the plot and restored afterwards (layoutSwitched, layoutRestored; a restore mismatch is a warning); a dry run never switches and reports validation=deferred. Model extents are refreshed before an extents plot. Read-back: device actually used, viewer suppression, media, paper/printable mm, PDF sheet size from /MediaBox, and coverage measured from the PDF ink (coverageSource=pdf, looksTiny, pdfContent). An empty PDF always fails plot_content_empty; with plotArea=extents and scale=fit a tiny PDF also fails plot_content_tiny; otherwise it is a warning. looksTiny is null when the PDF could not be measured. engine=\"command\" is the legacy -PLOT fallback. outputFormat=\"png\" (with optional dpi, default 150) plots to a raster PNG instead: the device defaults to PublishToWeb PNG.pc3, the Forge clone pc3 gets a user-defined pixel medium matching the sheet size at that dpi, paperSize is ignored, paper units become pixels, and the PDF probe/ink read-back is replaced by a PNG signature probe (pngProbe, rasterPixels).")]
@@ -192,8 +192,9 @@ public sealed class ForgeMcpTools
         int? dpi = null,
         bool overwriteAcknowledged = false,
         bool dryRun = false,
+        string? document = null,
         CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_plot_to_pdf", new { outputPath, layout, device, paperSize, plotStyle, plotArea, window, orientation, scale, units, centered, engine, outputFormat, dpi, overwriteAcknowledged }, dryRun, cancellationToken: cancellationToken);
+        => runner.InvokeAsync("forge_plot_to_pdf", new { outputPath, layout, device, paperSize, plotStyle, plotArea, window, orientation, scale, units, centered, engine, outputFormat, dpi, overwriteAcknowledged }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_plot_publish", Title = "Plot Publish", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Publish layouts to PDF via real DSD + Publisher.PublishDsd; returns PublishReceipt with PDF probe. Preflight gate unless force=true. With singlePdf=true the merged PDF gets one outline bookmark per layout title (bookmarks=true, default) via a pypdf post-pass — skipped automatically when the merged PDF already carries native outlines (engine reported as dsd-native); bookmarksApplied/bookmarkDetail report the outcome; the bookmark warning only appears when the PDF truly has no bookmarks, it never fails the publish.")]
@@ -209,8 +210,9 @@ public sealed class ForgeMcpTools
         string[]? requiredTitleblockTags = null,
         string? titleblockBlockName = null,
         bool dryRun = false,
+        string? document = null,
         CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_plot_publish", new { outputPath, layouts, singlePdf, bookmarks, overwriteAcknowledged, requirePreflight, force, requiredTitleblockTags = requiredTitleblockTags ?? [], titleblockBlockName }, dryRun, cancellationToken: cancellationToken);
+        => runner.InvokeAsync("forge_plot_publish", new { outputPath, layouts, singlePdf, bookmarks, overwriteAcknowledged, requirePreflight, force, requiredTitleblockTags = requiredTitleblockTags ?? [], titleblockBlockName }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_dgn_import", Title = "DGN Import", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Convert a MicroStation DGN V8 drawing to a new DWG: -DGNIMPORT into a fresh temporary document, then SaveAs targetDwgPath. Source DGN and the active drawing are never modified. DGN V7 is refused by header sniff. dryRun returns the plan; a large DGN can exceed the default 120s plugin timeout (raise FORGE_PLUGIN_RESPONSE_TIMEOUT_SECONDS).")]
@@ -226,42 +228,42 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_dgn_import", new { dgnPath, targetDwgPath, modelName, units, overwriteAcknowledged }, dryRun, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_draw_line", Title = "Draw Line", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
-    [Description("Draw a line from start to end (WCS, drawing units, [x,y] or [x,y,z]). Returns the new entity handle; read-back echoes geometry.")]
-    public static Task<ForgeResult> DrawLine(ForgeToolRunner runner, double[] start, double[] end, string? layer = null, int? colorIndex = null, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_draw_line", new { start, end, layer, colorIndex }, dryRun, cancellationToken: cancellationToken);
+    [Description("Draw a line from start to end (WCS, drawing units, [x,y] or [x,y,z]). Optional layout targets a paper-space sheet tab. Returns the new entity handle; read-back echoes geometry.")]
+    public static Task<ForgeResult> DrawLine(ForgeToolRunner runner, double[] start, double[] end, string? layer = null, int? colorIndex = null, string? layout = null, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_draw_line", new { start, end, layer, colorIndex, layout }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_draw_polyline", Title = "Draw Polyline", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
-    [Description("Draw a lightweight polyline from vertices (WCS [x,y] list, ≥2). Optional closed, per-vertex bulges (tan(θ/4), positive CCW), constantWidth, layer, colorIndex. Returns the handle.")]
-    public static Task<ForgeResult> DrawPolyline(ForgeToolRunner runner, double[][] vertices, bool closed = false, double[]? bulges = null, double? constantWidth = null, string? layer = null, int? colorIndex = null, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_draw_polyline", new { vertices, closed, bulges, constantWidth, layer, colorIndex }, dryRun, cancellationToken: cancellationToken);
+    [Description("Draw a lightweight polyline from vertices (WCS [x,y] list, ≥2). Optional closed, per-vertex bulges (tan(θ/4), positive CCW), constantWidth, layer, colorIndex, layout (paper-space tab). Returns the handle.")]
+    public static Task<ForgeResult> DrawPolyline(ForgeToolRunner runner, double[][] vertices, bool closed = false, double[]? bulges = null, double? constantWidth = null, string? layer = null, int? colorIndex = null, string? layout = null, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_draw_polyline", new { vertices, closed, bulges, constantWidth, layer, colorIndex, layout }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_draw_circle", Title = "Draw Circle", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
-    [Description("Draw a full circle (WCS center, radius in drawing units). Returns the new entity handle.")]
-    public static Task<ForgeResult> DrawCircle(ForgeToolRunner runner, double[] center, double radius, string? layer = null, int? colorIndex = null, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_draw_circle", new { center, radius, layer, colorIndex }, dryRun, cancellationToken: cancellationToken);
+    [Description("Draw a full circle (WCS center, radius in drawing units). Optional layout targets a paper-space sheet tab. Returns the new entity handle.")]
+    public static Task<ForgeResult> DrawCircle(ForgeToolRunner runner, double[] center, double radius, string? layer = null, int? colorIndex = null, string? layout = null, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_draw_circle", new { center, radius, layer, colorIndex, layout }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_draw_arc", Title = "Draw Arc", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
-    [Description("Draw a circular arc (WCS center, radius, startAngleDeg→endAngleDeg CCW, wraps through 0). Returns the new entity handle.")]
-    public static Task<ForgeResult> DrawArc(ForgeToolRunner runner, double[] center, double radius, double startAngleDeg, double endAngleDeg, string? layer = null, int? colorIndex = null, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_draw_arc", new { center, radius, startAngleDeg, endAngleDeg, layer, colorIndex }, dryRun, cancellationToken: cancellationToken);
+    [Description("Draw a circular arc (WCS center, radius, startAngleDeg→endAngleDeg CCW, wraps through 0). Optional layout targets a paper-space sheet tab. Returns the new entity handle.")]
+    public static Task<ForgeResult> DrawArc(ForgeToolRunner runner, double[] center, double radius, double startAngleDeg, double endAngleDeg, string? layer = null, int? colorIndex = null, string? layout = null, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_draw_arc", new { center, radius, startAngleDeg, endAngleDeg, layer, colorIndex, layout }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_draw_text", Title = "Draw Text", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
-    [Description("Draw a single-line DBText (WCS position, height, text — no newlines; rotationDeg CCW). Returns the new entity handle.")]
-    public static Task<ForgeResult> DrawText(ForgeToolRunner runner, double[] position, double height, string text, double rotationDeg = 0, string? layer = null, int? colorIndex = null, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_draw_text", new { position, height, text, rotationDeg, layer, colorIndex }, dryRun, cancellationToken: cancellationToken);
+    [Description("Draw a single-line DBText (WCS position, height, text — no newlines; rotationDeg CCW). Optional layout targets a paper-space sheet tab. Returns the new entity handle.")]
+    public static Task<ForgeResult> DrawText(ForgeToolRunner runner, double[] position, double height, string text, double rotationDeg = 0, string? layer = null, int? colorIndex = null, string? layout = null, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_draw_text", new { position, height, text, rotationDeg, layer, colorIndex, layout }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_draw_mtext", Title = "Draw MText", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
-    [Description("Draw an MText paragraph (WCS position, height, text — newlines become \\P; width 0 = no wrap; attachmentPoint e.g. topLeft/middleCenter). Returns the handle.")]
-    public static Task<ForgeResult> DrawMText(ForgeToolRunner runner, double[] position, double height, string text, double? width = null, string? attachmentPoint = null, double rotationDeg = 0, string? layer = null, int? colorIndex = null, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_draw_mtext", new { position, height, text, width, attachmentPoint, rotationDeg, layer, colorIndex }, dryRun, cancellationToken: cancellationToken);
+    [Description("Draw an MText paragraph (WCS position, height, text — newlines become \\P; width 0 = no wrap; attachmentPoint e.g. topLeft/middleCenter). Optional layout targets a paper-space sheet tab. Returns the handle.")]
+    public static Task<ForgeResult> DrawMText(ForgeToolRunner runner, double[] position, double height, string text, double? width = null, string? attachmentPoint = null, double rotationDeg = 0, string? layer = null, int? colorIndex = null, string? layout = null, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_draw_mtext", new { position, height, text, width, attachmentPoint, rotationDeg, layer, colorIndex, layout }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_draw_hatch", Title = "Draw Hatch", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
-    [Description("Draw a hatch: boundary = an existing closed curve handle, or vertices that first draw a closed polyline (associative). pattern (default ANSI31), scale, angleDeg. The pattern, scale, angle, loop count and first pattern line are read back; a mismatch fails with hatch_readback_mismatch and an unknown pattern with invalid_pattern (nothing is left behind). Returns the hatch handle.")]
-    public static Task<ForgeResult> DrawHatch(ForgeToolRunner runner, string? boundaryHandle = null, double[][]? boundaryVertices = null, string? pattern = null, double? scale = null, double angleDeg = 0, string? layer = null, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_draw_hatch", new { boundary = new { handle = boundaryHandle, vertices = boundaryVertices }, pattern, scale, angleDeg, layer }, dryRun, cancellationToken: cancellationToken);
+    [Description("Draw a hatch: boundary = an existing closed curve handle, or vertices that first draw a closed polyline (associative). pattern (default ANSI31; SOLID for solid fill), scale, angleDeg, optional colorIndex, trueColor [r,g,b], sendToBack (moves hatch behind linework), and layout (paper-space tab). The pattern, scale, angle, loop count and first pattern line are read back; a mismatch fails with hatch_readback_mismatch and an unknown pattern with invalid_pattern (nothing is left behind). Returns the hatch handle.")]
+    public static Task<ForgeResult> DrawHatch(ForgeToolRunner runner, string? boundaryHandle = null, double[][]? boundaryVertices = null, string? pattern = null, double? scale = null, double angleDeg = 0, string? layer = null, int? colorIndex = null, int[]? trueColor = null, bool sendToBack = false, string? layout = null, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_draw_hatch", new { boundary = new { handle = boundaryHandle, vertices = boundaryVertices }, pattern, scale, angleDeg, layer, colorIndex, trueColor, sendToBack, layout }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_draw_rectangle", Title = "Draw Rectangle", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
-    [Description("Draw a closed rectangle polyline from EITHER opposite corners (p1, p2) OR (center, width, height) in WCS drawing units — do not supply both. Optional filletRadius (rounded corners, mutually exclusive with chamfer), chamferDistance1/chamferDistance2 (beveled corners), rotationDeg CCW around rectangle center, constantWidth, layer (must exist), colorIndex (0..256).")]
+    [Description("Draw a closed rectangle polyline from EITHER opposite corners (p1, p2) OR (center, width, height) in WCS drawing units — do not supply both. Optional filletRadius (rounded corners, mutually exclusive with chamfer), chamferDistance1/chamferDistance2 (beveled corners), rotationDeg CCW around rectangle center, constantWidth, layer (must exist), colorIndex (0..256), layout (paper-space tab).")]
     public static Task<ForgeResult> DrawRectangle(
         ForgeToolRunner runner,
         double[]? p1 = null,
@@ -276,12 +278,14 @@ public sealed class ForgeMcpTools
         double? constantWidth = null,
         string? layer = null,
         int? colorIndex = null,
+        string? layout = null,
         bool dryRun = false,
+        string? document = null,
         CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_draw_rectangle", new { p1, p2, center, width, height, filletRadius, chamferDistance1, chamferDistance2, rotationDeg, constantWidth, layer, colorIndex }, dryRun, cancellationToken: cancellationToken);
+        => runner.InvokeAsync("forge_draw_rectangle", new { p1, p2, center, width, height, filletRadius, chamferDistance1, chamferDistance2, rotationDeg, constantWidth, layer, colorIndex, layout }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_draw_polygon", Title = "Draw Polygon", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
-    [Description("Draw a regular N-sided closed polygon (sides 3..1024) at WCS center [x,y] with radius > 0. inscribed=true (default) puts vertices on the circle; inscribed=false circumscribes the circle (apothem / flat-to-center = radius). Optional rotationDeg CCW, constantWidth, layer (must exist), colorIndex.")]
+    [Description("Draw a regular N-sided closed polygon (sides 3..1024) at WCS center [x,y] with radius > 0. inscribed=true (default) puts vertices on the circle; inscribed=false circumscribes the circle (apothem / flat-to-center = radius). Optional rotationDeg CCW, constantWidth, layer (must exist), colorIndex, layout (paper-space tab).")]
     public static Task<ForgeResult> DrawPolygon(
         ForgeToolRunner runner,
         double[] center,
@@ -292,12 +296,14 @@ public sealed class ForgeMcpTools
         double? constantWidth = null,
         string? layer = null,
         int? colorIndex = null,
+        string? layout = null,
         bool dryRun = false,
+        string? document = null,
         CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_draw_polygon", new { center, sides, radius, inscribed, rotationDeg, constantWidth, layer, colorIndex }, dryRun, cancellationToken: cancellationToken);
+        => runner.InvokeAsync("forge_draw_polygon", new { center, sides, radius, inscribed, rotationDeg, constantWidth, layer, colorIndex, layout }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_draw_ellipse", Title = "Draw Ellipse", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
-    [Description("Draw a full ellipse or elliptical arc at WCS center [x,y,(z)]. Specify EITHER majorAxis [dx,dy,(dz)] vector OR majorRadius (>0) + rotationDeg CCW. Minor axis via minorRadius (>0, <=majorRadius) or radiusRatio (minor/major in (0,1]). Optional startAngleDeg and endAngleDeg (parametric angles in degrees CCW from the major axis) for an elliptical arc.")]
+    [Description("Draw a full ellipse or elliptical arc at WCS center [x,y,(z)]. Specify EITHER majorAxis [dx,dy,(dz)] vector OR majorRadius (>0) + rotationDeg CCW. Minor axis via minorRadius (>0, <=majorRadius) or radiusRatio (minor/major in (0,1]). Optional startAngleDeg and endAngleDeg (parametric angles in degrees CCW from the major axis) for an elliptical arc, plus layout (paper-space tab).")]
     public static Task<ForgeResult> DrawEllipse(
         ForgeToolRunner runner,
         double[] center,
@@ -310,12 +316,14 @@ public sealed class ForgeMcpTools
         double? endAngleDeg = null,
         string? layer = null,
         int? colorIndex = null,
+        string? layout = null,
         bool dryRun = false,
+        string? document = null,
         CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_draw_ellipse", new { center, majorRadius, majorAxis, minorRadius, radiusRatio, rotationDeg, startAngleDeg, endAngleDeg, layer, colorIndex }, dryRun, cancellationToken: cancellationToken);
+        => runner.InvokeAsync("forge_draw_ellipse", new { center, majorRadius, majorAxis, minorRadius, radiusRatio, rotationDeg, startAngleDeg, endAngleDeg, layer, colorIndex, layout }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_draw_spline", Title = "Draw Spline", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
-    [Description("Draw a smooth NURBS spline through fitPoints (≥2 WCS points; ≥3 when closed=true). Optional closed (creates a periodic spline without duplicating endpoints), degree (2..11, default 3), startTangent [dx,dy,(dz)] and endTangent [dx,dy,(dz)] (non-zero vectors, open splines), layer, colorIndex.")]
+    [Description("Draw a smooth NURBS spline through fitPoints (≥2 WCS points; ≥3 when closed=true). Optional closed (creates a periodic spline without duplicating endpoints), degree (2..11, default 3), startTangent [dx,dy,(dz)] and endTangent [dx,dy,(dz)] (non-zero vectors, open splines), layer, colorIndex, layout (paper-space tab).")]
     public static Task<ForgeResult> DrawSpline(
         ForgeToolRunner runner,
         double[][] fitPoints,
@@ -325,12 +333,14 @@ public sealed class ForgeMcpTools
         double[]? endTangent = null,
         string? layer = null,
         int? colorIndex = null,
+        string? layout = null,
         bool dryRun = false,
+        string? document = null,
         CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_draw_spline", new { fitPoints, closed, degree, startTangent, endTangent, layer, colorIndex }, dryRun, cancellationToken: cancellationToken);
+        => runner.InvokeAsync("forge_draw_spline", new { fitPoints, closed, degree, startTangent, endTangent, layer, colorIndex, layout }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_draw_revcloud", Title = "Draw Revision Cloud", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
-    [Description("Draw an AEC revision cloud (closed polyline with outward arc lobes regardless of CW/CCW vertex winding) from EITHER polygon vertices (≥3) OR rectangular corners (p1, p2). Optional arcLength (>0; default = perimeter/24), bulgeMagnitude in (0,1] (default 0.52), constantWidth, layer, colorIndex.")]
+    [Description("Draw an AEC revision cloud (closed polyline with outward arc lobes regardless of CW/CCW vertex winding) from EITHER polygon vertices (≥3) OR rectangular corners (p1, p2). Optional arcLength (>0; default = perimeter/24), bulgeMagnitude in (0,1] (default 0.52), constantWidth, layer, colorIndex, layout (paper-space tab).")]
     public static Task<ForgeResult> DrawRevCloud(
         ForgeToolRunner runner,
         double[][]? vertices = null,
@@ -341,12 +351,14 @@ public sealed class ForgeMcpTools
         double? constantWidth = null,
         string? layer = null,
         int? colorIndex = null,
+        string? layout = null,
         bool dryRun = false,
+        string? document = null,
         CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_draw_revcloud", new { vertices, p1, p2, arcLength, bulgeMagnitude, constantWidth, layer, colorIndex }, dryRun, cancellationToken: cancellationToken);
+        => runner.InvokeAsync("forge_draw_revcloud", new { vertices, p1, p2, arcLength, bulgeMagnitude, constantWidth, layer, colorIndex, layout }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_draw_leader", Title = "Draw Leader", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
-    [Description("Draw a multi-leader (MLeader) callout: points (≥2 WCS points from arrow tip at points[0] to landing at points[last]), optional MText callout text, textHeight (>0, default 2.5), arrowSize (>0), hasArrowHead (default true; false suppresses the arrowhead), layer, colorIndex.")]
+    [Description("Draw a multi-leader (MLeader) callout: points (≥2 WCS points from arrow tip at points[0] to landing at points[last]), optional MText callout text, textHeight (>0, default 2.5), arrowSize (>0), hasArrowHead (default true; false suppresses the arrowhead), layer, colorIndex, layout (paper-space tab).")]
     public static Task<ForgeResult> DrawLeader(
         ForgeToolRunner runner,
         double[][] points,
@@ -356,12 +368,14 @@ public sealed class ForgeMcpTools
         bool hasArrowHead = true,
         string? layer = null,
         int? colorIndex = null,
+        string? layout = null,
         bool dryRun = false,
+        string? document = null,
         CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_draw_leader", new { points, text, textHeight, arrowSize, hasArrowHead, layer, colorIndex }, dryRun, cancellationToken: cancellationToken);
+        => runner.InvokeAsync("forge_draw_leader", new { points, text, textHeight, arrowSize, hasArrowHead, layer, colorIndex, layout }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_draw_table", Title = "Draw Table", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
-    [Description("Draw an AutoCAD Table (schedule/BOM/legend, max 10,000 cells): position [x,y,(z)], rows (2D string array of cells), optional title (prepends a merged title row above rows), hasTitleRow (when true without title, merges rows[0] across columns; when false, unmerges row 0), rowHeight (>0, default 8), columnWidths[] or uniform columnWidth (>0, default 30), textHeight (>0, default 2.5), layer, colorIndex.")]
+    [Description("Draw an AutoCAD Table (schedule/BOM/legend, max 10,000 cells): position [x,y,(z)], rows (2D string array of cells), optional title (prepends a merged title row above rows), hasTitleRow (when true without title, merges rows[0] across columns; when false, unmerges row 0), rowHeight (>0, default 8), columnWidths[] or uniform columnWidth (>0, default 30), textHeight (>0, default 2.5), layer, colorIndex, layout (paper-space tab).")]
     public static Task<ForgeResult> DrawTable(
         ForgeToolRunner runner,
         double[] position,
@@ -374,12 +388,14 @@ public sealed class ForgeMcpTools
         bool hasTitleRow = false,
         string? layer = null,
         int? colorIndex = null,
+        string? layout = null,
         bool dryRun = false,
+        string? document = null,
         CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_draw_table", new { position, rows, title, rowHeight, columnWidth, columnWidths, textHeight, hasTitleRow, layer, colorIndex }, dryRun, cancellationToken: cancellationToken);
+        => runner.InvokeAsync("forge_draw_table", new { position, rows, title, rowHeight, columnWidth, columnWidths, textHeight, hasTitleRow, layer, colorIndex, layout }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_draw_dimension", Title = "Draw Dimension", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
-    [Description("Draw a dimension: kind = linear (p1, p2, dimLinePoint, optional rotationDeg: 0=horizontal, 90=vertical) | aligned (p1, p2, dimLinePoint) | radius (p1=center, p2=pointOnCircle) | diameter (p1=center, p2=pointOnCircle; far chord point is computed at 2*p1-p2) | angular (vertex=angleVertex, p1=firstRayPoint, p2=secondRayPoint, dimLinePoint=arcPassThroughPoint — all 4 required) | ordinate (p1=featurePoint, dimLinePoint or p2=leaderEndPoint, useXAxis). Optional dimStyle (must exist), dimScale (>0), textOverride ('<>' keeps measured value), layer, colorIndex.")]
+    [Description("Draw a dimension: kind = linear (p1, p2, dimLinePoint, optional rotationDeg: 0=horizontal, 90=vertical) | aligned (p1, p2, dimLinePoint) | radius (p1=center, p2=pointOnCircle) | diameter (p1=center, p2=pointOnCircle; far chord point is computed at 2*p1-p2) | angular (vertex=angleVertex, p1=firstRayPoint, p2=secondRayPoint, dimLinePoint=arcPassThroughPoint — all 4 required) | ordinate (p1=featurePoint, dimLinePoint or p2=leaderEndPoint, useXAxis). Optional dimStyle (must exist), dimScale (>0), textOverride ('<>' keeps measured value), layer, colorIndex, layout (paper-space tab).")]
     public static Task<ForgeResult> DrawDimension(
         ForgeToolRunner runner,
         string kind,
@@ -394,64 +410,66 @@ public sealed class ForgeMcpTools
         string? textOverride = null,
         string? layer = null,
         int? colorIndex = null,
+        string? layout = null,
         bool dryRun = false,
+        string? document = null,
         CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_draw_dimension", new { kind, p1, p2, dimLinePoint, vertex, rotationDeg, useXAxis, dimStyle, dimScale, textOverride, layer, colorIndex }, dryRun, cancellationToken: cancellationToken);
+        => runner.InvokeAsync("forge_draw_dimension", new { kind, p1, p2, dimLinePoint, vertex, rotationDeg, useXAxis, dimStyle, dimScale, textOverride, layer, colorIndex, layout }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_draw_batch", Title = "Draw Batch", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
-    [Description("Draw up to 1000 entities in ONE call: steps[] of {tool: line|polyline|rectangle|polygon|circle|arc|ellipse|spline|revcloud|text|mtext|hatch|dimension|leader|block_insert, ...params}. Annotation keys: textStyle (text/mtext/leader), backgroundMask + maskScale 1–5 (mtext and leader text), leaderStyle (multileader style name), contentBlock + attributes (leader with a block tag bubble at the landing point), dimStyle (dimension kind linear|aligned|radius|diameter|angular|ordinate; rotationDeg rotates a linear dim), pattern/scale/angleDeg (hatch inside the given vertices; the closed boundary polyline is kept). Default: each step runs in its own nested transaction so a failed step never leaves partial geometry and the rest continue; all failing returns batch_all_failed. atomic=true validates every step first and creates everything in one transaction (all-or-nothing: batch_invalid / batch_aborted create nothing) — fastest for large batches. resultMode: full (default, per-step results), errors (failed steps + warnings only), summary (counts only, no handle list). Every result carries countsByType, elapsedMs and entitiesPerSecond. Example: [{\"tool\":\"rectangle\",\"p1\":[0,0],\"p2\":[100,50]},{\"tool\":\"leader\",\"points\":[[10,10],[30,25]],\"text\":\"SD-1\",\"backgroundMask\":true}].")]
-    public static Task<ForgeResult> DrawBatch(ForgeToolRunner runner, JsonElement[] steps, bool atomic = false, string? resultMode = null, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_draw_batch", new { steps, atomic, resultMode }, dryRun, cancellationToken: cancellationToken);
+    [Description("Draw up to 1000 entities in ONE call: steps[] of {tool: line|polyline|rectangle|polygon|circle|arc|ellipse|spline|revcloud|text|mtext|hatch|dimension|leader|block_insert, ...params}. Supports Paper Space via layout (batch-level or per-step), autoCreateLayers=true, trueColor [r,g,b], and hatch sendToBack. Annotation keys: textStyle (text/mtext/leader), backgroundMask + maskScale 1–5 (mtext and leader text), leaderStyle (multileader style name), contentBlock + attributes (leader with a block tag bubble at the landing point), dimStyle (dimension kind linear|aligned|radius|diameter|angular|ordinate; rotationDeg rotates a linear dim), pattern/scale/angleDeg (hatch inside the given vertices; the closed boundary polyline is kept). Default: each step runs in its own nested transaction so a failed step never leaves partial geometry and the rest continue; all failing returns batch_all_failed. atomic=true validates every step first and creates everything in one transaction (all-or-nothing: batch_invalid / batch_aborted create nothing) — fastest for large batches. resultMode: full (default, per-step results), errors (failed steps + warnings only), summary (counts only, no handle list). Every result carries countsByType, elapsedMs and entitiesPerSecond. Example: [{\"tool\":\"rectangle\",\"p1\":[0,0],\"p2\":[100,50]},{\"tool\":\"leader\",\"points\":[[10,10],[30,25]],\"text\":\"SD-1\",\"backgroundMask\":true}].")]
+    public static Task<ForgeResult> DrawBatch(ForgeToolRunner runner, JsonElement[] steps, bool atomic = false, string? resultMode = null, string? layout = null, bool autoCreateLayers = false, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_draw_batch", new { steps, atomic, resultMode, layout, autoCreateLayers }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_entity_get", Title = "Entity Get", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Read one entity by handle: returns {entity, kind, kindError?} with common summary (type, layer, color, linetype, lineweight, bbox) plus rich kind geometry (Line, Polyline with per-vertex widths up to 1000 vertices + truncated flag, Polyline2d/3d, Circle, Arc, Ellipse, Spline, DBText/MText with textStyle (+ MText backgroundMask), MLeader with backgroundMask/contentBlock, Table cells, Hatch area, Dimension measurement + dimStyleName, BlockReference attributes + dynamic effectiveName, Region area, Xline/Ray).")]
-    public static Task<ForgeResult> EntityGet(ForgeToolRunner runner, string handle, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_entity_get", new { handle }, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> EntityGet(ForgeToolRunner runner, string handle, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_entity_get", new { handle }, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_entity_list", Title = "Entity List", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("List model-space entities: exactly one of window [[x1,y1],[x2,y2]] or layer, optional exact type name (Line, Polyline, Circle, DBText...), maxEntities (default 1000). There is no select-all. includeBlocks=true also walks into block INSERTs (nested, transforms applied, xrefs via their INSERTs, blockDepth default 8 / max 32): nested rows add effectiveLayer (layer 0 shows on the INSERT's layer), depth, insertPath, blockPath and a world bbox; the window is tested in world coordinates and prunes INSERTs that miss it; the layer filter matches own or effective layer.")]
-    public static Task<ForgeResult> EntityList(ForgeToolRunner runner, double[][]? window = null, string? layer = null, string? type = null, int? maxEntities = null, bool includeBlocks = false, int? blockDepth = null, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_entity_list", new { window, layer, type, maxEntities, includeBlocks, blockDepth }, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> EntityList(ForgeToolRunner runner, double[][]? window = null, string? layer = null, string? type = null, int? maxEntities = null, bool includeBlocks = false, int? blockDepth = null, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_entity_list", new { window, layer, type, maxEntities, includeBlocks, blockDepth }, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_entity_move", Title = "Entity Move", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Move entities by explicit handles: delta [dx,dy,(dz)]. Pre-write backup + undo mark apply; read-back echoes the moved geometry.")]
-    public static Task<ForgeResult> EntityMove(ForgeToolRunner runner, string[] handles, double[] delta, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_entity_move", new { handles, delta }, dryRun, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> EntityMove(ForgeToolRunner runner, string[] handles, double[] delta, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_entity_move", new { handles, delta }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_entity_copy", Title = "Entity Copy", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Copy entities by explicit handles with delta [dx,dy,(dz)], copies=1..100 (copy n lands n×delta away). Returns the new handles.")]
-    public static Task<ForgeResult> EntityCopy(ForgeToolRunner runner, string[] handles, double[] delta, int copies = 1, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_entity_copy", new { handles, delta, copies }, dryRun, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> EntityCopy(ForgeToolRunner runner, string[] handles, double[] delta, int copies = 1, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_entity_copy", new { handles, delta, copies }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_entity_rotate", Title = "Entity Rotate", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Rotate entities by explicit handles about basePoint, angleDeg CCW around WCS Z. Pre-write backup + undo mark apply.")]
-    public static Task<ForgeResult> EntityRotate(ForgeToolRunner runner, string[] handles, double[] basePoint, double angleDeg, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_entity_rotate", new { handles, basePoint, angleDeg }, dryRun, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> EntityRotate(ForgeToolRunner runner, string[] handles, double[] basePoint, double angleDeg, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_entity_rotate", new { handles, basePoint, angleDeg }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_entity_scale", Title = "Entity Scale", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Uniformly scale entities by explicit handles about basePoint, factor > 0. Pre-write backup + undo mark apply.")]
-    public static Task<ForgeResult> EntityScale(ForgeToolRunner runner, string[] handles, double[] basePoint, double factor, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_entity_scale", new { handles, basePoint, factor }, dryRun, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> EntityScale(ForgeToolRunner runner, string[] handles, double[] basePoint, double factor, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_entity_scale", new { handles, basePoint, factor }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_entity_mirror", Title = "Entity Mirror", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Mirror entities by explicit handles about the axis through p1–p2 (WCS). eraseSource=true moves them to the mirrored position under new handles; default keeps both.")]
-    public static Task<ForgeResult> EntityMirror(ForgeToolRunner runner, string[] handles, double[] p1, double[] p2, bool eraseSource = false, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_entity_mirror", new { handles, p1, p2, eraseSource }, dryRun, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> EntityMirror(ForgeToolRunner runner, string[] handles, double[] p1, double[] p2, bool eraseSource = false, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_entity_mirror", new { handles, p1, p2, eraseSource }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_entity_offset", Title = "Entity Offset", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Offset one curve (line/polyline/arc/circle/ellipse handle) by distance (negative toward the closed side); read-back shows the resulting geometry class. Returns new handles.")]
-    public static Task<ForgeResult> EntityOffset(ForgeToolRunner runner, string handle, double distance, string? layer = null, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_entity_offset", new { handle, distance, layer }, dryRun, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> EntityOffset(ForgeToolRunner runner, string handle, double distance, string? layer = null, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_entity_offset", new { handle, distance, layer }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_entity_erase", Title = "Entity Erase", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Erase explicit entity handles (≤1000; >100 requires acknowledgeBulk=true). Dry-run first is recommended; undo mark + backup apply. There is no select-all.")]
-    public static Task<ForgeResult> EntityErase(ForgeToolRunner runner, string[] handles, bool acknowledgeBulk = false, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_entity_erase", new { handles, acknowledgeBulk }, dryRun, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> EntityErase(ForgeToolRunner runner, string[] handles, bool acknowledgeBulk = false, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_entity_erase", new { handles, acknowledgeBulk }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_entity_set_props", Title = "Entity Set Properties", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
-    [Description("Set properties on explicit entity handles: layer (must exist), colorIndex (0 ByBlock/1–255/256 ByLayer), linetype (must exist), lineweight (-3 default, -2 ByBlock, -1 ByLayer, 0–211 hundredths mm).")]
-    public static Task<ForgeResult> EntitySetProps(ForgeToolRunner runner, string[] handles, string? layer = null, int? colorIndex = null, string? linetype = null, int? lineweight = null, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_entity_set_props", new { handles, layer, colorIndex, linetype, lineweight }, dryRun, cancellationToken: cancellationToken);
+    [Description("Set properties on explicit entity handles: layer (must exist), colorIndex (0 ByBlock/1–255/256 ByLayer), trueColor [r,g,b] (24-bit RGB), linetype (must exist), lineweight (-3 default, -2 ByBlock, -1 ByLayer, 0–211 hundredths mm), constantWidth (Polyline global width >= 0), linetypeScale (> 0).")]
+    public static Task<ForgeResult> EntitySetProps(ForgeToolRunner runner, string[] handles, string? layer = null, int? colorIndex = null, int[]? trueColor = null, string? linetype = null, int? lineweight = null, double? constantWidth = null, double? linetypeScale = null, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_entity_set_props", new { handles, layer, colorIndex, trueColor, linetype, lineweight, constantWidth, linetypeScale }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_undo", Title = "Undo", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Undo the last tracked Forge write in the active drawing, verified by readback. Forge records what each write changed; this runs U, steps over empty, zoom/pan and plot side-effect undo steps, and returns undone=true only when the drawing reads back as reverted. Refuses without undoing when the drawing changed after that write (undo_target_changed_since_write) or the write was too large (undo_footprint_too_large). If an undo step would revert a change made outside Forge, or the revert is incomplete, every U of this call is redone and read back (undo_target_not_reverted / undo_incomplete / undo_step_failed, restored=true|false; the restore readback compares created/erased objects and the write's sysvars). undo_nothing_recorded: the write changed nothing; undo_failed: no Forge write to undo.")]
@@ -460,43 +478,60 @@ public sealed class ForgeMcpTools
 
     [McpServerTool(Name = "forge_block_create", Title = "Block Create", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Create a block definition from existing entities: basePoint becomes the insert origin; the source entities are consumed (cloned into the definition, originals erased in one transaction). Optional attributeDefs[{tag,prompt,height,position,invisible}].")]
-    public static Task<ForgeResult> BlockCreate(ForgeToolRunner runner, string name, double[] basePoint, string[] handles, BlockAttributeDefDto[]? attributeDefs = null, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_block_create", new { name, basePoint, handles, attributeDefs }, dryRun, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> BlockCreate(ForgeToolRunner runner, string name, double[] basePoint, string[] handles, BlockAttributeDefDto[]? attributeDefs = null, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_block_create", new { name, basePoint, handles, attributeDefs }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_block_insert", Title = "Block Insert", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Insert a block reference: name, position (WCS), uniform scale, rotationDeg, layer, attributes {tag: value}. Optional layout lands the insert on a paper-space tab (e.g. a title block on a sheet); omitted inserts to model space. Read-back echoes the applied attributes. Returns the insert handle.")]
-    public static Task<ForgeResult> BlockInsert(ForgeToolRunner runner, string name, double[] position, double scale = 1, double rotationDeg = 0, string? layer = null, string? layout = null, Dictionary<string, string>? attributes = null, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_block_insert", new { name, position, scale, rotationDeg, layer, layout, attributes }, dryRun, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> BlockInsert(ForgeToolRunner runner, string name, double[] position, double scale = 1, double rotationDeg = 0, string? layer = null, string? layout = null, Dictionary<string, string>? attributes = null, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_block_insert", new { name, position, scale, rotationDeg, layer, layout, attributes }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_block_list", Title = "Block List", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("List block definitions (not inserts): name, handle, origin, attribute tags. Use forge_block_list_attributes for the values on a specific insert.")]
-    public static Task<ForgeResult> BlockList(ForgeToolRunner runner, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_block_list", new { }, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> BlockList(ForgeToolRunner runner, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_block_list", new { }, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_layer_create", Title = "Layer Create", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Create a layer (colorIndex ACI 0–256 default 7, linetype must already exist, plottable). Idempotent: an existing layer returns alreadyExists=true. Draw tools require the layer to exist first.")]
-    public static Task<ForgeResult> LayerCreate(ForgeToolRunner runner, string name, int? colorIndex = null, string? linetype = null, bool plottable = true, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_layer_create", new { name, colorIndex, linetype, plottable }, dryRun, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> LayerCreate(ForgeToolRunner runner, string name, int? colorIndex = null, string? linetype = null, bool plottable = true, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_layer_create", new { name, colorIndex, linetype, plottable }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_layer_set", Title = "Layer Set", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Set one layer's state: isOn, isFrozen (refused on the current layer), isLocked, isPlottable, colorIndex, and/or makeCurrent. Read-back echoes the resulting state.")]
-    public static Task<ForgeResult> LayerSet(ForgeToolRunner runner, string name, bool? isOn = null, bool? isFrozen = null, bool? isLocked = null, bool? isPlottable = null, int? colorIndex = null, bool makeCurrent = false, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_layer_set", new { name, isOn, isFrozen, isLocked, isPlottable, colorIndex, makeCurrent }, dryRun, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> LayerSet(ForgeToolRunner runner, string name, bool? isOn = null, bool? isFrozen = null, bool? isLocked = null, bool? isPlottable = null, int? colorIndex = null, bool makeCurrent = false, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_layer_set", new { name, isOn, isFrozen, isLocked, isPlottable, colorIndex, makeCurrent }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_layer_delete", Title = "Layer Delete", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Delete one drawing layer. Dry-run by default — pass dryRun=false to actually delete. Refuses layer 0/Defpoints, the current layer, xref-dependent layers and layers still in use (reports occupant count and sample handles).")]
-    public static Task<ForgeResult> LayerDelete(ForgeToolRunner runner, string name, bool dryRun = true, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_layer_delete", new { name }, dryRun, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> LayerDelete(ForgeToolRunner runner, string name, bool dryRun = true, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_layer_delete", new { name }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_layout_create", Title = "Layout Create", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Create a paper-space layout tab by name. Refuses an existing name with layout_not_unique.")]
-    public static Task<ForgeResult> LayoutCreate(ForgeToolRunner runner, string name, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_layout_create", new { name }, dryRun, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> LayoutCreate(ForgeToolRunner runner, string name, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_layout_create", new { name }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_viewport_add", Title = "Viewport Add", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
-    [Description("Add a model-space viewport to a paper-space layout: layout, paper-space center [x,y], width, height. Optional scale (denominator, e.g. 50 for 1:50) and viewCenter [x,y] in model units. Read-back carries handle, number and applied customScale.")]
-    public static Task<ForgeResult> ViewportAdd(ForgeToolRunner runner, string layout, double[] center, double width, double height, double? scale = null, double[]? viewCenter = null, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_viewport_add", new { layout, center, width, height, scale, viewCenter }, dryRun, cancellationToken: cancellationToken);
+    [Description("Add a model-space viewport to a paper-space layout: layout, paper-space center [x,y], width, height. Optional scale (denominator, e.g. 500 for 1:500) + modelUnits ('mm'|'m', so 1:500 in a meter model automatically applies customScale=2.0), or explicit customScale, WCS viewCenter [x,y] (properly transformed into rotated DCS when twisted), twistDeg (ViewTwist) or alignAngleDeg (WCS corridor angle to render horizontally, twistDeg = -alignAngleDeg), locked, freezeLayers[], and clipBoundaryHandle. Read-back echoes wcsViewCenter, twistDeg, customScale, and locked.")]
+    public static Task<ForgeResult> ViewportAdd(
+        ForgeToolRunner runner,
+        string layout,
+        double[] center,
+        double width,
+        double height,
+        double? scale = null,
+        double? customScale = null,
+        string? modelUnits = null,
+        double[]? viewCenter = null,
+        double? twistDeg = null,
+        double? alignAngleDeg = null,
+        bool? locked = null,
+        string[]? freezeLayers = null,
+        string? clipBoundaryHandle = null,
+        bool dryRun = false,
+        string? document = null,
+        CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_viewport_add", new { layout, center, width, height, scale, customScale, modelUnits, viewCenter, twistDeg, alignAngleDeg, locked, freezeLayers, clipBoundaryHandle }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_doc_new", Title = "Drawing New", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Create a new document (optionally from a DWT/DWG templatePath) and make it the active document. Runs in application context (works from the Start tab). ok=true only when AutoCAD reads back the new drawing as the active document and DWGNAME names it; otherwise it fails with doc_new_unconfirmed and data shows which drawing is active.")]
@@ -505,28 +540,28 @@ public sealed class ForgeMcpTools
 
     [McpServerTool(Name = "forge_doc_export_dxf", Title = "Drawing Export DXF", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Export the in-memory drawing state (unsaved changes included) to a DXF file; overwrite acknowledgement + destination backup. Verification is a byte-count probe on the written file.")]
-    public static Task<ForgeResult> DocExportDxf(ForgeToolRunner runner, string outputPath, bool overwriteAcknowledged = false, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_doc_export_dxf", new { outputPath, overwriteAcknowledged }, dryRun, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> DocExportDxf(ForgeToolRunner runner, string outputPath, bool overwriteAcknowledged = false, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_doc_export_dxf", new { outputPath, overwriteAcknowledged }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_draw_polyline_from_csv", Title = "Draw Polyline from CSV", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Draw one polyline from a CSV of coordinates (columns xColumn/yColumn, delimiter, hasHeader; '.' decimals) — large survey/centerline point lists without token cost. Reports dropped lines.")]
-    public static Task<ForgeResult> DrawPolylineFromCsv(ForgeToolRunner runner, string csvPath, bool hasHeader = false, string? delimiter = null, int xColumn = 0, int yColumn = 1, bool closed = false, double? constantWidth = null, string? layer = null, int? colorIndex = null, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_draw_polyline_from_csv", new { csvPath, hasHeader, delimiter, xColumn, yColumn, closed, constantWidth, layer, colorIndex }, dryRun, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> DrawPolylineFromCsv(ForgeToolRunner runner, string csvPath, bool hasHeader = false, string? delimiter = null, int xColumn = 0, int yColumn = 1, bool closed = false, double? constantWidth = null, string? layer = null, int? colorIndex = null, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_draw_polyline_from_csv", new { csvPath, hasHeader, delimiter, xColumn, yColumn, closed, constantWidth, layer, colorIndex }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_measure_batch", Title = "Measure Batch", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("True measurement from the geometry engine (never re-read vertices): per-handle length/area/type/layer, pointDistance for p1+p2, and the bbox union of the handles.")]
-    public static Task<ForgeResult> MeasureBatch(ForgeToolRunner runner, string[]? handles = null, double[]? p1 = null, double[]? p2 = null, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_measure_batch", new { handles, p1, p2 }, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> MeasureBatch(ForgeToolRunner runner, string[]? handles = null, double[]? p1 = null, double[]? p2 = null, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_measure_batch", new { handles, p1, p2 }, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_entity_array", Title = "Entity Array", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Array entities by explicit handles. kind=rectangular: rows, columns, rowSpacing, colSpacing. kind=polar: center, count (2..5000), angleTotalDeg (default 360), rotateItems (default true). Sources untouched; returns new handles.")]
-    public static Task<ForgeResult> EntityArray(ForgeToolRunner runner, string[] handles, string kind, int? rows = null, int? columns = null, double? rowSpacing = null, double? colSpacing = null, double[]? center = null, int? count = null, double? angleTotalDeg = null, bool rotateItems = true, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_entity_array", new { handles, kind, rows, columns, rowSpacing, colSpacing, center, count, angleTotalDeg, rotateItems }, dryRun, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> EntityArray(ForgeToolRunner runner, string[] handles, string kind, int? rows = null, int? columns = null, double? rowSpacing = null, double? colSpacing = null, double[]? center = null, int? count = null, double? angleTotalDeg = null, bool rotateItems = true, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_entity_array", new { handles, kind, rows, columns, rowSpacing, colSpacing, center, count, angleTotalDeg, rotateItems }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_view_capture", Title = "View Capture", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Capture AutoCAD's main window to a PNG so the agent can LOOK at the drawing (PrintWindow works while the window is in the background, not minimized). fit=true zooms extents first; window=[[x1,y1],[x2,y2]] (world coordinates of the current space) zooms to that box instead, with padding (fraction per side, default 0.05). cropToDrawing=true crops to the drawing area (no ribbon/palettes). The zoom never runs _.ZOOM (undo untouched); the applied view (world box, center, size) is read back. Read the returned PNG path to visually verify work.")]
-    public static Task<ForgeResult> ViewCapture(ForgeToolRunner runner, string outputPath, bool fit = false, double[][]? window = null, double? padding = null, bool cropToDrawing = false, bool overwriteAcknowledged = false, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_view_capture", new { outputPath, fit, window, padding, cropToDrawing, overwriteAcknowledged }, dryRun, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> ViewCapture(ForgeToolRunner runner, string outputPath, bool fit = false, double[][]? window = null, double? padding = null, bool cropToDrawing = false, bool overwriteAcknowledged = false, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_view_capture", new { outputPath, fit, window, padding, cropToDrawing, overwriteAcknowledged }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_entity_fillet", Title = "Entity Fillet", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Fillet EITHER two coplanar Line handles (handle1, handle2, radius >= 0; radius=0 trims/extends both lines to a sharp corner) OR all straight corners of one Polyline handle (handle or handle1, radius > 0, preserving per-vertex widths and reporting filletedCorners/skippedCorners). When a line crosses the corner (X-intersection), pass pickPoint1/pickPoint2 [x,y] on the side to keep; otherwise the far endpoint survives.")]
@@ -794,14 +829,14 @@ public sealed class ForgeMcpTools
         => runner.InvokeAsync("forge_system_tool_profile", new { name }, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_viewport_list", Title = "Viewport List", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
-    [Description("List paper-space viewports with handle, layout, center, size, standard/custom scale, and lock state. Read-only.")]
-    public static Task<ForgeResult> ViewportList(ForgeToolRunner runner, string? layout = null, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_viewport_list", new { layout }, cancellationToken: cancellationToken);
+    [Description("List paper-space viewports with handle, layout, paper center, size, WCS viewCenter, twistDeg, standard/custom scale, lock state, non-rectangular clip handle, and frozenLayers[]. Read-only.")]
+    public static Task<ForgeResult> ViewportList(ForgeToolRunner runner, string? layout = null, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_viewport_list", new { layout }, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_viewport_set_layer_freeze", Title = "Viewport Set Layer Freeze", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Freeze or thaw a layer inside a specific viewport by handle (VP freeze), without changing global layer state.")]
-    public static Task<ForgeResult> ViewportSetLayerFreeze(ForgeToolRunner runner, string handle, string layer, bool freeze = true, bool dryRun = false, CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_viewport_set_layer_freeze", new { handle, layer, freeze }, dryRun, cancellationToken: cancellationToken);
+    public static Task<ForgeResult> ViewportSetLayerFreeze(ForgeToolRunner runner, string handle, string layer, bool freeze = true, bool dryRun = false, string? document = null, CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_viewport_set_layer_freeze", new { handle, layer, freeze }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_linework_dump", Title = "Linework Dump", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Extract CAD linework entities (line/polyline/arc[/circle]) as ordered vertices with handles. Source: live drawing (model space + xref contents) or a pl_dump.txt file via source=dumpFile. Layer matching is xref-prefix aware; use layerSuffix/layerMatch for explicit modes. The DEFAULT layerFilter keeps only pipe-like layers; pass layerFilter=\"*\" to read architecture/everything. includeBlocks=true walks into block INSERTs (nested, world transforms applied, MINSERT expanded, xrefs via their INSERTs; blockDepth default 8 / max 32; bbox [x1,y1,x2,y2] is world and prunes INSERTs that miss it; layer 0 content reports the INSERT's layer, ownLayer keeps the original); each entity then carries container (block:A>B) and insertPath, and blockTraversal reports what was walked/skipped.")]
@@ -1213,8 +1248,9 @@ public sealed class ForgeMcpTools
         string? dimStyle = null,
         int? colorIndex = null,
         bool dryRun = false,
+        string? document = null,
         CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_draw_grid", new { origin, xPositions, xSpacings, xLabels, yPositions, ySpacings, yLabels, extensionLength, bubbleRadius, bubbleSides, includeDimensions, layer, gridLayer, bubbleLayer, dimLayer, gridLinetype, dimStyle, colorIndex }, dryRun, cancellationToken: cancellationToken);
+        => runner.InvokeAsync("forge_draw_grid", new { origin, xPositions, xSpacings, xLabels, yPositions, ySpacings, yLabels, extensionLength, bubbleRadius, bubbleSides, includeDimensions, layer, gridLayer, bubbleLayer, dimLayer, gridLinetype, dimStyle, colorIndex }, dryRun, document: document, cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "forge_draw_wall", Title = "Draw Wall", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
     [Description("Draw a double-line architectural wall along a 2D centerline/reference path with clean mitered corners, end caps, optional door/window openings (each opening has segmentIndex, offsetFromStart, width — slices the wall with jamb end-caps and returns opening center + angleDeg for door/window block insertion), and optional associative hatch fill (same pattern order and readback as forge_draw_hatch; invalid_pattern or hatch_readback_mismatch rolls back the whole call). justification: 'center'|'left'|'right'.")]
@@ -1232,8 +1268,131 @@ public sealed class ForgeMcpTools
         string? hatchLayer = null,
         int? colorIndex = null,
         bool dryRun = false,
+        string? document = null,
         CancellationToken cancellationToken = default)
-        => runner.InvokeAsync("forge_draw_wall", new { vertices, thickness, justification, closed, openings, hatchPattern, hatchScale, hatchAngleDeg, layer, hatchLayer, colorIndex }, dryRun, cancellationToken: cancellationToken);
+        => runner.InvokeAsync("forge_draw_wall", new { vertices, thickness, justification, closed, openings, hatchPattern, hatchScale, hatchAngleDeg, layer, hatchLayer, colorIndex }, dryRun, document: document, cancellationToken: cancellationToken);
+
+    // ── V2 Big Update (2026-11): Zero-LISP sheet production, viewport twist/scale/lock, layout lifecycle, draw order, wipeout, raster images, civil stationing ──
+
+    [McpServerTool(Name = "forge_viewport_set", Title = "Viewport Set", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
+    [Description("Modify an existing Paper Space viewport in one transaction: paper center/width/height, WCS viewCenter (transformed into rotated DCS when twisted), twistDeg (ViewTwist) or alignAngleDeg (WCS corridor angle to render horizontally on paper, twistDeg = -alignAngleDeg), customScale or scale denominator + modelUnits ('mm'|'m', e.g. scale=500 + modelUnits='m' -> customScale=2.0), locked, isOn, freezeLayers[], thawLayers[], and clipBoundaryHandle. Automatically unlocks during edits and re-locks if requested. Returns full read-back.")]
+    public static Task<ForgeResult> ViewportSet(
+        ForgeToolRunner runner,
+        string handle,
+        double[]? center = null,
+        double? width = null,
+        double? height = null,
+        double[]? viewCenter = null,
+        double? twistDeg = null,
+        double? alignAngleDeg = null,
+        double? customScale = null,
+        double? scale = null,
+        string? modelUnits = null,
+        bool? locked = null,
+        bool? isOn = null,
+        string[]? freezeLayers = null,
+        string[]? thawLayers = null,
+        string? clipBoundaryHandle = null,
+        bool dryRun = false,
+        string? document = null,
+        CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_viewport_set", new { handle, center, width, height, viewCenter, twistDeg, alignAngleDeg, customScale, scale, modelUnits, locked, isOn, freezeLayers, thawLayers, clipBoundaryHandle }, dryRun, document: document, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_layout_manage", Title = "Layout Manage", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
+    [Description("Full Paper Space layout lifecycle: action = 'create' (name, optional eraseDefaultViewport=true), 'clone' (sourceLayout -> name in the same drawing, cloning all Paper Space entities, titleblocks, viewports, and PlotSettings), 'clone_from_template' (sourceTemplatePath + sourceLayout -> name via side-database WblockCloneObjects), 'rename' (name -> newName), 'delete' (name; refuses Model or last paper layout), 'reorder' (name + tabOrder, or orderedLayouts[]), or 'activate' (name).")]
+    public static Task<ForgeResult> LayoutManage(
+        ForgeToolRunner runner,
+        string action,
+        string? name = null,
+        string? newName = null,
+        string? sourceLayout = null,
+        string? sourceTemplatePath = null,
+        int? tabOrder = null,
+        string[]? orderedLayouts = null,
+        bool eraseDefaultViewport = true,
+        bool dryRun = false,
+        string? document = null,
+        CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_layout_manage", new { action, name, newName, sourceLayout, sourceTemplatePath, tabOrder, orderedLayouts, eraseDefaultViewport }, dryRun, document: document, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_entity_draworder", Title = "Entity Draw Order", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
+    [Description("Reorder visual stacking via DrawOrderTable in Model Space or a Paper Space layout: action = 'front' | 'back' | 'above' | 'below', handles[], and targetHandle (required for above/below). Essential for keeping solid hatches, wipeouts, and satellite rasters behind linework and annotations.")]
+    public static Task<ForgeResult> EntityDrawOrder(
+        ForgeToolRunner runner,
+        string action,
+        string[] handles,
+        string? targetHandle = null,
+        string? layout = null,
+        bool dryRun = false,
+        string? document = null,
+        CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_entity_draworder", new { layout, action, handles, targetHandle }, dryRun, document: document, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_draw_wipeout", Title = "Draw Wipeout", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
+    [Description("Create a polygonal Wipeout mask from vertices (≥3 [x,y] points) in Model Space or a Paper Space layout. Optional layer, frameMode ('off' | 'plot' | 'display_only'), and sendToBack. Returns the Wipeout handle.")]
+    public static Task<ForgeResult> DrawWipeout(
+        ForgeToolRunner runner,
+        double[][] vertices,
+        string? layout = null,
+        string? layer = null,
+        string? frameMode = null,
+        bool sendToBack = false,
+        bool dryRun = false,
+        string? document = null,
+        CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_draw_wipeout", new { layout, vertices, layer, frameMode, sendToBack }, dryRun, document: document, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_image_list", Title = "Image List", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
+    [Description("List all raster image definitions in ACAD_IMAGE_DICT (name, sourcePath, activePath, isLoaded, pathExists, pixelSize) and all RasterImage placements across layouts and blocks.")]
+    public static Task<ForgeResult> ImageList(
+        ForgeToolRunner runner,
+        string? document = null,
+        CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_image_list", new { }, document: document, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_image_attach", Title = "Image Attach", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
+    [Description("Attach a PNG/JPG/TIF raster image (titleblock logo, signature, keyplan, satellite map) into Model Space or a Paper Space layout: imagePath, position [x,y], optional width/height (auto-computes aspect ratio when only one is supplied), rotationDeg, name (ACAD_IMAGE_DICT key), layer, fade (0..100), and sendToBack. Enables RasterImage reactors so the image renders immediately.")]
+    public static Task<ForgeResult> ImageAttach(
+        ForgeToolRunner runner,
+        string imagePath,
+        double[] position,
+        double? width = null,
+        double? height = null,
+        double rotationDeg = 0,
+        string? name = null,
+        string? layout = null,
+        string? layer = null,
+        int fade = 0,
+        bool sendToBack = false,
+        bool dryRun = false,
+        string? document = null,
+        CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_image_attach", new { layout, name, imagePath, position, width, height, rotationDeg, layer, fade, sendToBack }, dryRun, document: document, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_image_repath", Title = "Image Repath", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
+    [Description("Fix broken raster image paths (e.g. missing titleblock logos) by updating RasterImageDef.SourceFileName and calling Load(): repath one definition via name + newPath, or auto-heal all broken images in the drawing by scanning searchDirectory for matching filenames.")]
+    public static Task<ForgeResult> ImageRepath(
+        ForgeToolRunner runner,
+        string? name = null,
+        string? newPath = null,
+        string? searchDirectory = null,
+        bool reload = true,
+        bool dryRun = false,
+        string? document = null,
+        CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_image_repath", new { name, newPath, searchDirectory, reload }, dryRun, document: document, cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "forge_curve_station", Title = "Curve Station", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(FreeFormObject))]
+    [Description("Civil/infrastructure curve stationing on any Curve handle (Polyline, Spline, Arc, Line): evaluate exact WCS point, tangent/normal vectors, tangentAngleDeg (for aligning bridges/structures), and formatted Km+mmm station at distances[] along the curve, and/or project arbitrary WCS points[] onto the curve for station + signed lateral offset (left > 0, right < 0).")]
+    public static Task<ForgeResult> CurveStation(
+        ForgeToolRunner runner,
+        string handle,
+        double startStation = 0,
+        double[]? distances = null,
+        double[][]? points = null,
+        string? document = null,
+        CancellationToken cancellationToken = default)
+        => runner.InvokeAsync("forge_curve_station", new { handle, startStation, distances, points }, document: document, cancellationToken: cancellationToken);
 }
 
 public sealed record CampaignEntryDto
@@ -1316,6 +1475,11 @@ public sealed record DrawStepDto
     public double? MaskScale { get; init; }
     public string? LeaderStyle { get; init; }
     public string? ContentBlock { get; init; }
+
+    // V2 Big Update: per-step Paper Space layout, TrueColor RGB, and hatch sendToBack.
+    public string? Layout { get; init; }
+    public int[]? TrueColor { get; init; }
+    public bool? SendToBack { get; init; }
 }
 
 public sealed record BlockAttributeDefDto

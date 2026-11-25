@@ -271,7 +271,15 @@ public sealed partial class PluginCommandProcessor
             "forge_pack_status" => PackStatus(command),
             "forge_system_tool_profile" => ToolProfile(command),
             "forge_viewport_list" => ViewportList(command),
+            "forge_viewport_set" => ViewportSet(command),
             "forge_viewport_set_layer_freeze" => ViewportSetLayerFreeze(command),
+            "forge_layout_manage" => LayoutManage(command),
+            "forge_entity_draworder" => EntityDrawOrder(command),
+            "forge_draw_wipeout" => DrawWipeout(command),
+            "forge_image_list" => ImageList(command),
+            "forge_image_attach" => ImageAttach(command),
+            "forge_image_repath" => ImageRepath(command),
+            "forge_curve_station" => CurveStation(command),
             "forge_linework_dump" => LineworkDump(command),
             "forge_linework_trace" => LineworkTrace(command),
             "forge_linework_topology" => LineworkTopology(command),
@@ -1793,6 +1801,8 @@ public sealed partial class PluginCommandProcessor
         return tokens.ToArray();
     }
 
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Script<object?>> DotNetScriptCache = new(StringComparer.Ordinal);
+
     private static ForgeResult ExecDotNet(ForgeCommand command)
     {
         var args = Args<ExecDotNetArgs>(command);
@@ -1820,19 +1830,32 @@ public sealed partial class PluginCommandProcessor
                 "Use synchronous snippets only, or promote the workflow into a typed tool.");
         }
 
-        var options = ScriptOptions.Default
-            .AddReferences(typeof(Application).Assembly, typeof(Database).Assembly, typeof(Editor).Assembly)
-            .AddImports(
-                "System",
-                "System.Linq",
-                "Autodesk.AutoCAD.ApplicationServices",
-                "Autodesk.AutoCAD.DatabaseServices",
-                "Autodesk.AutoCAD.EditorInput",
-                "Autodesk.AutoCAD.Geometry");
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(args.Code)));
+        var script = DotNetScriptCache.GetOrAdd(hash, _ =>
+        {
+            var options = ScriptOptions.Default
+                .AddReferences(
+                    typeof(object).Assembly,
+                    typeof(Enumerable).Assembly,
+                    typeof(Application).Assembly,
+                    typeof(Database).Assembly,
+                    typeof(Editor).Assembly,
+                    typeof(ForgeCommand).Assembly)
+                .AddImports(
+                    "System",
+                    "System.Linq",
+                    "System.Collections.Generic",
+                    "Autodesk.AutoCAD.ApplicationServices",
+                    "Autodesk.AutoCAD.DatabaseServices",
+                    "Autodesk.AutoCAD.EditorInput",
+                    "Autodesk.AutoCAD.Geometry",
+                    "Autodesk.AutoCAD.Colors");
+            return CSharpScript.Create<object?>(args.Code, options, typeof(DotNetScriptGlobals));
+        });
 
         var globals = new DotNetScriptGlobals(ActiveDoc, ActiveDb, ActiveEditor);
-        var result = CSharpScript.EvaluateAsync<object?>(args.Code, options, globals).GetAwaiter().GetResult();
-        return ForgeResult.Success(command.Id, new { result });
+        var state = script.RunAsync(globals).GetAwaiter().GetResult();
+        return ForgeResult.Success(command.Id, new { result = state.ReturnValue });
     }
 
     private static bool ContainsAwait(string code)

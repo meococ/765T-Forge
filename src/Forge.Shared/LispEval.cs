@@ -33,6 +33,10 @@ public static class LispCodes
     public const int RtT = 5021;
     public const int RtInt64 = 5031;
 
+    /// <summary>accore.dll x64 acedEvaluateLisp returns BOOL 1 (TRUE) on RTNORM and 0 (FALSE) on failure.</summary>
+    public const int EvalFalse = 0;
+    public const int EvalTrue = 1;
+
     public const int RtNorm = 5100;
     public const int RtError = -5001;
     public const int RtCancel = -5002;
@@ -41,8 +45,12 @@ public static class LispCodes
     public const int RtKeyword = -5005;
     public const int RtInputTruncated = -5008;
 
+    public static bool IsSuccess(int status) => status is EvalTrue or RtNorm;
+
     public static string StatusName(int status) => status switch
     {
+        EvalFalse => "FALSE",
+        EvalTrue => "TRUE",
         RtNorm => "RTNORM",
         RtError => "RTERROR",
         RtCancel => "RTCAN",

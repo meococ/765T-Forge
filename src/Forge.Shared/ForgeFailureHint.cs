@@ -20,7 +20,10 @@ public static class ForgeFailureHint
     private const string TransientHint =
         "Transport did not reach the plugin — one retry is reasonable; then check forge_system_health.";
 
-    public static bool IsRetryable(string? code) => code is "plugin_connect_timeout" or "plugin_unavailable";
+    private const string CommandActiveHint =
+        "AutoCAD is currently in an interactive command or modal prompt — press ESC in AutoCAD (or wait for the command to finish) and retry.";
+
+    public static bool IsRetryable(string? code) => code is "plugin_connect_timeout" or "plugin_unavailable" or "acad_command_active";
 
     public static ForgeError? Annotate(ForgeError? error)
     {
@@ -35,11 +38,13 @@ public static class ForgeFailureHint
         }
 
         var retryable = error.Retryable ?? IsRetryable(error.Code);
-        var hint = error.Hint ?? (retryable
-            ? TransientHint
-            : error.Code is "plugin_request_timeout" or "plugin_response_timeout" or "plugin_request_stale"
-                ? TimeoutHint
-                : NonRetryableHint);
+        var hint = error.Hint ?? (error.Code == "acad_command_active"
+            ? CommandActiveHint
+            : retryable
+                ? TransientHint
+                : error.Code is "plugin_request_timeout" or "plugin_response_timeout" or "plugin_request_stale"
+                    ? TimeoutHint
+                    : NonRetryableHint);
         return error with { Retryable = retryable, Hint = hint };
     }
 

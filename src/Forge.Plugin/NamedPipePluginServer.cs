@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.IO.Pipes;
+using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
@@ -10,11 +12,18 @@ namespace Forge.Plugin;
 
 public sealed class NamedPipePluginServer : IDisposable
 {
+    private const uint WmNull = 0x0000;
+    private const int MaxConcurrentPipeClients = 16;
+
+    [DllImport("user32.dll", SetLastError = false)]
+    private static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
     // Document-free dispatch is decided by Forge.Shared.DocumentContextPolicy.Route (D13): the
     // document-free tool set and both fail-fast codes live there. Every lane authenticates via
     // PluginCommandProcessor.VerifyToken before routing (review-wp2-r1 finding 1).
     private readonly ForgeEnvironment _environment;
     private readonly PluginCommandProcessor _processor;
+    private readonly SemaphoreSlim _mainThreadGate = new(1, 1);
     private readonly CancellationTokenSource _shutdown = new();
     private Task? _loop;
     // review-d14-r1 F6: mirrors the in-flight DGN runs from the Idle lane so Terminate can
@@ -94,21 +103,27 @@ public sealed class NamedPipePluginServer : IDisposable
 
     private async Task AcceptLoopAsync(CancellationToken cancellationToken)
     {
+        var activeHandlers = new List<Task>();
         while (!cancellationToken.IsCancellationRequested)
         {
             NamedPipeServerStream? pipe = null;
             try
             {
+                activeHandlers.RemoveAll(t => t.IsCompleted);
                 pipe = CreatePipe();
                 await pipe.WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
-                await HandleRequestAsync(pipe, cancellationToken).ConfigureAwait(false);
+                var connectedPipe = pipe;
+                pipe = null; // Ownership transferred to client task
+                activeHandlers.Add(HandleClientConnectionAsync(connectedPipe, cancellationToken));
             }
             catch (OperationCanceledException)
             {
+                pipe?.Dispose();
                 break;
             }
             catch (Exception ex)
             {
+                pipe?.Dispose();
                 TryWriteEditorMessage($"\n[765T-Forge] Pipe error: {ex.Message}");
                 // A persistent failure (e.g. another process holding the pipe name) must not
                 // turn into a tight retry spin.
@@ -121,10 +136,42 @@ public sealed class NamedPipePluginServer : IDisposable
                     break;
                 }
             }
-            finally
+        }
+    }
+
+    private async Task HandleClientConnectionAsync(NamedPipeServerStream pipe, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await HandleRequestAsync(pipe, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown.
+        }
+        catch (Exception ex)
+        {
+            TryWriteEditorMessage($"\n[765T-Forge] Client handler error: {ex.Message}");
+        }
+        finally
+        {
+            pipe.Dispose();
+        }
+    }
+
+    private static void WakeAutoCadMessagePump()
+    {
+        try
+        {
+            var hwnd = Application.MainWindow.Handle;
+            if (hwnd != IntPtr.Zero)
             {
-                pipe?.Dispose();
+                PostMessage(hwnd, WmNull, IntPtr.Zero, IntPtr.Zero);
             }
+        }
+        catch
+        {
+            // Ignore when MainWindow is not yet initialized or tearing down.
         }
     }
 
@@ -146,7 +193,7 @@ public sealed class NamedPipePluginServer : IDisposable
         return NamedPipeServerStreamAcl.Create(
             _environment.PipeName,
             PipeDirection.InOut,
-            maxNumberOfServerInstances: 1,
+            maxNumberOfServerInstances: MaxConcurrentPipeClients,
             PipeTransmissionMode.Byte,
             PipeOptions.Asynchronous,
             inBufferSize: 0,
@@ -205,24 +252,34 @@ public sealed class NamedPipePluginServer : IDisposable
         }
         else
         {
-            // Long-running tools emit forge_progress lines through this reporter; the Forge
-            // server skips them while reading the reply and forwards them as MCP progress.
-            // compat-progress-flag: emit ONLY when the request asks for it — servers older
-            // than core v2 read exactly one line and would take a progress line as the reply.
-            PluginCommandProcessor.Progress = command.Progress
-                ? new PipeProgressReporter(writer, command.Id)
-                : null;
-            Task<ForgeResult> work;
+            await _mainThreadGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                work = ExecuteOnMainThreadAsync(command);
-            }
-            catch (Exception ex)
-            {
-                work = Task.FromResult(ForgeResult.Failure(command.Id, "plugin_exception", ex.Message));
-            }
+                // Long-running tools emit forge_progress lines through this reporter; the Forge
+                // server skips them while reading the reply and forwards them as MCP progress.
+                // compat-progress-flag: emit ONLY when the request asks for it — servers older
+                // than core v2 read exactly one line and would take a progress line as the reply.
+                PluginCommandProcessor.Progress = command.Progress
+                    ? new PipeProgressReporter(writer, command.Id)
+                    : null;
+                Task<ForgeResult> work;
+                try
+                {
+                    work = ExecuteOnMainThreadAsync(command);
+                    WakeAutoCadMessagePump();
+                }
+                catch (Exception ex)
+                {
+                    work = Task.FromResult(ForgeResult.Failure(command.Id, "plugin_exception", ex.Message));
+                }
 
-            result = await AwaitWithWatchdogAsync(work, cancellationToken).ConfigureAwait(false);
+                result = await AwaitWithWatchdogAsync(work, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                PluginCommandProcessor.Progress = null;
+                _mainThreadGate.Release();
+            }
         }
 
         try
@@ -254,20 +311,39 @@ public sealed class NamedPipePluginServer : IDisposable
     private async Task<ForgeResult> AwaitWithWatchdogAsync(Task<ForgeResult> work, CancellationToken cancellationToken)
     {
         var deadline = RequestDeadline;
-        var completed = await Task.WhenAny(work, Task.Delay(deadline, cancellationToken)).ConfigureAwait(false);
-        if (completed == work)
+        using var pumpCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var pumpTask = PumpIdleWakeupsAsync(work, pumpCts.Token);
+        try
         {
-            return await work.ConfigureAwait(false);
-        }
+            var completed = await Task.WhenAny(work, Task.Delay(deadline, cancellationToken)).ConfigureAwait(false);
+            if (completed == work)
+            {
+                return await work.ConfigureAwait(false);
+            }
 
-        // Propagates OperationCanceledException on shutdown; an elapsed deadline falls through
-        // to the typed timeout below.
-        await completed.ConfigureAwait(false);
-        return ForgeResult.Failure(
-            "",
-            "plugin_request_timeout",
-            $"The plugin abandoned the request after {deadline.TotalSeconds:0}s because AutoCAD did not return a result.",
-            "Do not blindly retry non-idempotent writes. Call forge_qa_readback_after_timeout to check whether the operation committed, or raise FORGE_PLUGIN_RESPONSE_TIMEOUT_SECONDS for long-running tools.");
+            // Propagates OperationCanceledException on shutdown; an elapsed deadline falls through
+            // to the typed timeout below.
+            await completed.ConfigureAwait(false);
+            return ForgeResult.Failure(
+                "",
+                "plugin_request_timeout",
+                $"The plugin abandoned the request after {deadline.TotalSeconds:0}s because AutoCAD did not return a result.",
+                "Do not blindly retry non-idempotent writes. Call forge_qa_readback_after_timeout to check whether the operation committed, or raise FORGE_PLUGIN_RESPONSE_TIMEOUT_SECONDS for long-running tools.");
+        }
+        finally
+        {
+            pumpCts.Cancel();
+            try { await pumpTask.ConfigureAwait(false); } catch { /* ignore cancellation */ }
+        }
+    }
+
+    private static async Task PumpIdleWakeupsAsync(Task work, CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(200));
+        while (!work.IsCompleted && await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+        {
+            WakeAutoCadMessagePump();
+        }
     }
 
     private Task<ForgeResult> ExecuteOnMainThreadAsync(ForgeCommand command)

@@ -147,7 +147,9 @@ public sealed class ToolsetTests
     internal static string FindServerExe()
     {
         var bin = PluginDispatchSyncTests.RepoPath("src", "Forge.Server", "bin");
-        foreach (var config in new[] { "Debug", "Release" })
+        var preferRelease = AppContext.BaseDirectory.Contains(Path.DirectorySeparatorChar + "Release" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        var configs = preferRelease ? new[] { "Release", "Debug" } : new[] { "Debug", "Release" };
+        foreach (var config in configs)
         {
             var candidate = Path.Combine(bin, config, "net8.0", "Forge.Server.exe");
             if (File.Exists(candidate))

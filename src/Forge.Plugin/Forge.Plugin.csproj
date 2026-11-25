@@ -3,6 +3,7 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <AutoCadRoot Condition="'$(AUTOCAD_2026_ROOT)' != ''">$(AUTOCAD_2026_ROOT)</AutoCadRoot>
     <AutoCadRoot Condition="'$(AutoCadRoot)' == ''">C:\Program Files\Autodesk\AutoCAD 2026</AutoCadRoot>
     <!-- Job wave C2: the year this build targets, stamped as assembly

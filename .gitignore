@@ -55,6 +55,7 @@ artifactsverify*/
 
 # Deploy output (scripts/deploy-server.ps1) - never committed
 /deploy/
+plugin-bundle/765T-Forge.bundle/Contents/
 
 # Local LISP scratch / internal job scripts (never ship in product repo)
 lisp-lib/

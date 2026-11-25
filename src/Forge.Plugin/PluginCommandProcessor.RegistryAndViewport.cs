@@ -164,20 +164,12 @@ public sealed partial class PluginCommandProcessor
                     continue;
                 }
 
-                list.Add(new
-                {
-                    handle = vp.Handle.Value.ToString("X"),
-                    number = vp.Number,
-                    layout = layoutName,
-                    customScale = vp.CustomScale,
-                    locked = vp.Locked,
-                    on = vp.On
-                });
+                list.Add(BuildViewportReadBack(tr, vp, layoutName));
             }
         }
 
         tr.Commit();
-        return ForgeResult.Success(command.Id, new { viewports = list });
+        return ForgeResult.Success(command.Id, new { viewports = list, count = list.Count });
     }
 
     private static ForgeResult ViewportSetLayerFreeze(ForgeCommand command)

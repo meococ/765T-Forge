@@ -535,11 +535,13 @@ public sealed partial class PluginCommandProcessor
         var opened = OpenHandlesForWrite(db, tr, args.Handles!, unknown, locked);
         if (opened.Count == 0)
         {
+            var diagnostics = DiagnoseHandleLocations(db, tr, unknown);
             return ForgeResult.Failure(
                 command.Id,
                 locked.Count > 0 ? "layer_locked" : "handle_not_found",
                 locked.Count > 0 ? "All target entities are on locked layers." : "No valid layout entities found for the supplied handles.",
-                data: new { unknownHandles = unknown, lockedHandles = locked });
+                diagnostics.Length > 0 ? "Some handles live inside block definitions rather than a layout — freeze their layer in the viewport or redefine the owning block." : null,
+                data: new { unknownHandles = unknown, lockedHandles = locked, handleLocations = diagnostics });
         }
 
         var displacement = Matrix3d.Displacement(delta);
@@ -663,11 +665,13 @@ public sealed partial class PluginCommandProcessor
         var opened = OpenHandlesForWrite(db, tr, args.Handles!, unknown, locked);
         if (opened.Count == 0)
         {
+            var diagnostics = DiagnoseHandleLocations(db, tr, unknown);
             return ForgeResult.Failure(
                 command.Id,
                 locked.Count > 0 ? "layer_locked" : "handle_not_found",
                 locked.Count > 0 ? "All target entities are on locked layers." : "No valid layout entities found for the supplied handles.",
-                data: new { unknownHandles = unknown, lockedHandles = locked });
+                diagnostics.Length > 0 ? "Some handles live inside block definitions rather than a layout — freeze their layer in the viewport or redefine the owning block." : null,
+                data: new { unknownHandles = unknown, lockedHandles = locked, handleLocations = diagnostics });
         }
 
         // Degrees at the boundary, radians inside; CCW positive about the WCS Z axis.
@@ -725,11 +729,13 @@ public sealed partial class PluginCommandProcessor
         var opened = OpenHandlesForWrite(db, tr, args.Handles!, unknown, locked);
         if (opened.Count == 0)
         {
+            var diagnostics = DiagnoseHandleLocations(db, tr, unknown);
             return ForgeResult.Failure(
                 command.Id,
                 locked.Count > 0 ? "layer_locked" : "handle_not_found",
                 locked.Count > 0 ? "All target entities are on locked layers." : "No valid layout entities found for the supplied handles.",
-                data: new { unknownHandles = unknown, lockedHandles = locked });
+                diagnostics.Length > 0 ? "Some handles live inside block definitions rather than a layout — freeze their layer in the viewport or redefine the owning block." : null,
+                data: new { unknownHandles = unknown, lockedHandles = locked, handleLocations = diagnostics });
         }
 
         var scaling = Matrix3d.Scaling(args.Factor, basePoint);
@@ -788,11 +794,13 @@ public sealed partial class PluginCommandProcessor
         var opened = OpenHandlesForWrite(db, tr, args.Handles!, unknown, locked);
         if (opened.Count == 0)
         {
+            var diagnostics = DiagnoseHandleLocations(db, tr, unknown);
             return ForgeResult.Failure(
                 command.Id,
                 locked.Count > 0 ? "layer_locked" : "handle_not_found",
                 locked.Count > 0 ? "All target entities are on locked layers." : "No valid layout entities found for the supplied handles.",
-                data: new { unknownHandles = unknown, lockedHandles = locked });
+                diagnostics.Length > 0 ? "Some handles live inside block definitions rather than a layout — freeze their layer in the viewport or redefine the owning block." : null,
+                data: new { unknownHandles = unknown, lockedHandles = locked, handleLocations = diagnostics });
         }
 
         // Reflect across the vertical plane containing p1–p2 (det = -1). Unlike Matrix3d.Mirroring(Line3d)
@@ -928,11 +936,13 @@ public sealed partial class PluginCommandProcessor
         var opened = OpenHandlesForWrite(db, tr, args.Handles, unknown, locked);
         if (opened.Count == 0)
         {
+            var diagnostics = DiagnoseHandleLocations(db, tr, unknown);
             return ForgeResult.Failure(
                 command.Id,
                 locked.Count > 0 ? "layer_locked" : "handle_not_found",
                 locked.Count > 0 ? "All target entities are on locked layers." : "No valid layout entities found for the supplied handles.",
-                data: new { unknownHandles = unknown, lockedHandles = locked });
+                diagnostics.Length > 0 ? "Some handles live inside block definitions rather than a layout — freeze their layer in the viewport or redefine the owning block." : null,
+                data: new { unknownHandles = unknown, lockedHandles = locked, handleLocations = diagnostics });
         }
 
         foreach (var entity in opened)
@@ -957,9 +967,15 @@ public sealed partial class PluginCommandProcessor
 
         var setLayer = !string.IsNullOrWhiteSpace(args.Layer);
         var setLinetype = !string.IsNullOrWhiteSpace(args.Linetype);
-        if (!setLayer && args.ColorIndex is null && !setLinetype && args.Lineweight is null)
+        var setTrueColor = args.TrueColor is not null;
+        if (!setLayer && args.ColorIndex is null && !setTrueColor && !setLinetype && args.Lineweight is null && args.ConstantWidth is null && args.LinetypeScale is null)
         {
-            return ForgeResult.Failure(command.Id, "missing_props", "At least one of layer, colorIndex, linetype or lineweight is required.");
+            return ForgeResult.Failure(command.Id, "missing_props", "At least one of layer, colorIndex, trueColor, linetype, lineweight, constantWidth or linetypeScale is required.");
+        }
+
+        if (setTrueColor && (args.TrueColor!.Length != 3 || args.TrueColor.Any(c => c is < 0 or > 255)))
+        {
+            return ForgeResult.Failure(command.Id, "invalid_color", "trueColor must be [r, g, b] with each channel in 0..255.");
         }
 
         if (args.Lineweight is { } lineweight && lineweight is < -3 or > 211)
@@ -967,9 +983,19 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, "invalid_lineweight", "lineweight must be -3 (default), -2 (ByBlock), -1 (ByLayer) or 0–211 (hundredths of a millimeter).");
         }
 
+        if (args.ConstantWidth is < 0)
+        {
+            return ForgeResult.Failure(command.Id, "invalid_args", "constantWidth must be >= 0.");
+        }
+
+        if (args.LinetypeScale is <= 0)
+        {
+            return ForgeResult.Failure(command.Id, "invalid_args", "linetypeScale must be > 0.");
+        }
+
         if (command.DryRun)
         {
-            return DryRun(command, new { handles = args.Handles, args.Layer, args.ColorIndex, args.Linetype, args.Lineweight });
+            return DryRun(command, new { handles = args.Handles, args.Layer, args.ColorIndex, args.TrueColor, args.Linetype, args.Lineweight, args.ConstantWidth, args.LinetypeScale });
         }
 
         var db = ActiveDb;
@@ -989,11 +1015,13 @@ public sealed partial class PluginCommandProcessor
         var opened = OpenHandlesForWrite(db, tr, args.Handles!, unknown, locked);
         if (opened.Count == 0)
         {
+            var diagnostics = DiagnoseHandleLocations(db, tr, unknown);
             return ForgeResult.Failure(
                 command.Id,
                 locked.Count > 0 ? "layer_locked" : "handle_not_found",
                 locked.Count > 0 ? "All target entities are on locked layers." : "No valid layout entities found for the supplied handles.",
-                data: new { unknownHandles = unknown, lockedHandles = locked });
+                diagnostics.Length > 0 ? "Some handles live inside block definitions rather than a layout — freeze their layer in the viewport or redefine the owning block." : null,
+                data: new { unknownHandles = unknown, lockedHandles = locked, handleLocations = diagnostics });
         }
 
         var updated = 0;
@@ -1005,7 +1033,7 @@ public sealed partial class PluginCommandProcessor
                 entity.Layer = args.Layer!;
             }
 
-            ApplyColor(entity, args.ColorIndex);
+            ApplyColor(entity, args.ColorIndex, args.TrueColor);
             if (setLinetype)
             {
                 entity.Linetype = args.Linetype!;
@@ -1016,16 +1044,26 @@ public sealed partial class PluginCommandProcessor
                 entity.LineWeight = (LineWeight)weight;
             }
 
+            if (args.LinetypeScale is { } ltScale)
+            {
+                entity.LinetypeScale = ltScale;
+            }
+
+            if (args.ConstantWidth is { } cw && entity is Polyline pl)
+            {
+                pl.ConstantWidth = cw;
+            }
+
             updated++;
-            // EntitySummary has no linetype/lineweight fields, so the read-back repeats the
-            // full property set for these props.
             readBack.Add(new
             {
                 handle = HandleString(entity),
                 type = entity.GetType().Name,
                 layer = entity.Layer,
                 color = (int)entity.Color.ColorIndex,
+                rgb = entity.Color.IsByAci ? null : new[] { (int)entity.Color.Red, (int)entity.Color.Green, (int)entity.Color.Blue },
                 linetype = entity.Linetype,
+                linetypeScale = entity.LinetypeScale,
                 lineweight = (short)entity.LineWeight
             });
         }
@@ -2550,7 +2588,7 @@ public sealed partial class PluginCommandProcessor
     private sealed record EntityMirrorArgs { public string[]? Handles { get; init; } public double[]? P1 { get; init; } public double[]? P2 { get; init; } public bool EraseSource { get; init; } }
     private sealed record EntityOffsetArgs { public string? Handle { get; init; } public double Distance { get; init; } public string? Layer { get; init; } }
     private sealed record EntityEraseArgs { public string[]? Handles { get; init; } public bool AcknowledgeBulk { get; init; } }
-    private sealed record EntitySetPropsArgs { public string[]? Handles { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } public string? Linetype { get; init; } public int? Lineweight { get; init; } }
+    private sealed record EntitySetPropsArgs { public string[]? Handles { get; init; } public string? Layer { get; init; } public int? ColorIndex { get; init; } public int[]? TrueColor { get; init; } public string? Linetype { get; init; } public int? Lineweight { get; init; } public double? ConstantWidth { get; init; } public double? LinetypeScale { get; init; } }
     private sealed record EntityFilletArgs { public string? Handle { get; init; } public string? Handle1 { get; init; } public string? Handle2 { get; init; } public double Radius { get; init; } public double[]? PickPoint1 { get; init; } public double[]? PickPoint2 { get; init; } public string? Layer { get; init; } }
     private sealed record EntityChamferArgs { public string? Handle1 { get; init; } public string? Handle2 { get; init; } public double Distance1 { get; init; } public double? Distance2 { get; init; } public double[]? PickPoint1 { get; init; } public double[]? PickPoint2 { get; init; } public string? Layer { get; init; } }
     private sealed record EntityTrimArgs { public string? TargetHandle { get; init; } public string[]? CuttingHandles { get; init; } public double[]? PickPoint { get; init; } public double[]? KeepPoint { get; init; } }

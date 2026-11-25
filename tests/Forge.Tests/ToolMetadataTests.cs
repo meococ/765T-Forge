@@ -92,7 +92,7 @@ public sealed class ToolMetadataTests
                      "forge_draw_rectangle", "forge_draw_polygon", "forge_draw_ellipse", "forge_draw_spline",
                      "forge_draw_revcloud", "forge_draw_leader", "forge_draw_table",
                      "forge_linetype_load",
-                     "forge_draw_grid", "forge_draw_wall"
+                     "forge_draw_grid", "forge_draw_wall", "forge_draw_wipeout"
                  })
         {
             var tool = ForgeToolRegistry.Get(name);
