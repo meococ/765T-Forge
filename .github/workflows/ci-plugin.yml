@@ -32,7 +32,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configure runner-local .NET install dir
-        shell: powershell
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
         run: |
           $workspaceParent = Split-Path -Parent $env:GITHUB_WORKSPACE
           $dotnetDir = Join-Path $workspaceParent ".dotnet"
@@ -45,7 +45,7 @@ jobs:
           global-json-file: global.json
 
       - name: Build plugin
-        shell: powershell
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
         run: |
           if (-not $env:AUTOCAD_2026_ROOT) {
             Write-Host "AUTOCAD_2026_ROOT not set - optional if the year's default root exists (build-plugin.ps1 -Year); build-plugin.ps1 falls back to the build/AutoCadYears.props root for the selected year."
@@ -53,7 +53,7 @@ jobs:
           .\scripts\build-plugin.ps1 -Configuration Release -OutDir artifacts\Forge.Plugin\
 
       - name: Pack plugin zip
-        shell: powershell
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
         run: |
           .\scripts\pack-release.ps1 -Configuration Release
           # pack-release also publishes server; upload plugin zip only here
