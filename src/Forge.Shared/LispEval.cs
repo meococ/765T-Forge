@@ -522,7 +522,7 @@ public static class LispValueConverter
             case LispCodes.Rt3dPoint:
                 if (atom.Value is double[] pt)
                 {
-                    sb.Append('(').Append(string.Join(' ', pt.Select(RealText))).Append(')');
+                    sb.Append('(').Append(string.Join(" ", pt.Select(RealText))).Append(')');
                 }
                 else
                 {

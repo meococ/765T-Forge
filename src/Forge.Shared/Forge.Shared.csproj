@@ -1,12 +1,19 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework Condition="'$(ForgeTargetYear)' == '2024'">net48</TargetFramework>
+    <TargetFramework Condition="'$(ForgeTargetYear)' != '2024'">net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <!-- See Forge.Plugin.csproj: -p:DevAsmSuffix=.Dev renames this assembly for dev
          side-by-side NETLOAD next to a deployed bundle. -->
     <AssemblyName Condition="'$(DevAsmSuffix)' != ''">$(MSBuildProjectName)$(DevAsmSuffix)</AssemblyName>
   </PropertyGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <PackageReference Include="System.Text.Json" />
+    <PackageReference Include="System.Memory" />
+  </ItemGroup>
 
 </Project>

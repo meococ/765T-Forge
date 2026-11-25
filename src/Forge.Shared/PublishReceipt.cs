@@ -46,8 +46,8 @@ public sealed class PublishReceipt
             report.Passed,
             findings = report.Findings.Select(f => new { f.Code, f.Severity, f.Message })
         }, ForgeJson.Options);
-        var bytes = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(payload));
-        return Convert.ToHexString(bytes)[..16];
+        var bytes = ForgeCompat.Sha256Hash(System.Text.Encoding.UTF8.GetBytes(payload));
+        return ForgeCompat.ToHexString(bytes).Substring(0, 16);
     }
 
     public static string? TryWriteArtifact(PublishReceipt receipt, string? auditDir = null)

@@ -218,7 +218,7 @@ public static class CadSpatialMath
         {
             if (enabledKinds.Contains("nearest"))
             {
-                var t = Math.Clamp(((queryPoint[0] - s[0]) * dx + (queryPoint[1] - s[1]) * dy) / len2, 0.0, 1.0);
+                var t = ForgeCompat.Clamp(((queryPoint[0] - s[0]) * dx + (queryPoint[1] - s[1]) * dy) / len2, 0.0, 1.0);
                 double[] near = [s[0] + t * dx, s[1] + t * dy, z + t * (ez - z)];
                 yield return new SnapCandidate("nearest", near, Dist2D(near, queryPoint), handle, entityType, layer);
             }
@@ -229,7 +229,7 @@ public static class CadSpatialMath
                 var t = ((refPt[0] - s[0]) * dx + (refPt[1] - s[1]) * dy) / len2;
                 if (t >= -1e-6 && t <= 1.0 + 1e-6)
                 {
-                    var tc = Math.Clamp(t, 0.0, 1.0);
+                    var tc = ForgeCompat.Clamp(t, 0.0, 1.0);
                     double[] perp = [s[0] + tc * dx, s[1] + tc * dy, z + tc * (ez - z)];
                     yield return new SnapCandidate("perpendicular", perp, Dist2D(perp, queryPoint), handle, entityType, layer);
                 }

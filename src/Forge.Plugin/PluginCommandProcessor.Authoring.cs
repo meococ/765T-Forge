@@ -288,7 +288,7 @@ public sealed partial class PluginCommandProcessor
         }
 
         var steps = insertPath
-            .Split('>', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Split('>', StringSplitOptions.RemoveEmptyEntries | ForgeCompat.TrimEntriesCompat)
             .Select(s => s.Split('[')[0].Trim()) // strip MINSERT "[r,c]" instance suffixes
             .Where(s => s.Length > 0)
             .ToArray();

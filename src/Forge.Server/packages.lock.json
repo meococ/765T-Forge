@@ -347,17 +347,18 @@
         "resolved": "10.0.6",
         "contentHash": "o7zWD39jHesxpHyMSWAf+CjM+NaEIV49IJ8tasAsnaVkRcLP33+5aobgxeKLJRLQQfeciO7BbW5vXCUMzPoU6w=="
       },
+      "forge.shared": {
+        "type": "Project"
+      },
       "System.Text.Json": {
-        "type": "Transitive",
+        "type": "CentralTransitive",
+        "requested": "[8.0.5, )",
         "resolved": "10.0.6",
         "contentHash": "eU/JSsGWpQPE+rkBJjFjsmtaPsu1kCLqFYeW3NS715+z/dP2/BsCl6R7BFGcjhg+rm5WHblllC3p7QS+sS3HtA==",
         "dependencies": {
           "System.IO.Pipelines": "10.0.6",
           "System.Text.Encodings.Web": "10.0.6"
         }
-      },
-      "forge.shared": {
-        "type": "Project"
       }
     }
   }

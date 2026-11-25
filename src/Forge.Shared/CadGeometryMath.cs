@@ -358,7 +358,7 @@ public static class CadGeometryMath
                 continue;
             }
 
-            var steps = Math.Clamp((int)Math.Round(segLen / effectiveArcLen), 1, 200);
+            var steps = ForgeCompat.Clamp((int)Math.Round(segLen / effectiveArcLen), 1, 200);
             for (var s = 0; s < steps; s++)
             {
                 var t = (double)s / steps;
@@ -432,7 +432,7 @@ public static class CadGeometryMath
             return new LineFilletResult(newS1, newE1, newS2, newE2, intersection3D, false, null, 0, 0, 0, null, null);
         }
 
-        var dot = Math.Clamp(u1x * u2x + u1y * u2y, -1.0, 1.0);
+        var dot = ForgeCompat.Clamp(u1x * u2x + u1y * u2y, -1.0, 1.0);
         var angle = Math.Acos(dot);
         if (angle <= 1e-6 || Math.Abs(Math.PI - angle) <= 1e-6)
         {
@@ -697,7 +697,7 @@ public static class CadGeometryMath
             var uInY = vInY / lenIn;
             var uOutX = vOutX / lenOut;
             var uOutY = vOutY / lenOut;
-            var dot = Math.Clamp(uInX * uOutX + uInY * uOutY, -1.0, 1.0);
+            var dot = ForgeCompat.Clamp(uInX * uOutX + uInY * uOutY, -1.0, 1.0);
             var cornerAngle = Math.Acos(dot);
             if (Math.Abs(Math.PI - cornerAngle) <= 1e-5)
             {

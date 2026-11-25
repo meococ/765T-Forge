@@ -184,7 +184,7 @@ internal static class PdfCos
 
         for (int i = 0; i < 4; i++)
         {
-            if (!double.IsFinite(r[i]))
+            if (!ForgeCompat.IsFinite(r[i]))
             {
                 return null;
             }
@@ -209,7 +209,7 @@ internal sealed class PdfInkBounds
 
     public void Add(double x0, double y0, double x1, double y1)
     {
-        if (!double.IsFinite(x0) || !double.IsFinite(y0) || !double.IsFinite(x1) || !double.IsFinite(y1))
+        if (!ForgeCompat.IsFinite(x0) || !ForgeCompat.IsFinite(y0) || !ForgeCompat.IsFinite(x1) || !ForgeCompat.IsFinite(y1))
         {
             throw new PdfInkException("coordinates are out of range");
         }
@@ -494,7 +494,7 @@ internal sealed class PdfLexer
         var raw = new ReadOnlySpan<byte>(_b, start, Pos - start);
         if (raw.IndexOf((byte)'#') < 0)
         {
-            return new PdfName(Encoding.Latin1.GetString(raw));
+            return new PdfName(Encoding.GetEncoding(28591).GetString(raw.ToArray()));
         }
 
         var bytes = new List<byte>(raw.Length);
@@ -511,7 +511,7 @@ internal sealed class PdfLexer
             }
         }
 
-        return new PdfName(Encoding.Latin1.GetString(bytes.ToArray()));
+        return new PdfName(Encoding.GetEncoding(28591).GetString(bytes.ToArray()));
     }
 
     private byte[] ReadLiteralString()
@@ -645,14 +645,15 @@ internal sealed class PdfLexer
 
     private static double ParseNumber(ReadOnlySpan<byte> token)
     {
+        var tokenText = Encoding.GetEncoding(28591).GetString(token.ToArray());
         if (!double.TryParse(
-                token,
+                tokenText,
                 NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
                 CultureInfo.InvariantCulture,
                 out double value)
-            || !double.IsFinite(value))
+            || !ForgeCompat.IsFinite(value))
         {
-            throw new PdfInkException($"bad number '{Encoding.Latin1.GetString(token[..Math.Min(token.Length, 24)])}'");
+            throw new PdfInkException($"bad number '{Encoding.GetEncoding(28591).GetString(token[..Math.Min(token.Length, 24)].ToArray())}'");
         }
 
         return value;
@@ -683,7 +684,7 @@ internal sealed class PdfLexer
             return known;
         }
 
-        return Encoding.Latin1.GetString(token);
+        return Encoding.GetEncoding(28591).GetString(token.ToArray());
     }
 
     private static long KeyOf(ReadOnlySpan<byte> token)
@@ -1046,7 +1047,7 @@ internal sealed class PdfFile
             }
 
             if (numEnd - numStart > 10 || genEnd - genStart > 5
-                || !int.TryParse(span[numStart..numEnd], NumberStyles.None, CultureInfo.InvariantCulture, out int number))
+                || !int.TryParse(Encoding.GetEncoding(28591).GetString(span[numStart..numEnd].ToArray()), NumberStyles.None, CultureInfo.InvariantCulture, out int number))
             {
                 continue;
             }
@@ -1437,8 +1438,8 @@ internal sealed class PdfFile
 
         return new PdfGsParams(
             Number("LW"),
-            Number("LC") is double cap ? (int)Math.Clamp(cap, -1, 99) : null,
-            Number("LJ") is double join ? (int)Math.Clamp(join, -1, 99) : null,
+            Number("LC") is double cap ? (int)ForgeCompat.Clamp(cap, -1, 99) : null,
+            Number("LJ") is double join ? (int)ForgeCompat.Clamp(join, -1, 99) : null,
             Number("ML"),
             fontSize,
             fontProblem);
@@ -1503,11 +1504,11 @@ internal sealed class PdfPageResources
             {
                 res.XObjects[name] = info;
             }
-            else if (info.BBox is not { Length: 4 } || info.BBox.Any(v => !double.IsFinite(v)))
+            else if (info.BBox is not { Length: 4 } || info.BBox.Any(v => !ForgeCompat.IsFinite(v)))
             {
                 res.BadXObjects[name] = "form XObject without a valid /BBox";
             }
-            else if (info.Matrix is not null && (info.Matrix.Length != 6 || info.Matrix.Any(v => !double.IsFinite(v))))
+            else if (info.Matrix is not null && (info.Matrix.Length != 6 || info.Matrix.Any(v => !ForgeCompat.IsFinite(v))))
             {
                 res.BadXObjects[name] = "form XObject with a bad /Matrix";
             }
@@ -1593,10 +1594,10 @@ internal sealed class PdfContentInterpreter
                 _g.LineWidth = Math.Abs(Numbers(a, 1, op)[0]);
                 break;
             case "J":
-                _g.LineCap = (int)Math.Clamp(Numbers(a, 1, op)[0], -1, 99);
+                _g.LineCap = (int)ForgeCompat.Clamp(Numbers(a, 1, op)[0], -1, 99);
                 break;
             case "j":
-                _g.LineJoin = (int)Math.Clamp(Numbers(a, 1, op)[0], -1, 99);
+                _g.LineJoin = (int)ForgeCompat.Clamp(Numbers(a, 1, op)[0], -1, 99);
                 break;
             case "M":
                 _g.MiterLimit = Numbers(a, 1, op)[0];
@@ -1761,7 +1762,7 @@ internal sealed class PdfContentInterpreter
                 _g.Rise = Numbers(a, 1, op)[0];
                 break;
             case "Tr":
-                _g.RenderMode = (int)Math.Clamp(Numbers(a, 1, op)[0], -1, 99);
+                _g.RenderMode = (int)ForgeCompat.Clamp(Numbers(a, 1, op)[0], -1, 99);
                 break;
             case "Tf":
                 if (a.Count != 2 || a[0] is not PdfName font || a[1] is not double size)
@@ -1914,7 +1915,7 @@ internal sealed class PdfContentInterpreter
     private void AddPathPoint(double x, double y)
     {
         var (px, py) = PdfMatrix.Apply(_g.Ctm, x, y);
-        if (!double.IsFinite(px) || !double.IsFinite(py))
+        if (!ForgeCompat.IsFinite(px) || !ForgeCompat.IsFinite(py))
         {
             throw new PdfInkException("coordinates are out of range");
         }

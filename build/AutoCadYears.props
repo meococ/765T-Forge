@@ -6,6 +6,7 @@
        build-plugin.ps1 by name. Default roots are the documented install paths;
        non-default installs (e.g. D:\AutoCAD 2025) use the env override. -->
   <PropertyGroup>
+    <AutoCadRoot2024>C:\Program Files\Autodesk\AutoCAD 2024</AutoCadRoot2024>
     <AutoCadRoot2025>C:\Program Files\Autodesk\AutoCAD 2025</AutoCadRoot2025>
     <AutoCadRoot2026>C:\Program Files\Autodesk\AutoCAD 2026</AutoCadRoot2026>
   </PropertyGroup>

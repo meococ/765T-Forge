@@ -15,9 +15,9 @@ public static class ViewportTransform
 {
     /// <summary>Paper units per model unit; 0 when neither height ratio nor CustomScale is usable.</summary>
     public static double PaperScale(double paperHeight, double viewHeight, double customScale) =>
-        paperHeight > 0 && viewHeight > 0 && double.IsFinite(viewHeight)
+        paperHeight > 0 && viewHeight > 0 && ForgeCompat.IsFinite(viewHeight)
             ? paperHeight / viewHeight
-            : customScale > 0 && double.IsFinite(customScale)
+            : customScale > 0 && ForgeCompat.IsFinite(customScale)
                 ? customScale
                 : 0;
 

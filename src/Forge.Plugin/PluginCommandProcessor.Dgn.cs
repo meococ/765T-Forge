@@ -646,7 +646,10 @@ public sealed partial class PluginCommandProcessor
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
             var buffer = new byte[2];
             var read = stream.Read(buffer, 0, buffer.Length);
-            return read == buffer.Length ? buffer : buffer[..read];
+            if (read == buffer.Length) return buffer;
+            var partial = new byte[read];
+            Array.Copy(buffer, partial, read);
+            return partial;
         }
         catch
         {

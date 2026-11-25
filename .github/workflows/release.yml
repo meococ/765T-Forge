@@ -53,7 +53,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # Plugin build requires Autodesk reference assemblies for the target year
-  # (`build-plugin.ps1`/`pack-release.ps1 -Year 2025|2026`; `AUTOCAD_2026_ROOT` overrides).
+  # (`build-plugin.ps1`/`pack-release.ps1 -Year 2024|2025|2026`; `AUTOCAD_2026_ROOT` overrides).
   # GitHub-hosted runners do not include AutoCAD. Maintainers should build
   # the plugin locally (or on a self-hosted runner)
   # and attach Forge.Plugin.dll to the release, or run pack-release.ps1
@@ -72,8 +72,8 @@ jobs:
           Do NOT announce the tag as a complete product until the plugin zip is attached.
           Maintainer steps:
             1. Reference assemblies for the target year come from build-plugin.ps1 /
-               pack-release.ps1 -Year 2025|2026; AUTOCAD_2026_ROOT overrides the default root.
-            2. Run: .\scripts\pack-release.ps1 -Configuration Release
+               pack-release.ps1 -Year 2024|2025|2026; AUTOCAD_2026_ROOT overrides the default root.
+            2. Run: .\scripts\pack-release.ps1 -Configuration Release -PluginYears 2024,2026
             3. Attach artifacts/release/765T-Forge.Plugin.zip to the GitHub Release for tag $($env:GITHUB_REF_NAME).
             4. Note in the release notes whether a live AutoCAD smoke pass ran for this build.
           "@

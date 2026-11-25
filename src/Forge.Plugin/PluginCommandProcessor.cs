@@ -2007,7 +2007,7 @@ public sealed partial class PluginCommandProcessor
                 "Use synchronous snippets only, or promote the workflow into a typed tool.");
         }
 
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(args.Code)));
+        var hash = ForgeCompat.ToHexString(ForgeCompat.Sha256Hash(Encoding.UTF8.GetBytes(args.Code)));
         var script = DotNetScriptCache.GetOrAdd(hash, _ =>
         {
             var options = ScriptOptions.Default

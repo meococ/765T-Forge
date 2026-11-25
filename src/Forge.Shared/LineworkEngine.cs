@@ -18,7 +18,7 @@ public static class LineworkGeometry
             return Math.Sqrt((px - x1) * (px - x1) + (py - y1) * (py - y1));
         }
 
-        t = Math.Clamp(((px - x1) * dx + (py - y1) * dy) / l2, 0, 1);
+        t = ForgeCompat.Clamp(((px - x1) * dx + (py - y1) * dy) / l2, 0, 1);
         var cx = x1 + t * dx;
         var cy = y1 + t * dy;
         return Math.Sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
@@ -372,8 +372,8 @@ public sealed class SegmentGrid
         var xMax = (cx + 1) * _cellSize + pad;
         var ta = (xMin - x1) / dx;
         var tb = (xMax - x1) / dx;
-        var t0 = Math.Clamp(Math.Min(ta, tb), 0.0, 1.0);
-        var t1 = Math.Clamp(Math.Max(ta, tb), 0.0, 1.0);
+        var t0 = ForgeCompat.Clamp(Math.Min(ta, tb), 0.0, 1.0);
+        var t1 = ForgeCompat.Clamp(Math.Max(ta, tb), 0.0, 1.0);
         var yAt0 = y1 + dy * t0;
         var yAt1 = y1 + dy * t1;
         ry0 = Math.Max(cy0, CellCoord(Math.Min(yAt0, yAt1) - pad));
@@ -393,8 +393,8 @@ public sealed class SegmentGrid
         var yMax = (cy + 1) * _cellSize + pad;
         var ta = (yMin - y1) / dy;
         var tb = (yMax - y1) / dy;
-        var t0 = Math.Clamp(Math.Min(ta, tb), 0.0, 1.0);
-        var t1 = Math.Clamp(Math.Max(ta, tb), 0.0, 1.0);
+        var t0 = ForgeCompat.Clamp(Math.Min(ta, tb), 0.0, 1.0);
+        var t1 = ForgeCompat.Clamp(Math.Max(ta, tb), 0.0, 1.0);
         var xAt0 = x1 + dx * t0;
         var xAt1 = x1 + dx * t1;
         rx0 = Math.Max(cx0, CellCoord(Math.Min(xAt0, xAt1) - pad));
@@ -505,7 +505,7 @@ public static class LineworkQuery
     {
         var set = new HashSet<LineworkKind>();
         var text = string.IsNullOrWhiteSpace(entityTypes) ? "line,polyline,arc" : entityTypes!;
-        foreach (var token in text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (var token in text.Split(',', StringSplitOptions.RemoveEmptyEntries | ForgeCompat.TrimEntriesCompat))
         {
             if (Enum.TryParse<LineworkKind>(token, ignoreCase: true, out var kind))
             {
@@ -596,7 +596,7 @@ public static class LineworkQuery
     public static string[] SplitPatterns(string? filter)
         => string.IsNullOrWhiteSpace(filter)
             ? []
-            : filter!.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            : filter!.Split(',', StringSplitOptions.RemoveEmptyEntries | ForgeCompat.TrimEntriesCompat);
 
     private static void Bump(Dictionary<string, int> map, string key)
     {

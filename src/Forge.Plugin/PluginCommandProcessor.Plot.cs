@@ -500,7 +500,7 @@ public sealed partial class PluginCommandProcessor
                                     // temp+move: a mid-write kill must not leave a torn pmp
                                     var pmpTmp = pmpPath + ".forge-tmp";
                                     File.WriteAllBytes(pmpTmp, Pc3File.Write(patchedPmp, pmpHeader));
-                                    File.Move(pmpTmp, pmpPath, overwrite: true);
+                                    ForgeCompat.MoveFile(pmpTmp, pmpPath, overwrite: true);
                                     pmpMedium = "created";
                                 }
                                 else
@@ -1533,8 +1533,8 @@ public sealed partial class PluginCommandProcessor
             {
                 case PlotAreaKind.Window:
                     tokens.Add("Window");
-                    tokens.Add(string.Create(CultureInfo.InvariantCulture, $"{window![0]},{window[1]}"));
-                    tokens.Add(string.Create(CultureInfo.InvariantCulture, $"{window[2]},{window[3]}"));
+                    tokens.Add(FormattableString.Invariant($"{window![0]},{window[1]}"));
+                    tokens.Add(FormattableString.Invariant($"{window[2]},{window[3]}"));
                     break;
                 case PlotAreaKind.View:
                     // -PLOT asks for the view name right after the area choice.
@@ -1546,7 +1546,7 @@ public sealed partial class PluginCommandProcessor
                     break;
             }
 
-            tokens.Add(readBack.UsesFit ? "Fit" : readBack.CustomScale is { } s ? string.Create(CultureInfo.InvariantCulture, $"{s[0]}:{s[1]}") : "1:1");
+            tokens.Add(readBack.UsesFit ? "Fit" : readBack.CustomScale is { } s ? FormattableString.Invariant($"{s[0]}:{s[1]}") : "1:1");
             // review-wp2-r2 M1: a stored, uncentred Window/View must NOT be answered "0,0" — that
             // overrides the stored offset. KeepStored answers "" (Enter = keep the page setup's
             // stored offset and stored centred flag); see PlotCentring.OffsetPromptAnswer.
@@ -1858,7 +1858,7 @@ public sealed partial class PluginCommandProcessor
             {
                 var temp = clonePath + ".forge-tmp";
                 File.WriteAllBytes(temp, Pc3File.Write(cloneText, header));
-                File.Move(temp, clonePath, overwrite: true);
+                ForgeCompat.MoveFile(temp, clonePath, overwrite: true);
                 note = "created";
             }
         }

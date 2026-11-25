@@ -86,21 +86,21 @@ public static class UndoPolicy
     /// Sysvars that change as a side effect of running any command or of Forge's own command
     /// plumbing. They are ignored in footprints and in every U classification.
     /// </summary>
-    public static readonly IReadOnlySet<string> VolatileSysvars = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    public static readonly IReadOnlyCollection<string> VolatileSysvars = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "CMDNAMES", "CMDACTIVE", "CMDECHO", "LASTPROMPT", "DBMOD", "UNDOCTL", "UNDOMARKS", "LASTPOINT",
         "ERRNO", "NOMUTT", "EXPERT", "FILEDIA", "CMDDIA", "DIASTAT", "BACKGROUNDPLOT", "SECURELOAD"
     };
 
     /// <summary>Sysvars a zoom or pan changes. A U that touches only these and the active viewport record is a view change.</summary>
-    public static readonly IReadOnlySet<string> ViewSysvars = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    public static readonly IReadOnlyCollection<string> ViewSysvars = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "VIEWCTR", "VIEWSIZE", "VIEWDIR", "VIEWTWIST", "VIEWMODE", "TARGET", "LENSLENGTH", "FRONTZ", "BACKZ",
         "VSMIN", "VSMAX", "VIEWBACKSTATUS", "EXTMIN", "EXTMAX"
     };
 
     /// <summary>Tools whose non-tracked call may leave an undo unit that forge_undo can step over (§D3.2).</summary>
-    public static readonly IReadOnlySet<string> SideEffectTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    public static readonly IReadOnlyCollection<string> SideEffectTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "forge_plot_to_pdf",
         "forge_view_capture"
@@ -120,7 +120,7 @@ public static class UndoPolicy
     /// Internal objects AutoCAD creates on demand and never undoes (headless h6: the text font cache
     /// records a DXF merge added stayed live after its U). Treated like regenerated graphics.
     /// </summary>
-    public static readonly IReadOnlySet<string> InternalClasses = new HashSet<string>(StringComparer.Ordinal)
+    public static readonly IReadOnlyCollection<string> InternalClasses = new HashSet<string>(StringComparer.Ordinal)
     {
         "AcDbFontTableRecord"
     };

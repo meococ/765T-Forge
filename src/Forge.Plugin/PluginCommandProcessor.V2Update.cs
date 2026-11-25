@@ -300,7 +300,7 @@ public sealed partial class PluginCommandProcessor
     internal static object BuildViewportReadBack(Transaction tr, Viewport vp, string layoutName)
     {
         var wcsCenter = GetViewportWcsCenter(vp);
-        var scale = vp.CustomScale > 0 && double.IsFinite(vp.CustomScale)
+        var scale = vp.CustomScale > 0 && ForgeCompat.IsFinite(vp.CustomScale)
             ? vp.CustomScale
             : (vp.ViewHeight > 0 ? vp.Height / vp.ViewHeight : 1.0);
         var halfW = scale > 0 ? (vp.Width / scale) * 0.5 : 0;
@@ -622,7 +622,7 @@ public sealed partial class PluginCommandProcessor
                     }
 
                     paperLayouts.Remove(target);
-                    var insertAt = Math.Clamp(args.TabOrder.Value - 1, 0, paperLayouts.Count);
+                    var insertAt = ForgeCompat.Clamp(args.TabOrder.Value - 1, 0, paperLayouts.Count);
                     paperLayouts.Insert(insertAt, target);
                 }
                 else
@@ -1205,7 +1205,7 @@ public sealed partial class PluginCommandProcessor
         raster.Orientation = new CoordinateSystem3d(origin, uVec, vVec);
         raster.ShowImage = true;
         raster.ImageTransparency = true;
-        raster.Fade = (byte)Math.Clamp(args.Fade, 0, 100);
+        raster.Fade = (byte)ForgeCompat.Clamp(args.Fade, 0, 100);
         if (args.Layer is not null)
         {
             raster.Layer = args.Layer;
@@ -1387,12 +1387,12 @@ public sealed partial class PluginCommandProcessor
         var stations = new List<object>();
         foreach (var station in args.Distances ?? [])
         {
-            if (!double.IsFinite(station))
+            if (!ForgeCompat.IsFinite(station))
             {
                 continue;
             }
 
-            var distAlong = Math.Clamp(station - args.StartStation, 0, totalLength);
+            var distAlong = ForgeCompat.Clamp(station - args.StartStation, 0, totalLength);
             var pt = curve.GetPointAtDist(startDist + distAlong);
             var deriv = curve.GetFirstDerivative(pt);
             var tangentDeg = NormalizeDegrees(RadiansToDegrees(Math.Atan2(deriv.Y, deriv.X)));
@@ -1411,12 +1411,12 @@ public sealed partial class PluginCommandProcessor
         var projections = new List<object>();
         foreach (var rawPt in args.Points ?? [])
         {
-            if (rawPt is null || rawPt.Length < 2 || !double.IsFinite(rawPt[0]) || !double.IsFinite(rawPt[1]))
+            if (rawPt is null || rawPt.Length < 2 || !ForgeCompat.IsFinite(rawPt[0]) || !ForgeCompat.IsFinite(rawPt[1]))
             {
                 continue;
             }
 
-            var queryPt = new Point3d(rawPt[0], rawPt[1], rawPt.Length >= 3 && double.IsFinite(rawPt[2]) ? rawPt[2] : 0);
+            var queryPt = new Point3d(rawPt[0], rawPt[1], rawPt.Length >= 3 && ForgeCompat.IsFinite(rawPt[2]) ? rawPt[2] : 0);
             var closest = curve.GetClosestPointTo(queryPt, extend: false);
             var distAlong = curve.GetDistAtPoint(closest) - startDist;
             var deriv = curve.GetFirstDerivative(closest);

@@ -190,6 +190,17 @@ public sealed class NamedPipePluginServer : IDisposable
             PipeAccessRights.FullControl,
             AccessControlType.Allow));
 
+#if NETFRAMEWORK
+        return new NamedPipeServerStream(
+            _environment.PipeName,
+            PipeDirection.InOut,
+            MaxConcurrentPipeClients,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous,
+            4096,
+            4096,
+            pipeSecurity);
+#else
         return NamedPipeServerStreamAcl.Create(
             _environment.PipeName,
             PipeDirection.InOut,
@@ -199,12 +210,13 @@ public sealed class NamedPipePluginServer : IDisposable
             inBufferSize: 0,
             outBufferSize: 0,
             pipeSecurity);
+#endif
     }
 
     private async Task HandleRequestAsync(Stream pipe, CancellationToken cancellationToken)
     {
-        using var reader = new StreamReader(pipe, Encoding.UTF8, leaveOpen: true);
-        await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), leaveOpen: true)
+        using var reader = new StreamReader(pipe, Encoding.UTF8, false, 4096, leaveOpen: true);
+        using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 4096, leaveOpen: true)
         {
             AutoFlush = true
         };
@@ -339,10 +351,13 @@ public sealed class NamedPipePluginServer : IDisposable
 
     private static async Task PumpIdleWakeupsAsync(Task work, CancellationToken cancellationToken)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(200));
-        while (!work.IsCompleted && await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+        while (!work.IsCompleted)
         {
-            WakeAutoCadMessagePump();
+            await Task.Delay(200, cancellationToken).ConfigureAwait(false);
+            if (!work.IsCompleted)
+            {
+                WakeAutoCadMessagePump();
+            }
         }
     }
 
@@ -405,7 +420,7 @@ public sealed class NamedPipePluginServer : IDisposable
     private Task<ForgeResult> ExecuteInCommandContextAsync(ForgeCommand command)
     {
         var tcs = new TaskCompletionSource<ForgeResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var startedAt = Environment.TickCount64;
+        var startedAt = ForgeCompat.TickCount64();
         var staleAfterMs = (long)RequestDeadline.TotalMilliseconds;
 
         // The dispatcher's ExecutionResult is deliberately discarded (it is not a Task and the
@@ -415,7 +430,7 @@ public sealed class NamedPipePluginServer : IDisposable
         {
             try
             {
-                if (Environment.TickCount64 - startedAt >= staleAfterMs)
+                if (ForgeCompat.TickCount64() - startedAt >= staleAfterMs)
                 {
                     // The watchdog has already answered the client; starting now could commit
                     // a write long after its caller gave up.
@@ -513,7 +528,7 @@ public sealed class NamedPipePluginServer : IDisposable
     private Task<ForgeResult> ExecuteWhenIdleAsync(ForgeCommand command)
     {
         var tcs = new TaskCompletionSource<ForgeResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var startedAt = Environment.TickCount64;
+        var startedAt = ForgeCompat.TickCount64();
         var staleAfterMs = (long)RequestDeadline.TotalMilliseconds;
 
         void OnIdle(object? sender, EventArgs e)
@@ -521,7 +536,7 @@ public sealed class NamedPipePluginServer : IDisposable
             Application.Idle -= OnIdle;
             try
             {
-                if (Environment.TickCount64 - startedAt >= staleAfterMs)
+                if (ForgeCompat.TickCount64() - startedAt >= staleAfterMs)
                 {
                     tcs.TrySetResult(ForgeResult.Failure(
                         command.Id,
@@ -553,7 +568,7 @@ public sealed class NamedPipePluginServer : IDisposable
     private Task<ForgeResult> ExecuteDocActivateWhenIdleAsync(ForgeCommand command)
     {
         var tcs = new TaskCompletionSource<ForgeResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var startedAt = Environment.TickCount64;
+        var startedAt = ForgeCompat.TickCount64();
         var staleAfterMs = (long)RequestDeadline.TotalMilliseconds;
         ForgeResult? first = null;
         var claimed = false;
@@ -579,7 +594,7 @@ public sealed class NamedPipePluginServer : IDisposable
                     // read-back-after-timeout contract.
                     if (!dgnRun.LegFinished)
                     {
-                        if (!dgnRun.LegStarted && Environment.TickCount64 - startedAt >= staleAfterMs)
+                        if (!dgnRun.LegStarted && ForgeCompat.TickCount64() - startedAt >= staleAfterMs)
                         {
                             dgnRun.Abandoned = true;
                             var timedOutRun = dgnRun;
@@ -601,7 +616,7 @@ public sealed class NamedPipePluginServer : IDisposable
                         // is exactly the mid-teardown close that wedged quiescence
                         // (artifacts/d14/fail-evidence-20261030.md) — keep waiting, bounded
                         // by the same deadline as the leg itself.
-                        if (Environment.TickCount64 - startedAt >= staleAfterMs)
+                        if (ForgeCompat.TickCount64() - startedAt >= staleAfterMs)
                         {
                             var stalledRun = dgnRun;
                             dgnRun = null;
@@ -642,7 +657,7 @@ public sealed class NamedPipePluginServer : IDisposable
                             dgnRun.RestoreInFlight = false;
                         }
 
-                        if (!closed && Environment.TickCount64 - startedAt < staleAfterMs)
+                        if (!closed && ForgeCompat.TickCount64() - startedAt < staleAfterMs)
                         {
                             // Each settled tick gets a retry until the deadline — extra
                             // settle cycles cost nothing and the lane never blocks.
@@ -681,7 +696,7 @@ public sealed class NamedPipePluginServer : IDisposable
                         return;
                     }
 
-                    if (Environment.TickCount64 - startedAt >= staleAfterMs)
+                    if (ForgeCompat.TickCount64() - startedAt >= staleAfterMs)
                     {
                         Finish(ForgeResult.Failure(
                             command.Id,
@@ -710,14 +725,14 @@ public sealed class NamedPipePluginServer : IDisposable
                         return;
                     }
 
-                    pollUntil = Math.Max(Environment.TickCount64 + DocumentContextPolicy.ActivatePollMs, startedAt + DocumentContextPolicy.PollWindowMs(command.Tool, staleAfterMs));
+                    pollUntil = Math.Max(ForgeCompat.TickCount64() + DocumentContextPolicy.ActivatePollMs, startedAt + DocumentContextPolicy.PollWindowMs(command.Tool, staleAfterMs));
                     return;
                 }
 
                 var reread = (first.Data is PluginCommandProcessor.DocCloseReadBack closing
                     ? PluginCommandProcessor.ReadBackClosedDocument(command.Id, closing)
                     : PluginCommandProcessor.ReadBackActiveDocument(command.Id, (PluginCommandProcessor.DocActivateReadBack)first.Data!)) with { AuditId = first.AuditId };
-                if (reread.Ok || Environment.TickCount64 >= pollUntil)
+                if (reread.Ok || ForgeCompat.TickCount64() >= pollUntil)
                 {
                     Finish(reread);
                 }
@@ -750,7 +765,13 @@ public sealed class NamedPipePluginServer : IDisposable
         var buf = new char[4096];
         while (true)
         {
-            var n = await reader.ReadAsync(buf.AsMemory(0, buf.Length), cancellationToken).ConfigureAwait(false);
+            var readTask = reader.ReadAsync(buf, 0, buf.Length);
+            var completed = await Task.WhenAny(readTask, Task.Delay(Timeout.Infinite, cancellationToken)).ConfigureAwait(false);
+            if (!ReferenceEquals(completed, readTask))
+            {
+                throw new OperationCanceledException(cancellationToken);
+            }
+            var n = readTask.Result;
             if (n == 0)
             {
                 return sb.Length == 0 ? null : sb.ToString();

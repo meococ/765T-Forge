@@ -52,7 +52,7 @@ public sealed partial class PluginCommandProcessor
             window = box;
         }
 
-        var padding = Math.Clamp(args.Padding ?? 0.05, 0, 1);
+        var padding = ForgeCompat.Clamp(args.Padding ?? 0.05, 0, 1);
         if (command.DryRun)
         {
             return DryRun(command, new { outputPath, fit = args.Fit, window, padding, cropToDrawing = args.CropToDrawing, exists = File.Exists(outputPath) });

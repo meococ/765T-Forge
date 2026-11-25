@@ -10,8 +10,8 @@ public static class DsdWriter
 {
     public static string Build(string dwgPath, string outputPath, IReadOnlyList<string> layouts, bool singlePdf)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(dwgPath);
-        ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
+        if (string.IsNullOrWhiteSpace(dwgPath)) throw new ArgumentException("Value cannot be null or whitespace.", nameof(dwgPath));
+        if (string.IsNullOrWhiteSpace(outputPath)) throw new ArgumentException("Value cannot be null or whitespace.", nameof(outputPath));
         if (layouts is null || layouts.Count == 0)
         {
             throw new ArgumentException("At least one layout is required.", nameof(layouts));

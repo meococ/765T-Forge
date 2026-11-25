@@ -403,7 +403,7 @@ public static class DrawingImport
     /// <summary>Union of [minX,minY,minZ,maxX,maxY,maxZ] boxes; null when none.</summary>
     public static double[]? UnionExtents(double[]? acc, double[]? box)
     {
-        if (box is not { Length: 6 } || box.Any(v => !double.IsFinite(v)))
+        if (box is not { Length: 6 } || box.Any(v => !ForgeCompat.IsFinite(v)))
         {
             return acc;
         }
@@ -436,7 +436,7 @@ public static class DrawingImport
             return true;
         }
 
-        if (value.Length is < 2 or > 3 || value.Any(v => !double.IsFinite(v)))
+        if (value.Length is < 2 or > 3 || value.Any(v => !ForgeCompat.IsFinite(v)))
         {
             error = $"{name} must be [x, y] or [x, y, z] with finite values.";
             return false;

@@ -97,7 +97,7 @@ public sealed partial class PluginCommandProcessor
 
         var scale = args.Scale ?? 1.0;
         var rotationDeg = args.RotationDeg ?? 0.0;
-        if (!(scale > 0) || !double.IsFinite(scale) || !double.IsFinite(rotationDeg))
+        if (!(scale > 0) || !ForgeCompat.IsFinite(scale) || !ForgeCompat.IsFinite(rotationDeg))
         {
             return ForgeResult.Failure(command.Id, "invalid_args", "scale must be > 0 and rotationDeg finite.");
         }
@@ -867,9 +867,12 @@ public sealed partial class PluginCommandProcessor
     /// <summary>One attribute reference per non-constant definition, with the definition's default text.</summary>
     private static void AppendDefaultAttributes(Database db, Transaction tr, BlockReference bref, IReadOnlyList<AttributeDefinition> definitions, IReadOnlyDictionary<string, string>? values = null, List<string>? unknownTags = null)
     {
-        Dictionary<string, string>? remaining = values is { Count: > 0 }
-            ? new Dictionary<string, string>(values, StringComparer.OrdinalIgnoreCase)
-            : null;
+        Dictionary<string, string>? remaining = null;
+        if (values is { Count: > 0 })
+        {
+            remaining = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var pair in values) remaining[pair.Key] = pair.Value;
+        }
         foreach (var definition in definitions)
         {
             var reference = new AttributeReference();

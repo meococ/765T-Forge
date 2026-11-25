@@ -131,7 +131,7 @@ public static class BlockWalk
     public const int DefaultMaxDepth = 8;
     public const int HardMaxDepth = 32;
 
-    public static int ClampDepth(int? requested) => Math.Clamp(requested ?? DefaultMaxDepth, 1, HardMaxDepth);
+    public static int ClampDepth(int? requested) => ForgeCompat.Clamp(requested ?? DefaultMaxDepth, 1, HardMaxDepth);
 
     /// <summary>
     /// Decide whether to walk into a nested INSERT. <paramref name="depth"/> is the depth of the

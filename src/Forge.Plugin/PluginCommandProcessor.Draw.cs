@@ -395,7 +395,7 @@ public sealed partial class PluginCommandProcessor
             return ForgeResult.Failure(command.Id, "missing_boundary", "Provide exactly one of boundary.handle or boundary.vertices.");
         }
 
-        if (args.Scale is { } requestedScale && !(requestedScale > 0 && double.IsFinite(requestedScale)))
+        if (args.Scale is { } requestedScale && !(requestedScale > 0 && ForgeCompat.IsFinite(requestedScale)))
         {
             return ForgeResult.Failure(command.Id, "invalid_args", "scale must be a finite number greater than 0.");
         }
@@ -2131,7 +2131,7 @@ public sealed partial class PluginCommandProcessor
     {
         ValidateVertices(step.Vertices);
         ValidateWidth(step.ConstantWidth);
-        if (bulges is not null && bulges.Any(b => !double.IsFinite(b)))
+        if (bulges is not null && bulges.Any(b => !ForgeCompat.IsFinite(b)))
         {
             throw new DrawStepException("invalid_args", "bulges must be finite numbers.");
         }
@@ -2183,12 +2183,12 @@ public sealed partial class PluginCommandProcessor
             throw new DrawStepException("missing_text", "Text is required.");
         }
 
-        if (step.Height is { } height && !(height > 0 && double.IsFinite(height)))
+        if (step.Height is { } height && !(height > 0 && ForgeCompat.IsFinite(height)))
         {
             throw new DrawStepException("invalid_height", "height must be greater than 0.");
         }
 
-        if (step.Width is { } width && !(width >= 0 && double.IsFinite(width)))
+        if (step.Width is { } width && !(width >= 0 && ForgeCompat.IsFinite(width)))
         {
             throw new DrawStepException("invalid_args", "width must be >= 0 (0 = no wrapping).");
         }
@@ -2311,7 +2311,7 @@ public sealed partial class PluginCommandProcessor
                 throw new DrawStepException("invalid_args", "majorAxis must lie in the XY plane (dz = 0).");
             }
         }
-        else if (step.MajorRadius is { } majorRadius && majorRadius > 0 && double.IsFinite(majorRadius))
+        else if (step.MajorRadius is { } majorRadius && majorRadius > 0 && ForgeCompat.IsFinite(majorRadius))
         {
             var rotation = DegreesToRadians(step.RotationDeg ?? 0);
             major = new Vector3d(majorRadius * Math.Cos(rotation), majorRadius * Math.Sin(rotation), 0);
@@ -2347,7 +2347,7 @@ public sealed partial class PluginCommandProcessor
 
         var startDeg = step.StartAngleDeg ?? 0;
         var endDeg = step.EndAngleDeg ?? 360;
-        if (!double.IsFinite(startDeg) || !double.IsFinite(endDeg))
+        if (!ForgeCompat.IsFinite(startDeg) || !ForgeCompat.IsFinite(endDeg))
         {
             throw new DrawStepException("invalid_args", "startAngleDeg and endAngleDeg must be finite.");
         }
@@ -2423,12 +2423,12 @@ public sealed partial class PluginCommandProcessor
             throw new DrawStepException("too_few_vertices", "A hatch boundary needs at least 3 vertices.");
         }
 
-        if (step.Bulges is not null && step.Bulges.Any(b => !double.IsFinite(b)))
+        if (step.Bulges is not null && step.Bulges.Any(b => !ForgeCompat.IsFinite(b)))
         {
             throw new DrawStepException("invalid_args", "bulges must be finite numbers.");
         }
 
-        if (step.Scale is { } scale && !(scale > 0 && double.IsFinite(scale)))
+        if (step.Scale is { } scale && !(scale > 0 && ForgeCompat.IsFinite(scale)))
         {
             throw new DrawStepException("invalid_args", "scale must be a finite number greater than 0.");
         }
@@ -2489,7 +2489,7 @@ public sealed partial class PluginCommandProcessor
             throw new DrawStepException("invalid_points", "vertex must differ from p1 and p2.");
         }
 
-        if (step.DimScale is { } dimScale && !(dimScale > 0 && double.IsFinite(dimScale)))
+        if (step.DimScale is { } dimScale && !(dimScale > 0 && ForgeCompat.IsFinite(dimScale)))
         {
             throw new DrawStepException("invalid_args", "dimScale must be greater than 0.");
         }
@@ -2531,12 +2531,12 @@ public sealed partial class PluginCommandProcessor
         ValidateVertices(raw);
         var points = raw.Select((p, i) => PointArg(p, $"points[{i}]")).ToArray();
         var textHeight = step.TextHeight ?? step.Height ?? 2.5;
-        if (!(textHeight > 0 && double.IsFinite(textHeight)))
+        if (!(textHeight > 0 && ForgeCompat.IsFinite(textHeight)))
         {
             throw new DrawStepException("invalid_height", "textHeight must be greater than 0.");
         }
 
-        if (step.ArrowSize is { } arrowSize && !(arrowSize >= 0 && double.IsFinite(arrowSize)))
+        if (step.ArrowSize is { } arrowSize && !(arrowSize >= 0 && ForgeCompat.IsFinite(arrowSize)))
         {
             throw new DrawStepException("invalid_args", "arrowSize must be >= 0.");
         }
@@ -2573,7 +2573,7 @@ public sealed partial class PluginCommandProcessor
         {
             if (args.ColumnWidths is { } requested && c < requested.Length)
             {
-                if (!(requested[c] > 0 && double.IsFinite(requested[c])))
+                if (!(requested[c] > 0 && ForgeCompat.IsFinite(requested[c])))
                 {
                     throw new DrawStepException("invalid_args", $"columnWidths[{c}] must be greater than 0.");
                 }
@@ -2598,7 +2598,7 @@ public sealed partial class PluginCommandProcessor
         }
 
         var blockId = ResolveBlockId(db, tr, blockName);
-        if (step.Scale is { } scale && !(scale > 0 && double.IsFinite(scale)))
+        if (step.Scale is { } scale && !(scale > 0 && ForgeCompat.IsFinite(scale)))
         {
             throw new DrawStepException("invalid_scale", "scale must be > 0.");
         }
@@ -2684,7 +2684,7 @@ public sealed partial class PluginCommandProcessor
 
     private static double RequirePositiveRadius(double? radius)
     {
-        if (radius is not { } value || !(value > 0 && double.IsFinite(value)))
+        if (radius is not { } value || !(value > 0 && ForgeCompat.IsFinite(value)))
         {
             throw new DrawStepException("invalid_radius", "Radius must be greater than 0.");
         }
@@ -2699,7 +2699,7 @@ public sealed partial class PluginCommandProcessor
             return fallback;
         }
 
-        if (!(value.Value > 0 && double.IsFinite(value.Value)))
+        if (!(value.Value > 0 && ForgeCompat.IsFinite(value.Value)))
         {
             throw new DrawStepException("invalid_args", $"{name} must be greater than 0.");
         }
@@ -2709,7 +2709,7 @@ public sealed partial class PluginCommandProcessor
 
     private static void ValidateWidth(double? constantWidth)
     {
-        if (constantWidth is { } width && !(width >= 0 && double.IsFinite(width)))
+        if (constantWidth is { } width && !(width >= 0 && ForgeCompat.IsFinite(width)))
         {
             throw new DrawStepException("invalid_args", "constantWidth must be >= 0.");
         }

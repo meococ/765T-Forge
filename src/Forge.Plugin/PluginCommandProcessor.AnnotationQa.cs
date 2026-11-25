@@ -84,7 +84,7 @@ public sealed partial class PluginCommandProcessor
             }
         }
 
-        if (args.PlotScale is { } ps && !(ps > 0 && double.IsFinite(ps)))
+        if (args.PlotScale is { } ps && !(ps > 0 && ForgeCompat.IsFinite(ps)))
         {
             return ForgeResult.Failure(command.Id, "invalid_plot_scale", "plotScale is the scale denominator (100 for 1:100) and must be > 0.");
         }
@@ -674,7 +674,7 @@ public sealed partial class PluginCommandProcessor
             WallStraddle = checks.Contains(AnnotationClash.CheckWallStraddle),
             MinHeight = checks.Contains(AnnotationClash.CheckMinHeight),
             MinOverlapRatio = args.MinOverlapRatio is > 0 and < 1 ? args.MinOverlapRatio.Value : 0.02,
-            Padding = args.Padding is { } pad && double.IsFinite(pad) ? pad : 0,
+            Padding = args.Padding is { } pad && ForgeCompat.IsFinite(pad) ? pad : 0,
             MinPlottedHeightMm = args.MinTextHeightMm ?? 2.0,
             UnitsPerPaperMm = unitsPerPaperMm,
             ReportMaskedCrossings = args.ReportMaskedCrossings,
@@ -827,7 +827,7 @@ public sealed partial class PluginCommandProcessor
         }
 
         scale = ViewportTransform.PaperScale(vp.Height, vp.ViewHeight, vp.CustomScale);
-        if (!(scale > 0 && double.IsFinite(scale)))
+        if (!(scale > 0 && ForgeCompat.IsFinite(scale)))
         {
             return false;
         }

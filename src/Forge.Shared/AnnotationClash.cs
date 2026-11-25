@@ -174,7 +174,7 @@ public static class AnnotationClash
             w = c > Eps ? (bigW - h * s) / c : bigH;
         }
 
-        if (!(w > 0) || !(h > 0) || !double.IsFinite(w) || !double.IsFinite(h))
+        if (!(w > 0) || !(h > 0) || !ForgeCompat.IsFinite(w) || !ForgeCompat.IsFinite(h))
         {
             // Degenerate solve (empty text, rounding): fall back to the axis-aligned box.
             return RectCorners(cx, cy, bigW, bigH, 0);
@@ -486,7 +486,7 @@ public static class AnnotationClash
         var boxes = new List<PreparedText>(texts.Count);
         foreach (var text in texts)
         {
-            if (text.Corners is not { Length: >= 3 } || text.Corners.Any(c => !double.IsFinite(c.X) || !double.IsFinite(c.Y)))
+            if (text.Corners is not { Length: >= 3 } || text.Corners.Any(c => !ForgeCompat.IsFinite(c.X) || !ForgeCompat.IsFinite(c.Y)))
             {
                 continue;
             }
@@ -583,7 +583,7 @@ public static class AnnotationClash
                 {
                     var p = pts[k];
                     var q = pts[(k + 1) % pts.Length];
-                    if (!double.IsFinite(p.X) || !double.IsFinite(p.Y) || !double.IsFinite(q.X) || !double.IsFinite(q.Y))
+                    if (!ForgeCompat.IsFinite(p.X) || !ForgeCompat.IsFinite(p.Y) || !ForgeCompat.IsFinite(q.X) || !ForgeCompat.IsFinite(q.Y))
                     {
                         continue;
                     }
@@ -740,7 +740,7 @@ public static class AnnotationClash
             .ThenBy(f => f.At[0])
             .ThenBy(f => f.At[1])
             .ToList();
-        var max = Math.Clamp(options.MaxFindings, 1, 5000);
+        var max = ForgeCompat.Clamp(options.MaxFindings, 1, 5000);
         var truncated = ordered.Count > max;
         return new ClashReport(
             boxes.Count,
@@ -847,7 +847,7 @@ public static class AnnotationClash
 
         var sizes = boxes
             .Select(b => Math.Max(b.Box[2] - b.Box[0], b.Box[3] - b.Box[1]))
-            .Where(s => s > 0 && double.IsFinite(s))
+            .Where(s => s > 0 && ForgeCompat.IsFinite(s))
             .OrderBy(s => s)
             .ToList();
         var median = sizes.Count > 0 ? sizes[sizes.Count / 2] : 1;

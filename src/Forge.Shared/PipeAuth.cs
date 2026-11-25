@@ -16,7 +16,7 @@ public static class PipeAuth
 
     /// <summary>True when <paramref name="token"/> equals <paramref name="expected"/> in fixed time; null and empty both mean "".</summary>
     public static bool TokenMatches(string? token, string? expected)
-        => CryptographicOperations.FixedTimeEquals(
+        => ForgeCompat.FixedTimeEquals(
             Encoding.UTF8.GetBytes(token ?? ""),
             Encoding.UTF8.GetBytes(expected ?? ""));
 }

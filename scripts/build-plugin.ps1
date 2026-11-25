@@ -5,8 +5,8 @@
   Build configuration (Debug or Release).
 .PARAMETER Year
   The AutoCAD year to build against. Must be a row of build/AutoCadYears.props; the default
-  root for the year comes from that table. AUTOCAD_2026_ROOT stays the manual root override
-  for whichever year is being built.
+  root for the year comes from that table. AUTOCAD_<YEAR>_ROOT is the manual root override
+  for that year; AUTOCAD_2026_ROOT remains the legacy override for 2026.
 .PARAMETER OutDir
   Optional alternate output directory; default is artifacts\Forge.Plugin\<Year> so two years
   can coexist side by side.
@@ -15,7 +15,7 @@
 param(
     [ValidateSet("Debug", "Release")]
     [string] $Configuration = "Release",
-    [ValidateSet("2025", "2026")]
+    [ValidateSet("2024", "2025", "2026")]
     [string] $Year = "2026",
     [string] $OutDir = ""
 )
@@ -36,12 +36,15 @@ if (-not $defaultRoot) {
     exit 2
 }
 
+$yearEnvName = "AUTOCAD_${Year}_ROOT"
+$yearEnv = (Get-Item -Path "Env:$yearEnvName" -ErrorAction SilentlyContinue).Value
+$legacyEnv = if ($Year -eq "2026") { $env:AUTOCAD_2026_ROOT } else { "" }
+$acad = if ($yearEnv) { $yearEnv } elseif ($legacyEnv) { $legacyEnv } else { $defaultRoot }
 $prevAcadEnv = $env:AUTOCAD_2026_ROOT
-$acad = if ($prevAcadEnv) { $prevAcadEnv } else { $defaultRoot }
 try {
     $env:AUTOCAD_2026_ROOT = $acad
     if (-not (Test-Path (Join-Path $acad "AcCoreMgd.dll"))) {
-        Write-Error "AUTOCAD_ROOT_MISSING: AcCoreMgd.dll not found under AUTOCAD_2026_ROOT=$acad (year $Year)."
+        Write-Error "AUTOCAD_ROOT_MISSING: AcCoreMgd.dll not found under $yearEnvName/AUTOCAD_2026_ROOT=$acad (year $Year)."
         exit 2
     }
 

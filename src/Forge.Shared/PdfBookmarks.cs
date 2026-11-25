@@ -69,7 +69,7 @@ print(json.dumps({"ok": True, "bookmarks": len(titles), "pages": len(writer.page
     {
         try
         {
-            var text = Encoding.Latin1.GetString(File.ReadAllBytes(pdfPath));
+            var text = Encoding.GetEncoding(28591).GetString(File.ReadAllBytes(pdfPath));
             if (!text.Contains("/Outlines"))
             {
                 return 0;

@@ -1,7 +1,7 @@
 name: CI Plugin (self-hosted)
 
-# Requires a self-hosted Windows runner with AutoCAD reference assemblies.
-# AUTOCAD_2026_ROOT is optional if the year's default root exists (build-plugin.ps1 -Year).
+# Requires a self-hosted Windows runner with AutoCAD 2024 and 2026 reference assemblies.
+# AUTOCAD_<YEAR>_ROOT is optional if the year's default root exists (build-plugin.ps1 -Year).
 # Do not enable on GitHub-hosted runners.
 
 on:
@@ -47,15 +47,15 @@ jobs:
       - name: Build plugin
         shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
         run: |
-          if (-not $env:AUTOCAD_2026_ROOT) {
-            Write-Host "AUTOCAD_2026_ROOT not set - optional if the year's default root exists (build-plugin.ps1 -Year); build-plugin.ps1 falls back to the build/AutoCadYears.props root for the selected year."
+          foreach ($year in @("2024", "2026")) {
+            .\scripts\build-plugin.ps1 -Configuration Release -Year $year
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
-          .\scripts\build-plugin.ps1 -Configuration Release -OutDir artifacts\Forge.Plugin\
 
       - name: Pack plugin zip
         shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
         run: |
-          .\scripts\pack-release.ps1 -Configuration Release
+          .\scripts\pack-release.ps1 -Configuration Release -PluginYears 2024,2026
           # pack-release also publishes server; upload plugin zip only here
 
       - name: Upload plugin artifact

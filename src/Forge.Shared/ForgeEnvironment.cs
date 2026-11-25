@@ -129,10 +129,10 @@ public sealed record ForgeEnvironment
             AutoCadRoot = Get("AUTOCAD_2026_ROOT", DefaultAutoCadRoot()),
             EnableUnsafeOps = bool.TryParse(Environment.GetEnvironmentVariable("FORGE_ENABLE_UNSAFE_OPS"), out var unsafeOps) && unsafeOps,
             PluginConnectTimeoutSeconds = int.TryParse(Environment.GetEnvironmentVariable("FORGE_PLUGIN_CONNECT_TIMEOUT_SECONDS"), out var connectTimeout)
-                ? Math.Clamp(connectTimeout, 1, 120)
+                ? ForgeCompat.Clamp(connectTimeout, 1, 120)
                 : 10,
             PluginResponseTimeoutSeconds = int.TryParse(Environment.GetEnvironmentVariable("FORGE_PLUGIN_RESPONSE_TIMEOUT_SECONDS"), out var timeout)
-                ? Math.Clamp(timeout, 5, 3600)
+                ? ForgeCompat.Clamp(timeout, 5, 3600)
                 : 120,
             Toolsets = Environment.GetEnvironmentVariable("FORGE_TOOLSETS")
         };

@@ -248,7 +248,7 @@ public sealed partial class PluginCommandProcessor
             hasWindow = true;
         }
 
-        var maxResults = Math.Clamp(args.MaxResults ?? 100, 1, 1000);
+        var maxResults = ForgeCompat.Clamp(args.MaxResults ?? 100, 1, 1000);
         var db = ActiveDb;
         using var tr = db.TransactionManager.StartTransaction();
 
@@ -495,7 +495,7 @@ public sealed partial class PluginCommandProcessor
             enabledKinds.UnionWith(CadSpatialMath.SupportedSnapKinds);
         }
 
-        var maxResults = Math.Clamp(args.MaxResults ?? 20, 1, 200);
+        var maxResults = ForgeCompat.Clamp(args.MaxResults ?? 20, 1, 200);
         var qx = queryPt[0];
         var qy = queryPt[1];
         var minAx = qx - radius;

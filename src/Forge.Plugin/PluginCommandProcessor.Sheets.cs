@@ -271,7 +271,7 @@ public sealed partial class PluginCommandProcessor
                     continue;
                 }
 
-                var cells = line.Split(delimiter);
+                var cells = line.Split(new[] { delimiter }, StringSplitOptions.None);
                 if (cells.Length <= Math.Max(xColumn, yColumn) ||
                     !double.TryParse(cells[xColumn], NumberStyles.Float, CultureInfo.InvariantCulture, out var x) ||
                     !double.TryParse(cells[yColumn], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))

@@ -1,6 +1,8 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
+#if !NETFRAMEWORK
 using System.Runtime.Loader;
+#endif
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.Runtime;
 using Forge.Shared;
@@ -22,7 +24,9 @@ public sealed class Plugin : IExtensionApplication
         // AutoCAD 2025/2026 (.NET 8) loads plugins with the AutoCAD install root as the probing base,
         // so Roslyn scripting assemblies sitting beside Forge.Plugin.dll must be resolved explicitly
         // BEFORE any method referencing Roslyn types is JIT-compiled.
+#if !NETFRAMEWORK
         AssemblyLoadContext.Default.Resolving += ResolvePluginAssembly;
+#endif
         AppDomain.CurrentDomain.AssemblyResolve += ResolveAppDomainAssembly;
         InitializeCore();
     }
@@ -68,12 +72,14 @@ public sealed class Plugin : IExtensionApplication
     {
         _server?.Dispose();
         _server = null;
+#if !NETFRAMEWORK
         AssemblyLoadContext.Default.Resolving -= ResolvePluginAssembly;
+#endif
         AppDomain.CurrentDomain.AssemblyResolve -= ResolveAppDomainAssembly;
         WriteMessage("\n[765T-Forge] Plugin stopped.");
     }
 
-    private static Assembly? ResolvePluginAssembly(AssemblyLoadContext context, AssemblyName assemblyName)
+    private static string? ResolvePluginAssemblyPath(AssemblyName assemblyName)
     {
         if (string.IsNullOrWhiteSpace(assemblyName.Name) || string.IsNullOrWhiteSpace(PluginDirectory))
         {
@@ -81,12 +87,21 @@ public sealed class Plugin : IExtensionApplication
         }
 
         var candidate = Path.Combine(PluginDirectory, $"{assemblyName.Name}.dll");
-        return File.Exists(candidate) ? context.LoadFromAssemblyPath(candidate) : null;
+        return File.Exists(candidate) ? candidate : null;
     }
+
+#if !NETFRAMEWORK
+    private static Assembly? ResolvePluginAssembly(AssemblyLoadContext context, AssemblyName assemblyName)
+    {
+        var candidate = ResolvePluginAssemblyPath(assemblyName);
+        return candidate is null ? null : context.LoadFromAssemblyPath(candidate);
+    }
+#endif
 
     private static Assembly? ResolveAppDomainAssembly(object? sender, ResolveEventArgs args)
     {
-        return ResolvePluginAssembly(AssemblyLoadContext.Default, new AssemblyName(args.Name));
+        var candidate = ResolvePluginAssemblyPath(new AssemblyName(args.Name));
+        return candidate is null ? null : Assembly.LoadFrom(candidate);
     }
 
     private static void WriteMessage(string message)

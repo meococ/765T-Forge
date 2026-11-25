@@ -23,7 +23,7 @@ public static class UnderlayResolution
         try
         {
             // Drive-rooted (C:\...) and UNC (\\server\share\...) pass through.
-            if (Path.IsPathFullyQualified(raw))
+            if (ForgeCompat.IsPathFullyQualified(raw))
             {
                 return Path.GetFullPath(raw);
             }

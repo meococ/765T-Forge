@@ -402,7 +402,7 @@ public static class PlotLayoutMath
             return false;
         }
 
-        if (!double.IsFinite(x1) || !double.IsFinite(y1) || !double.IsFinite(x2) || !double.IsFinite(y2))
+        if (!ForgeCompat.IsFinite(x1) || !ForgeCompat.IsFinite(y1) || !ForgeCompat.IsFinite(x2) || !ForgeCompat.IsFinite(y2))
         {
             error = "window coordinates must be finite numbers.";
             return false;
@@ -432,7 +432,7 @@ public static class PlotLayoutMath
             return false;
         }
 
-        var text = Encoding.Latin1.GetString(pdf);
+        var text = Encoding.GetEncoding(28591).GetString(pdf);
         var match = Regex.Match(
             text,
             @"/MediaBox\s*\[\s*(?<x0>-?\d+(?:\.\d+)?)\s+(?<y0>-?\d+(?:\.\d+)?)\s+(?<x1>-?\d+(?:\.\d+)?)\s+(?<y1>-?\d+(?:\.\d+)?)\s*\]");

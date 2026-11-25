@@ -10,6 +10,16 @@ namespace Forge.Plugin;
 // error reports bookmarksApplied:false and the publish still succeeds.
 public sealed partial class PluginCommandProcessor
 {
+    private static string QuoteProcessArgument(string value)
+    {
+        if (value.Length != 0 && !value.Any(char.IsWhiteSpace) && !value.Contains('"'))
+        {
+            return value;
+        }
+
+        return "\"" + value.Replace("\"", "\\\"") + "\"";
+    }
+
     private sealed record BookmarkPassResult(bool Applied, int Count, string? Engine, string? Error)
     {
         public object ToPayload() => new { applied = Applied, count = Count, engine = Engine, error = Error };
@@ -44,15 +54,10 @@ public sealed partial class PluginCommandProcessor
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                 };
-                foreach (var a in PdfBookmarks.ArgumentsFor(candidate))
-                {
-                    psi.ArgumentList.Add(a);
-                }
-
-                psi.ArgumentList.Add(scriptPath);
-                psi.ArgumentList.Add(pdfPath);
-                psi.ArgumentList.Add(outPath);
-                psi.ArgumentList.Add(titlesPath);
+                var processArgs = PdfBookmarks.ArgumentsFor(candidate)
+                    .Concat(new[] { scriptPath, pdfPath, outPath, titlesPath })
+                    .Select(QuoteProcessArgument);
+                psi.Arguments = string.Join(" ", processArgs);
 
                 string? stdout;
                 string? stderrTail;

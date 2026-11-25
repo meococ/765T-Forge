@@ -21,7 +21,7 @@ public static class TextRead
     public const int DefaultMaxResults = 500;
     public const int HardMaxResults = 5000;
 
-    public static int ClampMaxResults(int? requested) => Math.Clamp(requested ?? DefaultMaxResults, 1, HardMaxResults);
+    public static int ClampMaxResults(int? requested) => ForgeCompat.Clamp(requested ?? DefaultMaxResults, 1, HardMaxResults);
 
     /// <summary>Parses "text,mtext,attrib,attdef,mleader" (case-insensitive; DBText/ATTRIB/etc. aliases accepted).</summary>
     public static bool TryParseKinds(string? value, out TextKinds kinds, out string? error)

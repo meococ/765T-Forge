@@ -31,14 +31,30 @@ public sealed class ProjectConfigurationTests
         var root = RepoRoot();
         var pluginProjectPath = Path.Combine(root, "src", "Forge.Plugin", "Forge.Plugin.csproj");
         var pluginProject = XDocument.Load(pluginProjectPath);
-        var target = pluginProject.Descendants("TargetFramework").Single().Value;
+        var targets = pluginProject.Descendants("TargetFramework").Select(x => x.Value).ToArray();
         var text = File.ReadAllText(pluginProjectPath);
 
-        Assert.Equal("net8.0-windows", target);
+        Assert.Contains("net8.0-windows", targets);
+        Assert.Contains("net48", targets);
         Assert.Contains("$(AutoCadRoot)\\AcCoreMgd.dll", text);
         Assert.Contains("AUTOCAD_2026_ROOT", text);
         Assert.Contains("<Private>false</Private>", text);
         Assert.DoesNotContain("net9.0", text);
+    }
+
+    [Fact]
+    public void PluginBundleUsesYearSpecificRuntimePayloads()
+    {
+        var root = RepoRoot();
+        var bundleXml = File.ReadAllText(Path.Combine(root, "plugin-bundle", "765T-Forge.bundle", "PackageContents.xml"));
+
+        Assert.Contains("SeriesMin=\"R24.3\"", bundleXml);
+        Assert.Contains("SeriesMin=\"R25.0\"", bundleXml);
+        Assert.Contains("SeriesMin=\"R25.1\"", bundleXml);
+        Assert.Contains("./Contents/Windows/2024/Forge.Plugin.dll", bundleXml);
+        Assert.Contains("./Contents/Windows/2025/Forge.Plugin.dll", bundleXml);
+        Assert.Contains("./Contents/Windows/2026/Forge.Plugin.dll", bundleXml);
+        Assert.DoesNotContain("./Contents/Windows/Forge.Plugin.dll", bundleXml);
     }
 
     [Fact]

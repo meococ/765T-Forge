@@ -104,7 +104,14 @@ public sealed partial class PluginCommandProcessor
         return na != IntPtr.Zero && na == NativeOf(b);
     }
 
-    private static readonly Dictionary<Document, DocLedger> Ledgers = new(ReferenceEqualityComparer.Instance);
+    private sealed class ReferenceDocumentComparer : IEqualityComparer<Document>
+    {
+        public static readonly ReferenceDocumentComparer Instance = new();
+        public bool Equals(Document? x, Document? y) => ReferenceEquals(x, y);
+        public int GetHashCode(Document obj) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj);
+    }
+
+    private static readonly Dictionary<Document, DocLedger> Ledgers = new(ReferenceDocumentComparer.Instance);
     private static UndoCallScope? _undoScope;
     private static bool _documentHooks;
     private static bool _idleHooked;
@@ -326,8 +333,8 @@ public sealed partial class PluginCommandProcessor
     {
         null => null,
         double d => d.ToString("R", CultureInfo.InvariantCulture),
-        Point3d p => string.Create(CultureInfo.InvariantCulture, $"({p.X:R},{p.Y:R},{p.Z:R})"),
-        Point2d p => string.Create(CultureInfo.InvariantCulture, $"({p.X:R},{p.Y:R})"),
+        Point3d p => FormattableString.Invariant($"({p.X:R},{p.Y:R},{p.Z:R})"),
+        Point2d p => FormattableString.Invariant($"({p.X:R},{p.Y:R})"),
         IFormattable f => f.ToString(null, CultureInfo.InvariantCulture),
         _ => value.ToString()
     };

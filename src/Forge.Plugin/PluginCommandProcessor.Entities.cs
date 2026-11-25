@@ -394,7 +394,7 @@ public sealed partial class PluginCommandProcessor
             }
         }
 
-        var maxEntities = Math.Clamp(args.MaxEntities ?? 1000, 1, 10000);
+        var maxEntities = ForgeCompat.Clamp(args.MaxEntities ?? 1000, 1, 10000);
 
         var db = ActiveDb;
         using var tr = db.TransactionManager.StartTransaction();
@@ -632,7 +632,7 @@ public sealed partial class PluginCommandProcessor
             return denied;
         }
 
-        var copies = Math.Clamp(args.Copies, 1, 100);
+        var copies = ForgeCompat.Clamp(args.Copies, 1, 100);
         Vector3d delta;
         try
         {

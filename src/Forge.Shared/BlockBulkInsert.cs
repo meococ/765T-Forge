@@ -98,14 +98,14 @@ public static class BlockBulkInsert
             }
 
             var scale = item.Scale ?? defaultScale ?? 1.0;
-            if (!(scale > 0) || !double.IsFinite(scale))
+            if (!(scale > 0) || !ForgeCompat.IsFinite(scale))
             {
                 errors.Add(new BulkInsertError(index, "invalid_scale", "scale must be a finite number > 0."));
                 continue;
             }
 
             var rotationDeg = item.RotationDeg ?? defaultRotationDeg ?? 0;
-            if (!double.IsFinite(rotationDeg))
+            if (!ForgeCompat.IsFinite(rotationDeg))
             {
                 errors.Add(new BulkInsertError(index, "invalid_rotation", "rotationDeg must be finite."));
                 continue;
@@ -183,7 +183,7 @@ public static class BlockBulkInsert
         }
 
         var textHeight = spec.TextHeight ?? height;
-        if (textHeight is { } h && !(h > 0 && double.IsFinite(h)))
+        if (textHeight is { } h && !(h > 0 && ForgeCompat.IsFinite(h)))
         {
             error = "leader.textHeight must be > 0.";
             return false;
@@ -202,7 +202,7 @@ public static class BlockBulkInsert
     private static bool TryPoint(double[]? value, out double[] point)
     {
         point = [0, 0, 0];
-        if (value is null || value.Length is < 2 or > 3 || value.Any(v => !double.IsFinite(v)))
+        if (value is null || value.Length is < 2 or > 3 || value.Any(v => !ForgeCompat.IsFinite(v)))
         {
             return false;
         }

@@ -51,7 +51,7 @@ public static class Pc3File
                 length--;
             }
 
-            text = Encoding.Latin1.GetString(raw, 0, length);
+            text = Encoding.GetEncoding(28591).GetString(raw, 0, length);
             return true;
         }
         catch (InvalidDataException)
@@ -68,7 +68,7 @@ public static class Pc3File
             throw new ArgumentException($"PIA header must be exactly {HeaderLength} characters.", nameof(header));
         }
 
-        var body = Encoding.Latin1.GetBytes(text + "\0");
+        var body = Encoding.GetEncoding(28591).GetBytes(text + "\0");
         byte[] compressed;
         using (var output = new MemoryStream())
         {

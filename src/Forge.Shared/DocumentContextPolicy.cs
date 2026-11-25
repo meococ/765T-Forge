@@ -29,7 +29,7 @@ public enum DocDispatchDecision
 /// </summary>
 public static class DocumentContextPolicy
 {
-    public static readonly IReadOnlySet<string> ApplicationContextTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    public static readonly IReadOnlyCollection<string> ApplicationContextTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "forge_doc_activate",
         "forge_doc_close",
@@ -55,7 +55,7 @@ public static class DocumentContextPolicy
     /// FindBlockAttributes read the active database) and forge_system_capabilities
     /// (QaAndPublish.cs — opens a transaction on the active database) stay refused.
     /// </summary>
-    public static readonly IReadOnlySet<string> ZeroDocumentTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    public static readonly IReadOnlyCollection<string> ZeroDocumentTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "forge_system_health",
         "forge_system_version",
@@ -69,7 +69,7 @@ public static class DocumentContextPolicy
     };
 
     /// <summary>Tools that create, open or close a drawing: they may need longer than a plain switch to settle.</summary>
-    public static readonly IReadOnlySet<string> LifecycleTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    public static readonly IReadOnlyCollection<string> LifecycleTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "forge_doc_close",
         "forge_doc_new",
@@ -77,7 +77,7 @@ public static class DocumentContextPolicy
     };
 
     /// <summary>Failure codes that mean "done, but AutoCAD has not yet reported the drawing as active": keep polling.</summary>
-    public static readonly IReadOnlySet<string> UnconfirmedCodes = new HashSet<string>(StringComparer.Ordinal)
+    public static readonly IReadOnlyCollection<string> UnconfirmedCodes = new HashSet<string>(StringComparer.Ordinal)
     {
         "doc_activate_unconfirmed",
         "doc_close_unconfirmed",

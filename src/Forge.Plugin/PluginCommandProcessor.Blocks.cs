@@ -882,17 +882,17 @@ public sealed partial class PluginCommandProcessor
             return reject;
         }
 
-        if (textSize is { } size && (!double.IsFinite(size) || size < 0))
+        if (textSize is { } size && (!ForgeCompat.IsFinite(size) || size < 0))
         {
             return ForgeResult.Failure(command.Id, "invalid_args", "textSize must be >= 0 (0 = variable height).");
         }
 
-        if (args.WidthFactor is { } width && (!double.IsFinite(width) || width <= 0 || width > 100))
+        if (args.WidthFactor is { } width && (!ForgeCompat.IsFinite(width) || width <= 0 || width > 100))
         {
             return ForgeResult.Failure(command.Id, "invalid_args", "widthFactor must be > 0 (and <= 100).");
         }
 
-        if (args.ObliqueAngleDeg is { } oblique && (!double.IsFinite(oblique) || Math.Abs(oblique) > 85))
+        if (args.ObliqueAngleDeg is { } oblique && (!ForgeCompat.IsFinite(oblique) || Math.Abs(oblique) > 85))
         {
             return ForgeResult.Failure(command.Id, "invalid_args", "obliqueAngleDeg must be within -85..85 degrees.");
         }
@@ -1123,7 +1123,7 @@ public sealed partial class PluginCommandProcessor
                      ("linearScaleFactor", args.LinearScaleFactor, false)
                  })
         {
-            if (value is { } v && (!double.IsFinite(v) || v < 0 || (!allowZero && v == 0)))
+            if (value is { } v && (!ForgeCompat.IsFinite(v) || v < 0 || (!allowZero && v == 0)))
             {
                 return ForgeResult.Failure(command.Id, "invalid_args", allowZero ? $"{field} must be >= 0." : $"{field} must be > 0.");
             }

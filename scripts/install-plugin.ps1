@@ -32,7 +32,7 @@
 param(
     [ValidateSet("Debug", "Release")]
     [string] $Configuration = "Release",
-    [ValidateSet("2025", "2026")]
+    [ValidateSet("2024", "2025", "2026")]
     [string] $Year = "2026",
     [string] $SourceDir = "",
     [string] $InstallDir = "",
@@ -121,9 +121,21 @@ if (-not $SkipBundle) {
         exit 1
     }
 
-    $bundleWinDir = Join-Path $BundleDir "Contents\Windows"
-    New-Item -ItemType Directory -Force -Path $bundleWinDir | Out-Null
+    $bundleWinRoot = Join-Path $BundleDir "Contents\Windows"
+    $bundleWinDir = Join-Path $bundleWinRoot $Year
+    New-Item -ItemType Directory -Force -Path $bundleWinRoot | Out-Null
     Copy-Item -LiteralPath $bundleXmlSrc -Destination (Join-Path $BundleDir "PackageContents.xml") -Force
+
+    # Remove pre-multi-year flat payloads from older installers. PackageContents.xml now
+    # resolves only Contents\Windows\<Year>, but stale root DLLs make troubleshooting ambiguous.
+    $yearFolderNames = @("2024", "2025", "2026")
+    Get-ChildItem -LiteralPath $bundleWinRoot -Force -ErrorAction SilentlyContinue |
+        Where-Object { $yearFolderNames -notcontains $_.Name } |
+        Remove-Item -Recurse -Force
+
+    # Refresh only the current year payload so side-by-side years stay installed.
+    if (Test-Path $bundleWinDir) { Remove-Item $bundleWinDir -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $bundleWinDir | Out-Null
 
     Get-ChildItem -Path $SourceDir -Recurse -File | Where-Object { $excludedHostDlls -notcontains $_.Name } | ForEach-Object {
         $rel = $_.FullName.Substring($SourceDir.Length).TrimStart('\')
@@ -144,7 +156,11 @@ if (-not $SkipUserEnvironment) {
     }
 
     $tokenAction = "kept existing"
-    if ($ForceTokenReset -or [string]::IsNullOrWhiteSpace($token)) {
+    if ($token -eq "dev-only-insecure-token") {
+        $token = New-ForgeToken
+        $tokenAction = "rotated persisted dev-default token"
+    }
+    elseif ($ForceTokenReset -or [string]::IsNullOrWhiteSpace($token)) {
         $token = New-ForgeToken
         $tokenAction = if ($ForceTokenReset) { "generated new (forced)" } else { "generated new" }
     }
@@ -153,11 +169,12 @@ if (-not $SkipUserEnvironment) {
     Set-UserEnvironmentValue -Name "FORGE_DEV_ALLOW_DEFAULT_TOKEN" -Value "false"
     Set-UserEnvironmentValue -Name "FORGE_TOOLSETS" -Value $Toolsets
 
-    $autoCadRoot = [Environment]::GetEnvironmentVariable("AUTOCAD_2026_ROOT", "User")
+    $rootEnvName = "AUTOCAD_${Year}_ROOT"
+    $autoCadRoot = [Environment]::GetEnvironmentVariable($rootEnvName, "User")
     if ([string]::IsNullOrWhiteSpace($autoCadRoot)) {
         $defaultRoot = "C:\Program Files\Autodesk\AutoCAD $Year"
         if (Test-Path (Join-Path $defaultRoot "accoreconsole.exe")) {
-            Set-UserEnvironmentValue -Name "AUTOCAD_2026_ROOT" -Value $defaultRoot
+            Set-UserEnvironmentValue -Name $rootEnvName -Value $defaultRoot
             $autoCadRoot = $defaultRoot
         }
     }
@@ -175,7 +192,7 @@ if (-not $SkipUserEnvironment) {
     Write-Host "  FORGE_DEV_ALLOW_DEFAULT_TOKEN=false"
     Write-Host "  FORGE_TOOLSETS=$Toolsets"
     if (-not [string]::IsNullOrWhiteSpace($autoCadRoot)) {
-        Write-Host "  AUTOCAD_2026_ROOT=$autoCadRoot"
+        Write-Host "  $rootEnvName=$autoCadRoot"
     }
     if ($EnableUnsafeOps) {
         Write-Host "  FORGE_ENABLE_UNSAFE_OPS=true (explicit opt-in; raw command/LISP/C# execution enabled)"
@@ -191,7 +208,7 @@ if (-not $SkipUserEnvironment) {
 Write-Host ""
 Write-Host "Checklist:"
 Write-Host "  1. Autoloader bundle installed at: $BundleDir"
-Write-Host "     AutoCAD 2025/2026 loads Forge.Plugin.dll automatically at startup (no manual NETLOAD needed)."
+Write-Host "     AutoCAD loads the year-matching Forge.Plugin.dll automatically at startup (no manual NETLOAD needed)."
 Write-Host "  2. User token/toolset environment is configured without printing secrets."
 Write-Host "  3. Restart AutoCAD $Year and run MCP_STATUS to verify the named pipe is listening."
 Write-Host ""

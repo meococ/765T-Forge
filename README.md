@@ -23,13 +23,14 @@ Measured on this codebase: an outcome eval of 32 runs (fresh agent sessions, MCP
 
 | AutoCAD | Status |
 |---------|--------|
+| 2024 | **Core Console smoke-tested** — net48 plugin NETLOADs, initializes the pipe, and answers MCP_STATUS |
 | 2025 | **Live-tested** against a running AutoCAD 2025 host |
 | 2026 | **Built, not live-tested** — compiles against the 2026 managed references; unproven in a live session |
 
 ## Requirements
 
 - Windows + .NET 8 SDK
-- AutoCAD 2025 (live-tested) or 2026 (build supported) for the plugin / live tools
+- AutoCAD 2024, 2025, or 2026 for the plugin / live tools (2024 uses the net48 build)
 - `FORGE_AUTOCAD_TOKEN` (or `MCP_AUTOCAD_TOKEN`) — **required**, no production default secret
 
 ## Quick install
@@ -37,8 +38,9 @@ Measured on this codebase: an outcome eval of 32 runs (fresh agent sessions, MCP
 ### 1. Build and install the plugin (machine with AutoCAD)
 
 ```powershell
-.\scripts\build-plugin.ps1 -Configuration Release -Year 2025
-.\scripts\install-plugin.ps1 -Configuration Release -Year 2025 -SkipBuild
+.\scripts\build-plugin.ps1 -Configuration Release -Year 2026
+.\scripts\install-plugin.ps1 -Configuration Release -Year 2026 -SkipBuild
+# repeat with -Year 2024 and/or -Year 2025 on machines that also run those AutoCAD versions
 ```
 
 Default install dir: `%LOCALAPPDATA%\765T-Forge\plugin\<Year>\Forge.Plugin.dll`.
@@ -50,7 +52,7 @@ Then:
 3. `NETLOAD` the installed DLL, then run `MCP_STATUS` in AutoCAD.
 4. From the MCP client, call `forge_system_health` — the `pipe` field must match your configured pipe name.
 
-**Autoloader alternative:** copy `plugin-bundle/765T-Forge.bundle` into `%APPDATA%\Autodesk\ApplicationPlugins` (per-user; preferred) or `%PROGRAMFILES%\Autodesk\ApplicationPlugins` (machine-wide, admin). Avoid `%PROGRAMDATA%` on 2026 — Autodesk tightened ProgramData auto-load. Build/bundle per year: 2025 = Series R25.0, 2026 = R25.1.
+**Autoloader alternative:** copy `plugin-bundle/765T-Forge.bundle` into `%APPDATA%\Autodesk\ApplicationPlugins` (per-user; preferred) or `%PROGRAMFILES%\Autodesk\ApplicationPlugins` (machine-wide, admin). Avoid `%PROGRAMDATA%` on 2026 — Autodesk tightened ProgramData auto-load. The Autoloader bundle is multi-year: 2024 = Series R24.3/net48, 2025 = R25.0/net8, 2026 = R25.1/net8, with payloads under `Contents\Windows\<Year>`.
 
 **Releases:** GitHub-hosted runners have no AutoCAD, so CI builds the **server** zip only; the plugin zip is built on a machine with AutoCAD and attached to the same release. A working install needs both `765T-Forge.Server-win-x64.zip` and `765T-Forge.Plugin.zip`.
 
@@ -98,7 +100,7 @@ Pin a version; never `@latest`.
 | `FORGE_DEV_ALLOW_DEFAULT_TOKEN` | Dev-only escape hatch (`true` → insecure token); never in production |
 | `FORGE_PIPE_NAME` | Default `765T.Forge.AutoCAD` |
 | `FORGE_BACKUP_DIR` / `FORGE_AUDIT_DIR` | Under `%LOCALAPPDATA%\765T-Forge\` by default |
-| `AUTOCAD_2026_ROOT` | AutoCAD install root override (plugin references + accoreconsole) |
+| `AUTOCAD_<YEAR>_ROOT` / `AUTOCAD_2026_ROOT` | Per-year plugin build root override; `AUTOCAD_2026_ROOT` remains the legacy 2026/server accoreconsole override |
 | `FORGE_ENABLE_UNSAFE_OPS` | Enables `forge_exec_dotnet` when also acknowledged per call |
 | `FORGE_PLUGIN_RESPONSE_TIMEOUT_SECONDS` | Default `120`; drives the plugin watchdog (`plugin_request_timeout`) at timeout−5 s |
 | `FORGE_PLUGIN_CONNECT_TIMEOUT_SECONDS` | Default `10` (clamp 1–120) |
@@ -153,7 +155,7 @@ dotnet build   .\765T-Forge.ServerOnly.slnf --no-restore
 dotnet test    .\765T-Forge.ServerOnly.slnf --no-build
 ```
 
-Full solution (needs AutoCAD references; `AUTOCAD_2026_ROOT` overrides the default root):
+Full solution (needs AutoCAD references; `AUTOCAD_<YEAR>_ROOT` overrides a year-specific build root, with `AUTOCAD_2026_ROOT` as the legacy 2026 override):
 
 ```powershell
 dotnet build .\765T-Forge.sln

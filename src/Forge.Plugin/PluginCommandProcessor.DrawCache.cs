@@ -247,9 +247,11 @@ public sealed partial class PluginCommandProcessor
     /// <summary>Attribute values on a block-content multileader (the MLeader keeps its own copies).</summary>
     private static string[] SetMLeaderBlockAttributes(Transaction tr, MLeader mleader, ObjectId blockId, IReadOnlyDictionary<string, string>? values)
     {
-        var remaining = values is { Count: > 0 }
-            ? new Dictionary<string, string>(values, StringComparer.OrdinalIgnoreCase)
-            : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var remaining = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (values is not null)
+        {
+            foreach (var pair in values) remaining[pair.Key] = pair.Value;
+        }
         var block = (BlockTableRecord)tr.GetObject(blockId, OpenMode.ForRead);
         if (!block.HasAttributeDefinitions)
         {
