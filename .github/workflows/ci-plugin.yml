@@ -31,6 +31,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Configure runner-local .NET install dir
+        shell: powershell
+        run: |
+          $workspaceParent = Split-Path -Parent $env:GITHUB_WORKSPACE
+          $dotnetDir = Join-Path $workspaceParent ".dotnet"
+          New-Item -ItemType Directory -Force -Path $dotnetDir | Out-Null
+          "DOTNET_INSTALL_DIR=$dotnetDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:

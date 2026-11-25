@@ -49,6 +49,12 @@ if ($removeToken) {
     & $configCmd remove --token $removeToken 2>$null | Out-Host
 }
 
+Write-Host "Configuring runner-local .NET install dir for service identity..."
+$dotnetDir = Join-Path $RunnerRoot ".dotnet"
+New-Item -ItemType Directory -Force -Path $dotnetDir | Out-Null
+[Environment]::SetEnvironmentVariable("DOTNET_INSTALL_DIR", $dotnetDir, "Machine")
+& icacls $dotnetDir /grant "*S-1-5-20:(OI)(CI)(M)" /T | Out-Null
+
 Write-Host "Registering runner as Windows service..."
 $registrationToken = (gh api --method POST "repos/$Repo/actions/runners/registration-token" --jq .token).Trim()
 if (-not $registrationToken) {
