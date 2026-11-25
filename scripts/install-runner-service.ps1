@@ -21,7 +21,7 @@ $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal($identity)
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host "Elevation required. Relaunching with UAC..."
-    $args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$PSCommandPath`"")
+    $args = @("-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "`"$PSCommandPath`"")
     foreach ($name in $MyInvocation.BoundParameters.Keys) {
         $args += "-$name"
         $args += "`"$($MyInvocation.BoundParameters[$name])`""
@@ -39,27 +39,41 @@ if (-not (Test-Path $configCmd)) {
     throw "config.cmd not found at $configCmd"
 }
 
-$transcriptPath = Join-Path $RunnerRoot "install-runner-service.log"
-try { Stop-Transcript | Out-Null } catch { }
-Start-Transcript -Path $transcriptPath -Force | Out-Null
-
-Write-Host "Stopping interactive runner process if present..."
-Get-Process Runner.Listener -ErrorAction SilentlyContinue | Stop-Process -Force
-Start-Sleep -Seconds 3
-
-Write-Host "Removing existing runner registration locally (token not printed)..."
-$removeToken = (gh api --method POST "repos/$Repo/actions/runners/remove-token" --jq .token).Trim()
-if ($removeToken) {
-    & $configCmd remove --token $removeToken 2>$null | Out-Host
+$logPath = Join-Path $RunnerRoot "install-runner-service.log"
+function Write-SetupLog {
+    param([Parameter(Mandatory = $true)] [string] $Message)
+    $line = "$(Get-Date -Format o) $Message"
+    Add-Content -Path $logPath -Value $line -Encoding utf8
+    Write-Host $Message
 }
 
-Write-Host "Configuring runner-local .NET install dir for service identity..."
+Set-Content -Path $logPath -Value "$(Get-Date -Format o) runner service setup started" -Encoding utf8
+trap {
+    Write-SetupLog "ERROR: $($_.Exception.Message)"
+    exit 1
+}
+
+Write-SetupLog "Stopping interactive runner process if present..."
+Get-Process Runner.Listener -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-Sleep -Seconds 3
+Write-SetupLog "Interactive runner process stopped."
+
+Write-SetupLog "Requesting remove token via gh..."
+$removeToken = (gh api --method POST "repos/$Repo/actions/runners/remove-token" --jq .token).Trim()
+Write-SetupLog "Remove token acquired: $(-not [string]::IsNullOrWhiteSpace($removeToken))"
+if ($removeToken) {
+    Write-SetupLog "Removing existing runner registration locally..."
+    & $configCmd remove --token $removeToken 2>$null | Out-Host
+    Write-SetupLog "Remove step exited with code $LASTEXITCODE."
+}
+
+Write-SetupLog "Configuring runner-local .NET install dir for service identity..."
 $dotnetDir = Join-Path $RunnerRoot ".dotnet"
 New-Item -ItemType Directory -Force -Path $dotnetDir | Out-Null
 [Environment]::SetEnvironmentVariable("DOTNET_INSTALL_DIR", $dotnetDir, "Machine")
 & icacls $dotnetDir /grant "*S-1-5-20:(OI)(CI)(M)" /T | Out-Null
 
-Write-Host "Registering runner as Windows service..."
+Write-SetupLog "Registering runner as Windows service..."
 $registrationToken = (gh api --method POST "repos/$Repo/actions/runners/registration-token" --jq .token).Trim()
 if (-not $registrationToken) {
     throw "Could not obtain runner registration token."
@@ -110,6 +124,5 @@ if ($service.State -ne "Running") {
     $service = Get-CimInstance Win32_Service -Filter "Name='$($service.Name)'"
 }
 
-Write-Host "Runner service installed: $($service.Name) [$($service.State)]"
-Write-Host "Startup-folder fallback can remain installed; it exits automatically while this service is running."
-Stop-Transcript | Out-Null
+Write-SetupLog "Runner service installed: $($service.Name) [$($service.State)]"
+Write-SetupLog "Startup-folder fallback can remain installed; it exits automatically while this service is running."
