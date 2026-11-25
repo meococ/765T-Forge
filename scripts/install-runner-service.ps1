@@ -76,7 +76,12 @@ $configArgs = @(
     "--windowslogonaccount", $WindowsLogonAccount
 )
 
-if ($WindowsLogonAccount -notmatch '^NT AUTHORITY\(NETWORK SERVICE|SYSTEM|LOCAL SERVICE)$') {
+$wellKnownServiceAccounts = @(
+    "NT AUTHORITY\NETWORK SERVICE",
+    "NT AUTHORITY\SYSTEM",
+    "NT AUTHORITY\LOCAL SERVICE"
+)
+if ($WindowsLogonAccount -notin $wellKnownServiceAccounts) {
     $cred = Get-Credential -UserName $WindowsLogonAccount -Message "Password for runner service account"
     $configArgs += @("--windowslogonpassword", $cred.GetNetworkCredential().Password)
 }
